@@ -1,0 +1,239 @@
+{
+    "claim_extractor.extractor.predict": {
+      "traces": [],
+      "train": [],
+      "demos": [],
+      "signature": {
+        "instructions": "Extract the claims from the statement(s).",
+        "fields": [
+          {
+            "prefix": "Statement:",
+            "description": "the statements to extract claims from"
+          },
+          {
+            "prefix": "Reasoning: Let's think step by step in order to",
+            "description": "${reasoning}"
+          },
+          {
+            "prefix": "Claims:",
+            "description": "A list of distinct claims"
+          }
+        ]
+      },
+      "lm": null
+    },
+    "research_agent.page_selector.predict": {
+      "traces": [],
+      "train": [],
+      "demos": [],
+      "signature": {
+        "instructions": "Select the most promising page to visit from search results for evidence gathering.\n\nGiven a claim being fact-checked and search results, intelligently select which\npage to visit next based on relevance, authoritativeness, and potential to\nprovide supporting or refuting evidence.",
+        "fields": [
+          {
+            "prefix": "Claim:",
+            "description": "The factual claim being verified"
+          },
+          {
+            "prefix": "Search Results:",
+            "description": "Search results with 'title', 'link', 'snippet' fields"
+          },
+          {
+            "prefix": "Visited Urls:",
+            "description": "URLs already visited in this research session"
+          },
+          {
+            "prefix": "Current Evidence:",
+            "description": "Evidence already gathered from previous pages"
+          },
+          {
+            "prefix": "Reasoning:",
+            "description": "Explanation of why this page is most relevant to the claim"
+          },
+          {
+            "prefix": "Selected Url:",
+            "description": "URL to visit next, or None if existing evidence is sufficient or no useful pages remain unvisited"
+          }
+        ]
+      },
+      "lm": null
+    },
+    "research_agent.evidence_summarizer.predict": {
+      "traces": [],
+      "train": [],
+      "demos": [],
+      "signature": {
+        "instructions": "Task: Extract and summarize evidence from a scraped web page to verify a specific factual claim.\n\nInput format (always provided):\n- claim: a single short sentence asserting a fact (may include numeric thresholds or date ranges).\n- page_content: raw scraped text of a single web page (may include images, HTML fragments, truncated content, navigation, ads).\n- source_url: the URL string of the page_content.\n\nGoal:\nFrom the given page_content, identify factual statements that directly support or directly refute the claim. Produce a concise, source‑attributed extraction of the most relevant facts and a short, transparent judgement about whether the page supports/refutes/is neutral toward the claim. Emphasize numerical conversions, date math, and uncertainty when the claim uses thresholds (e.g., \"over 11,000 years\", \"significant number\", \"often\").\n\nRequired output (exact keys; concise content):\n1. reasoning — 1–3 short paragraphs (or 2–5 sentences) explaining how the page_content relates to the claim. If numbers or dates are involved, show the calculations/logic (e.g., convert BCE to years ago, compare counts to the claim). Note important uncertainties or caveats (ranges, ambiguous language, source limitations).\n2. relevant_evidence — a short bulleted list of extracted facts. Each item must:\n   - include the exact quoted phrase (or a succinct paraphrase if quote not available) from page_content that is the factual basis,\n   - include a parenthetical attribution: (Source title — source_url).\n   - prefer authoritative factual statements: numbers, dates, percentages, explicit factual claims. Avoid quoting navigation/ads or opinion fluff.\n   - if page_content is truncated and a quoted passage may be incomplete, add \"… (truncated)\" after the quote.\n   - show up to ~4 strongest evidence items; more only if necessary to explain contradictions.\n3. evidence_stance — one word: supports / refutes / neutral. Use:\n   - supports: when the page gives an explicit factual statement that directly affirms the claim (or an unambiguous numeric/date interval that fully satisfies the claim threshold).\n   - refutes: when the page gives an explicit factual statement that directly contradicts the claim.\n   - neutral: when the page contains either (a) no directly relevant factual information, (b) ambiguous or partial information (e.g., a range that crosses the claim threshold), or (c) both supporting and contradicting facts so no clear conclusion can be drawn from this single page.\n\nGuidelines and decision rules (domain-specific and general strategies derived from examples):\n- Focus on factual passages: counts of reactors, years/dates, percentages, \"operates X\", \"dating back to Y\", \"is commonly found\", etc. These are high-value evidence.\n- For numeric/date claims:\n  - If page gives an interval (e.g., \"10,000 to 8,000 BCE\") compare both ends to the claim threshold. If the entire interval supports the claim, label supports; if entire interval contradicts, label refutes; if interval crosses the threshold (some parts support, some do not), label neutral and explain.\n  - Convert BC/BCE dates to \"years ago\" relative to current reference year only if necessary to evaluate the claim; show the conversion math in reasoning.\n- For qualitative frequency claims (e.g., \"often\", \"commonly found\"):\n  - Give the quoted language and judge whether it matches the claim’s scope. If phrasing clearly matches (\"comes with almost every Chinese delivery order\", \"are commonly served at Chinese‑American restaurants\"), treat as supports for claims about that category (but note any scope limitations — U.S., Chinese‑American restaurants, not all Asian restaurants).\n- If page includes authoritative organization reports (IAEA, UNESCO, academic, government), treat explicit factual statements as high‑weight evidence; still attribute exactly.\n- If page contains both supporting and refuting statements, list both pieces under relevant_evidence and mark evidence_stance = neutral; in reasoning explain the contradiction and why it prevents a definitive conclusion from this single page.\n- If page_content lacks any relevant facts, produce:\n   - reasoning: one sentence saying \"No directly relevant factual information found on this page.\"\n   - relevant_evidence: empty list\n   - evidence_stance: neutral\n- Always include the provided source_url in at least one evidence item (or in every item), and use the page title if available in page_content for clearer attribution.\n\nFormatting conventions:\n- Keep reasoning concise and explicit about how evidence maps to the claim.\n- Each evidence bullet: either a short direct quote in quotation marks followed by the citation, or a short paraphrase plus citation.\n- Do not add external facts not present in page_content.\n- Avoid long narrative histories — prioritize the direct link between page statements and the claim.\n\nExamples of decision logic:\n- Claim: \"Russia has a significant number of nuclear power plants.\" Page: \"The Russian Federation operates 42 nuclear power reactors...\" → evidence_stance = supports; include the quote and IAEA URL.\n- Claim: \"Fortune cookies can often be found in Asian restaurants.\" Page: article states they are typical at Chinese‑American restaurants and explains history → evidence_stance = supports for Chinese‑American restaurants; reasoning should note scope (U.S., Chinese‑American) and that the page does not claim they are common at all types of Asian restaurants.\n- Claim: \"Damascus has been inhabited for over 11,000 years.\" Page: \"evidence of habitation dating back to around 10,000 to 8,000 BCE\" → since 10,000 BCE (~12,000 years ago) supports but 8,000 BCE (~10,000 years ago) does not, evidence_stance = neutral; reasoning must explain interval crosses the 11,000‑year threshold and why the page doesn’t definitively prove the claim.\n\nBe concise, transparent, and conservative in the final judgement.",
+        "fields": [
+          {
+            "prefix": "Claim:",
+            "description": "The factual claim being verified"
+          },
+          {
+            "prefix": "Page Content:",
+            "description": "Markdown content scraped from the web page"
+          },
+          {
+            "prefix": "Source Url:",
+            "description": "URL of the source page for attribution"
+          },
+          {
+            "prefix": "Reasoning: Let's think step by step in order to",
+            "description": "${reasoning}"
+          },
+          {
+            "prefix": "Relevant Evidence:",
+            "description": "Extracted facts relevant to the claim, with source attribution"
+          },
+          {
+            "prefix": "Evidence Stance:",
+            "description": "Whether this evidence 'supports', 'refutes', or is 'neutral' toward the claim"
+          }
+        ]
+      },
+      "lm": null
+    },
+    "fire_judge.judge.predict": {
+      "traces": [],
+      "train": [],
+      "demos": [],
+      "signature": {
+        "instructions": "You are the FIRE (Fact-checking with Iterative Research and Evaluation) Judge. Your job is to evaluate a single factual claim using only the provided accumulated evidence (the \"evidence\" text and any prior \"search_history\") and to either produce a final verdict or request one targeted extra search query that will likely resolve the claim.\n\nInputs you will receive\n- claim: a single factual sentence/short claim to evaluate.\n- evidence: accumulated search results / scraped snippets / notes from prior searches (may be empty). Treat this as the authoritative evidence base for this iteration.\n- search_history: a list of previous search query strings already attempted.\n\nRequired single-output format (must include exactly these three fields)\n- reasoning: A concise explanation (1–6 sentences) of how you interpreted the available evidence and why you reached the decision. If you relied on general/background knowledge beyond the provided evidence, explicitly state that fact in the reasoning. If the evidence contains direct matching passages or source names, cite them briefly by name in the reasoning. If snippets appear partial/truncated, state that limitation.\n- verdict: one of the strings \"supported\", \"refuted\", or \"not_supported\"; OR the null value None when you judge that targeted additional searching could likely yield a decisive answer. Use \"supported\" or \"refuted\" only when the provided evidence clearly and directly supports or contradicts the claim. Use \"not_supported\" when the evidence is inconclusive and you judge that no further useful searches remain.\n- next_search: Either None (if you produced a final verdict) or exactly one short search query string (if you want one targeted additional search). If you provide a query, it must be non-redundant with items in search_history.\n\nDecision logic (use exactly this mapping)\n- If the provided evidence clearly supports the claim -> verdict = \"supported\", next_search = None.\n- If the provided evidence clearly contradicts the claim -> verdict = \"refuted\", next_search = None.\n- If the evidence is inconclusive but a focused additional search could likely resolve the claim -> verdict = None, next_search = \"<single focused query>\".\n- If evidence is inconclusive and you judge no further useful searches remain -> verdict = \"not_supported\", next_search = None.\n\nEvidence interpretation rules and heuristics\n- Use only the provided evidence as authoritative unless you explicitly state reliance on background knowledge in the reasoning.\n- Prefer direct primary sources or authoritative secondary sources (official docs, academic papers, reputable major news outlets). If evidence contains direct quotes or explicit planks/statements matching or contradicting the claim, that usually suffices.\n- Weight-of-evidence:\n  - Strong support: direct, explicit statements in reputable sources that affirm the claim.\n  - Strong contradiction: direct, explicit statements in reputable sources that negate the claim.\n  - Mixed/sparse: conflicting or only tangential evidence -> treat as inconclusive unless one side is much stronger.\n- Quantifiers:\n  - Treat universal claims (\"all\", \"always\", \"everywhere\") conservatively: require broad/explicit evidence or representative/global sources. If evidence shows absence in a major region or authoritative sources say it's not common, consider refuted.\n  - Partial/existential claims (\"some\", \"many\", \"in several countries\") require only evidence of occurrences.\n- Absence of evidence in the current record is not automatic refutation. Only classify as \"refuted\" if reliable sources in the evidence explicitly contradict the claim or the record is effectively exhaustive for the claim.\n- If evidence snippets are truncated or partial, note that limitation in reasoning.\n\nWhen to propose a next_search and how to write it\n- Propose a next_search only when a single targeted, non-redundant query could likely produce decisive evidence.\n- The next_search must be a single short string (no lists). Keep it focused and avoid repeating queries in search_history.\n- Useful query techniques (use sparingly): exact names in quotes, date ranges, document titles, site or filetype restrictions (site:.gov, site:.edu, filetype:pdf), alternative names, and relevant region/date qualifiers.\n- Examples of appropriate queries:\n  - \"Omaha Platform 1892 'direct election of senators' full text\"\n  - \"1906 International Radiotelegraph Convention SOS adoption\"\n  - \"fortune cookie origin 'San Francisco' 1918\"\n\nOther operational rules\n- Keep reasoning concise (1–6 sentences). Do not add extra fields or formatting beyond the three required fields.\n- Do not hallucinate sources or facts. If the evidence includes citations, refer to those citations by the names present in the evidence.\n- If you rely on background (general) knowledge because no evidence is present, explicitly say so in the reasoning.\n- If you identify that provided evidence already contains a direct supporting or contradicting passage, cite it in the reasoning (briefly).\n- If you return a next_search, provide only the single query string and nothing else in that field.\n\nExamples to follow\n- If evidence contains a direct official platform text supporting a plank -> verdict \"supported\", next_search None.\n- If evidence contains a reputable source stating the opposite of the claim -> verdict \"refuted\", next_search None.\n- If evidence is empty or ambiguous but a single precise query could locate a primary source -> verdict None and provide that single targeted query.\n- If evidence is mixed and additional searches are unlikely to change the uncertain balance -> verdict \"not_supported\", next_search None.\n\nProduce outputs strictly in the three-field format (reasoning, verdict, next_search) and follow the rules above on when to return None versus a verdict string.",
+        "fields": [
+          {
+            "prefix": "Claim:",
+            "description": "A single factual claim to verify"
+          },
+          {
+            "prefix": "Evidence:",
+            "description": "Evidence gathered from web research, may be empty initially"
+          },
+          {
+            "prefix": "Search History:",
+            "description": "Previous search queries already executed"
+          },
+          {
+            "prefix": "Reasoning:",
+            "description": "Step-by-step reasoning about the claim and evidence"
+          },
+          {
+            "prefix": "Verdict:",
+            "description": "Final judgment if enough evidence exists, otherwise None"
+          },
+          {
+            "prefix": "Next Search:",
+            "description": "Search query if more evidence needed, otherwise None. Must differ from search_history."
+          }
+        ]
+      },
+      "lm": null
+    },
+    "fire_judge.research_agent.page_selector.predict": {
+      "traces": [],
+      "train": [],
+      "demos": [],
+      "signature": {
+        "instructions": "Select the most promising page to visit from search results for evidence gathering.\n\nGiven a claim being fact-checked and search results, intelligently select which\npage to visit next based on relevance, authoritativeness, and potential to\nprovide supporting or refuting evidence.",
+        "fields": [
+          {
+            "prefix": "Claim:",
+            "description": "The factual claim being verified"
+          },
+          {
+            "prefix": "Search Results:",
+            "description": "Search results with 'title', 'link', 'snippet' fields"
+          },
+          {
+            "prefix": "Visited Urls:",
+            "description": "URLs already visited in this research session"
+          },
+          {
+            "prefix": "Current Evidence:",
+            "description": "Evidence already gathered from previous pages"
+          },
+          {
+            "prefix": "Reasoning:",
+            "description": "Explanation of why this page is most relevant to the claim"
+          },
+          {
+            "prefix": "Selected Url:",
+            "description": "URL to visit next, or None if existing evidence is sufficient or no useful pages remain unvisited"
+          }
+        ]
+      },
+      "lm": null
+    },
+    "fire_judge.research_agent.evidence_summarizer.predict": {
+      "traces": [],
+      "train": [],
+      "demos": [],
+      "signature": {
+        "instructions": "Extract and summarize evidence relevant to verifying a specific claim.\n\nGiven a claim and scraped web page content, identify and extract facts\nthat either support or refute the claim. Focus on factual information\nwith proper source attribution.",
+        "fields": [
+          {
+            "prefix": "Claim:",
+            "description": "The factual claim being verified"
+          },
+          {
+            "prefix": "Page Content:",
+            "description": "Markdown content scraped from the web page"
+          },
+          {
+            "prefix": "Source Url:",
+            "description": "URL of the source page for attribution"
+          },
+          {
+            "prefix": "Reasoning: Let's think step by step in order to",
+            "description": "${reasoning}"
+          },
+          {
+            "prefix": "Relevant Evidence:",
+            "description": "Extracted facts relevant to the claim, with source attribution"
+          },
+          {
+            "prefix": "Evidence Stance:",
+            "description": "Whether this evidence 'supports', 'refutes', or is 'neutral' toward the claim"
+          }
+        ]
+      },
+      "lm": null
+    },
+    "aggregator.aggregator.predict": {
+      "traces": [],
+      "train": [],
+      "demos": [],
+      "signature": {
+        "instructions": "Task summary\n- You are given: (a) an original_statement (string) and (b) claim_verdicts (a list of dicts). Each dict in claim_verdicts contains at least the keys:\n  - \"claim\" (string)\n  - \"verdict\" (string; expected values: \"refuted\", \"not_supported\", \"supported\" — but may appear in different casing)\n  - \"evidence_summary\" (string; ignore this field for aggregation)\n- Your job: aggregate the individual claim verdicts into a single overall statement verdict using the exact output fields: reasoning, overall_verdict, confidence.\n\nPriority aggregation logic (must be applied exactly)\n1. If ANY claim has verdict \"refuted\" (case-insensitive) -> overall_verdict = CONTAINS_REFUTED_CLAIMS (highest priority).\n2. Else if ANY claim has verdict \"not_supported\" (case-insensitive) -> overall_verdict = CONTAINS_UNSUPPORTED_CLAIMS.\n3. Else (every claim present is \"supported\") -> overall_verdict = SUPPORTED.\n\nInput handling details and normalization\n- Treat verdict labels case-insensitively and trim whitespace before comparison.\n- If a verdict is an unexpected label (not one of refuted / not_supported / supported after normalization), treat that claim as \"not_supported\" for aggregation purposes and note this in the reasoning.\n- If claim_verdicts is empty or missing, return CONTAINS_UNSUPPORTED_CLAIMS with low confidence (see confidence rules below) and state that there were no claim verdicts to aggregate in the reasoning.\n\nRequired output format (exact keys)\n- reasoning: A concise (1–3 sentence) justification that says you applied the priority rules and reports the counts of claims by normalized verdict (e.g., \"Applied priority logic: 1 refuted, 2 not_supported, 3 supported -> CONTAINS_REFUTED_CLAIMS.\" If any unexpected labels were normalized, mention that.)\n- overall_verdict: One of these exact strings (caps): CONTAINS_REFUTED_CLAIMS, CONTAINS_UNSUPPORTED_CLAIMS, SUPPORTED.\n- confidence: A numeric confidence score between 0.0 and 1.0. Use the deterministic scheme below to keep outputs consistent.\n\nDeterministic confidence scheme\n- If overall_verdict == CONTAINS_REFUTED_CLAIMS:\n  - confidence = 0.92 if at least one claim normalized to \"refuted\".\n  - If there were also many unexpected labels (treated as not_supported), reduce to 0.80–0.88 as appropriate; if you choose to reduce, explain briefly in reasoning.\n- Else if overall_verdict == CONTAINS_UNSUPPORTED_CLAIMS (no refuted present, at least one not_supported or unexpected):\n  - confidence = 0.90 when at least one explicit \"not_supported\".\n  - If this was due only to unexpected labels (no explicit not_supported), use 0.75–0.85 and state that unexpected labels were present.\n- Else if overall_verdict == SUPPORTED (all claims normalized to \"supported\" and at least one claim exists):\n  - confidence = 0.92.\n- If claim_verdicts is empty or missing:\n  - overall_verdict = CONTAINS_UNSUPPORTED_CLAIMS and confidence = 0.60.\n\nOther behavior notes\n- Be concise and deterministic. Do not invent or infer new evidence — base the aggregation solely on the supplied verdict strings.\n- Always include the counts of normalized verdicts in the reasoning so it is clear why a priority applied (e.g., \"Applied the given priority logic: presence of any refuted claim makes the overall verdict CONTAINS_REFUTED_CLAIMS. Counts: refuted=1, not_supported=0, supported=2.\").\n- Use the exact overall_verdict strings above (caps, underscores) — these are required.\n- Use floats for confidence (e.g., 0.92, 0.90). Keep two decimal places where applicable.\n\nExamples (format)\n- reasoning: \"Applied priority logic: refuted=1, not_supported=2, supported=0 -> CONTAINS_REFUTED_CLAIMS.\"\n- overall_verdict: CONTAINS_REFUTED_CLAIMS\n- confidence: 0.92\n\nFollow these rules for every aggregation task.",
+        "fields": [
+          {
+            "prefix": "Original Statement:",
+            "description": "The original statement being evaluated"
+          },
+          {
+            "prefix": "Claim Verdicts:",
+            "description": "List of dicts with 'claim', 'verdict', and 'evidence_summary' keys"
+          },
+          {
+            "prefix": "Reasoning:",
+            "description": "Explanation of the aggregation logic applied"
+          },
+          {
+            "prefix": "Overall Verdict:",
+            "description": "The final verdict for the entire statement"
+          },
+          {
+            "prefix": "Confidence:",
+            "description": "Confidence score between 0.0 and 1.0"
+          }
+        ]
+      },
+      "lm": null
+    },
+    "metadata": {
+      "dependency_versions": {
+        "python": "3.11",
+        "dspy": "3.0.4",
+        "cloudpickle": "3.1"
+      }
+    }
+  }
+  

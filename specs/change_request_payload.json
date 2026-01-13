@@ -1,0 +1,46 @@
+{
+  "_comment": "Example payloads for /execute_step endpoint",
+
+  "prompt_mutation_example": {
+    "client_id": "client_abc123",
+    "program_id": "prog_gen_042",
+    "parent_program_id": "prog_gen_041",
+    "mutation_type": "prompt",
+    "program_json_path": "src/fire/program.json",
+    "entry_point": "fire.FIREJudge",
+    "candidate": {
+      "fire_judge.judge.predict": "You are the FIRE Judge. Evaluate factual claims using only provided evidence. Be conservative - only mark 'supported' with explicit, direct evidence.",
+      "research_agent.evidence_summarizer.predict": "Extract evidence for claim verification. Focus on quantitative data and direct quotes from authoritative sources."
+    },
+    "test_examples": [
+      {
+        "claim": "Russia has a significant number of nuclear power plants",
+        "label": "supported"
+      },
+      {
+        "claim": "Fortune cookies originated in China",
+        "label": "refuted"
+      }
+    ],
+    "capture_traces": true
+  },
+
+  "code_mutation_example": {
+    "client_id": "client_abc123",
+    "program_id": "prog_gen_043",
+    "parent_program_id": "prog_gen_041",
+    "mutation_type": "code",
+    "program_json_path": "src/lead_profiler/program.json",
+    "entry_point": "lead_profiler.LeadProfiler",
+    "change_request": "At the start of the lead_profiler module, add a sub-module that searches a Lead's company website and provides a summary of what the website does and how many employees. Perform search only on the conditional that the lead_quality classification is a strong fit.",
+    "change_location": "start of the lead_profiler module",
+    "test_examples": [
+      {
+        "lead_name": "John Smith",
+        "company": "Acme Corp",
+        "email": "john@acme.com"
+      }
+    ],
+    "capture_traces": false
+  }
+}
