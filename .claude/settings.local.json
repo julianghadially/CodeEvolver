@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 5 uvicorn:*)",
+      "Bash(uvicorn:*)"
+    ]
+  }
+}

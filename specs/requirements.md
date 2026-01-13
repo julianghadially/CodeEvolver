@@ -342,4 +342,28 @@ class CodeEvolverAdapter(GEPAAdapter):
 
 ## Other Requirements
 - Our License will be either MIT or Apache, so cannot incorporate any GNU GPL or Affero licenses
-- 
+
+---
+
+## Implementation Status
+
+### Completed (v0.1.0)
+- [x] POST /connect-git - Clone repository and register client
+- [x] POST /execute_step - Apply mutations (prompt only), run program (placeholder)
+- [x] GET /program/{program_id} - Retrieve program details
+- [x] GET /health - Health check
+- [x] MongoDB integration with Motor (async)
+- [x] Git worktree management for parallel branches
+- [x] Pydantic schemas for all request/response types
+
+### Pending
+- [ ] DSPy runtime integration (ProgramRunner.run_program returns placeholder)
+- [ ] Claude Agents SDK integration for code mutations
+- [ ] Modal integration for execution environments
+- [ ] Private repository authentication
+
+### Implementation Notes
+- **Git Worktrees**: Using GitPython's `git.worktree` commands. Each program gets its own worktree directory at `{workspace_root}/{client_id}/{program_id}/`
+- **Prompt Mutations**: Directly edit `signature.instructions` in program.json, then commit
+- **Code Mutations**: Return 501 Not Implemented until Claude Agents SDK is integrated
+- **Program Execution**: Returns placeholder outputs - DSPy runtime integration needed
