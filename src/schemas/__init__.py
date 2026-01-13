@@ -1,14 +1,23 @@
 """Pydantic models for request/response and database records."""
 
-from .client import ConnectGitRequest, ConnectGitResponse, ClientRecord
-from .program import (
-    MutationType,
+
+from .program_schemas import (
     ProgramStatus,
-    ExecuteStepRequest,
-    ExecuteStepResponse,
+    MutationType,
     PipelineOutput,
-    ProgramRecord,
+)
+from .requests import (
+    ExecuteStepRequest,
+    ConnectGitRequest,
+)
+from .responses import (
+    ExecuteStepResponse,
+    ConnectGitResponse,
     GetProgramResponse,
+)
+from .db_schemas import (
+    ClientRecord,
+    ProgramRecord,
 )
 
 __all__ = [

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(timeout 5 uvicorn:*)",
-      "Bash(uvicorn:*)"
+      "Bash(uvicorn:*)",
+      "Bash(python -m pytest:*)"
     ]
   }
 }
