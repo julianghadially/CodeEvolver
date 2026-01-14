@@ -1,8 +1,10 @@
 """FastAPI application for CodeEvolver Agents.
 
-Run with:
-uvicorn src.main:app --reload
+Run locally:  uvicorn src.main:app --reload
+Run on Modal: modal serve modal_app.py (or modal deploy modal_app.py)
 """
+
+import os
 
 from fastapi import FastAPI, HTTPException
 
@@ -20,6 +22,9 @@ from .schemas import (
     GetProgramResponse,
 )
 from .services import GitService, MutationService, ProgramRunner
+
+# Check if running on Modal (sandbox execution enabled)
+USE_SANDBOX = os.getenv("CODEEVOLVER_USE_SANDBOX", "false").lower() == "true"
 
 app = FastAPI(
     title="CodeEvolver Agents",

@@ -6,8 +6,10 @@ Always refer to specs/*.md for detailed requirements, and update them after a se
 
 ## Key Resources
 - **Auto coders**: 
-    - **Claude Code:** If 
+    - **Claude Agents SDK** 
     - **Other**: Auto-Claude is missing a reproducible license. Gas Town is written in Go. anomalyco/opencode is written in typescript
+- **Modal agent sandbox examples:** 
+    - https://github.com/modal-labs/modal-vibe/tree/main
 - **DSPy docs**: https://dspy.ai/
 
 ## DSPy Assumption

@@ -201,38 +201,118 @@ Benefits:
 - Isolation: Each worktree = one branch, separate directory
 - Contains: Worktree checkout, Claude Agents SDK runtime, Python/DSPy
 
-**Execution Platform: Modal**
+**Execution Platform: Modal Sandbox**
 
-Decision: Use [Modal](https://modal.com) for execution environments.
+Decision: Use [Modal Sandbox](https://modal.com/docs/guide/sandboxes) for execution environments.
+
+Architecture inspired by [Modal Vibe](https://github.com/modal-labs/modal-vibe).
+
+**Key Insight:** The Claude Agent SDK runs **inside** the Modal Sandbox, so its native tools (Bash, Grep, Glob, Read, Edit) work directly via subprocess. No custom tool wrappers needed.
 
 Rationale:
-- ~1-2s cold start (meets <10s requirement)
-- Python-native SDK
+- Modal Sandbox provides persistent filesystem while alive
+- Dynamic pip install (user's requirements.txt with unknown packages)
+- Full bash/python access for Claude Agent
 - Apache-2.0 friendly (no license conflicts)
-- Good concurrency support
-- Built-in container caching
+- Client isolation via separate sandboxes
+
+**Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Modal Web Endpoint (FastAPI)                                    │
+│  - Receives HTTP requests                                        │
+│  - Creates Modal Sandbox per execution                           │
+│  - Manages MongoDB connections                                   │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            │ Creates Sandbox
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Modal Sandbox (per mutation)                                    │
+│  ───────────────────────────────────────────────────────────── │
+│  /workspace/                                                     │
+│    ├── .git/                                                     │
+│    ├── requirements.txt  ← pip install -r this                  │
+│    ├── src/                                                      │
+│    └── program.json                                              │
+│                                                                  │
+│  Claude Agent SDK runs HERE:                                     │
+│  - Native Bash tool → subprocess.run() ✅                        │
+│  - Native Grep tool → subprocess.run("grep") ✅                  │
+│  - Native Read/Edit → file operations ✅                         │
+│  - pip install → works dynamically ✅                            │
+│                                                                  │
+│  Lifecycle:                                                      │
+│  1. Sandbox.create() → container starts                          │
+│  2. git clone repo, pip install dependencies                     │
+│  3. Run Claude Agent with full capabilities                      │
+│  4. sandbox.terminate() → container destroyed                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Implementation Pattern:**
 
 ```python
 import modal
 
-app = modal.App("codeevolver-agents")
+app = modal.App.lookup("codeevolver-agents", create_if_missing=True)
 
-@app.function(
-    image=modal.Image.debian_slim().pip_install("dspy", "anthropic"),
-    timeout=300,
+# Base image with common tools (user deps installed dynamically)
+BASE_IMAGE = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git", "curl", "build-essential")
+    .pip_install("claude-agent-sdk", "gitpython", "dspy")
 )
-async def execute_mutation(
-    workspace_path: str,
-    candidate: dict[str, str],
-    test_examples: list[dict],
-) -> dict:
-    # Clone/worktree setup, apply mutation, run program
-    ...
+
+async def execute_in_sandbox(client_id: str, mutation: dict) -> dict:
+    # Create isolated sandbox
+    sandbox = modal.Sandbox.create(
+        app=app,
+        image=BASE_IMAGE,
+        timeout=600,
+    )
+    
+    try:
+        # Clone repo and install dependencies
+        sandbox.exec("git", "clone", repo_url, "/workspace").wait()
+        sandbox.exec("bash", "-c", 
+            "cd /workspace && pip install -r requirements.txt").wait()
+        
+        # Write and run agent script INSIDE sandbox
+        # Native tools work because Claude SDK runs inside the sandbox
+        agent_script = '''
+from claude_agent_sdk import query, ClaudeAgentOptions
+
+for message in query(
+    prompt=change_request,
+    options=ClaudeAgentOptions(
+        cwd="/workspace",
+        allowed_tools=["Bash", "Read", "Edit", "Glob", "Grep"],
+        permission_mode="acceptEdits",  # Safe inside isolated sandbox
+    )
+):
+    pass
+'''
+        sandbox.exec("python", "-c", agent_script).wait()
+        
+        return {"status": "success"}
+    finally:
+        sandbox.terminate()
 ```
 
+**Why Sandbox over Modal Function:**
+
+| Feature | Modal Function | Modal Sandbox |
+|---------|---------------|---------------|
+| Dependencies | Baked at deploy time | Dynamic pip install ✅ |
+| Filesystem | Ephemeral per call | Persistent while alive ✅ |
+| Bash access | Limited | Full interactive shell ✅ |
+| User code | Can't adapt to requirements.txt | Installs anything ✅ |
+
 Future options if needed:
-- Daytona (faster, but requires commercial license for MIT/Apache compatibility)
-- Self-hosted (maximum privacy)
+- Self-hosted Docker (maximum privacy, same pattern)
+- User's own infrastructure (enterprise)
 
 ### Run Program
 Executes the mutated DSPy program and returns output.
@@ -340,6 +420,69 @@ class CodeEvolverAdapter(GEPAAdapter):
 - Future: Option for users to run execution environment on their own infrastructure
 - No unnecessary third-party services
 
+## Security
+- Cross-client leakage: execution of code should be isolated. Each client should be in a separate container (e.g., client could have malicious code to steal other clients' data or secrets)
+- Network Egress Control and user-defined whitelist: Limit urls to allowed domains and ips (e.g., api.firecrawl.dev)
+- Secrets management
+- Monitoring and detection
+- Note: We are currently in development, and do not need to implement security features for the time being
+
+Security Diagram:
+For v1: 
+- Keep workers specific to each client
+- Omit separate api gateway (go direct to sandbox)
+- no egress proxy (temp)
+- use env for secrets (temp)
+┌─────────────────────────────────────────────────────────────────┐
+│                       CodeEvolver Service                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                      API Gateway                          │   │
+│  │  - Authentication                                         │   │
+│  │  - Rate limiting                                          │   │
+│  │  - Request validation                                     │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Secrets Manager                        │   │
+│  │  - Per-client encrypted secrets                           │   │
+│  │  - Never exposed to agent                                 │   │
+│  │  - Injected via proxy                                     │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │  Client A    │  │  Client B    │  │  Client C    │          │
+│  │  Sandbox     │  │  Sandbox     │  │  Sandbox     │          │
+│  │  ──────────  │  │  ──────────  │  │  ──────────  │          │
+│  │  - Isolated  │  │  - Isolated  │  │  - Isolated  │          │
+│  │  - Own net   │  │  - Own net   │  │  - Own net   │          │
+│  │  - Egress    │  │  - Egress    │  │  - Egress    │          │
+│  │    proxy     │  │    proxy     │  │    proxy     │          │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
+│         │                 │                 │                    │
+│         ▼                 ▼                 ▼                    │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                     Egress Proxy                          │   │
+│  │  - Whitelist domains                                      │   │
+│  │  - Inject secrets as headers                              │   │
+│  │  - Log all outbound traffic                               │   │
+│  │  - Block unauthorized destinations                        │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│                              ▼                                   │
+│                    ┌───────────────────┐                         │
+│                    │ Allowed APIs      │                         │
+│                    │ - Claude          │                         │
+│                    │ - OpenAI          │                         │
+│                    │ - Our whitelist   │                         │
+│                    │ - Users whitelist │                         │
+│                    └───────────────────┘                         │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
 ## Other Requirements
 - Our License will be either MIT or Apache, so cannot incorporate any GNU GPL or Affero licenses
 
@@ -355,15 +498,18 @@ class CodeEvolverAdapter(GEPAAdapter):
 - [x] MongoDB integration with Motor (async)
 - [x] Git worktree management for parallel branches
 - [x] Pydantic schemas for all request/response types
+- [x] Modal app structure with FastAPI web endpoint
 
 ### Pending
 - [ ] DSPy runtime integration (ProgramRunner.run_program returns placeholder)
-- [ ] Claude Agents SDK integration for code mutations
-- [ ] Modal integration for execution environments
-- [ ] Private repository authentication
+- [ ] Claude Agents SDK integration for code mutations (runs inside Modal Sandbox)
+- [ ] Modal Sandbox execution (sandbox executor service)
+- [ ] Private repository authentication (GitHub App)
 
 ### Implementation Notes
+- **Modal Architecture**: FastAPI runs as Modal web endpoint. Mutations execute in Modal Sandbox where Claude Agent SDK has full bash/python access.
 - **Git Worktrees**: Using GitPython's `git.worktree` commands. Each program gets its own worktree directory at `{workspace_root}/{client_id}/{program_id}/`
 - **Prompt Mutations**: Directly edit `signature.instructions` in program.json, then commit
 - **Code Mutations**: Return 501 Not Implemented until Claude Agents SDK is integrated
 - **Program Execution**: Returns placeholder outputs - DSPy runtime integration needed
+- **Local Development**: Use `modal serve modal_app.py` for local dev, `modal deploy modal_app.py` for production

@@ -15,6 +15,7 @@ dependencies = [
     "motor>=3.6.0",
     "pydantic-settings>=2.6.0",
     "gitpython>=3.1.0",
+    "modal>=0.66.0",
 ]
 
 [project.optional-dependencies]
@@ -25,7 +26,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/codeevolver_agents"]
+packages = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
