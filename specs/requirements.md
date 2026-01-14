@@ -1,20 +1,34 @@
 # CodeEvolver Agents Requirements
 
 ## Overview
-An open source remote service for executing evolutionary code changes. Users' code flows only to: our server → Claude → execution environment. Privacy and speed are paramount. 
+CodeEvolver Agents is an open source remote service for executing evolutionary code changes. Code evolver agents executes mutations to a AI workflow, directly in the code, and runs mutated the AI workflow pipeline. Another service will be responsible for requesting changes to code. 
+
+CodeEvolver agents uses Claude Agents SDK In a fully autonomous, fully permissive mode, which has access to an execution environment for modifying code, running code, and executing bash / grep / glob. After code changes are made, the app needs to run a mutated version of the code, and return the output. 
+
+Users Connect their code with our service by adding Our GitHub app, which adds our organization as a contributor to their GitHub.
+
+Code changes will be made in the context of GEPA optimization - i.e., an evolutionary, thousand step process. Speed and parallel execution of coding changes is important. The AI worfklow code needs to be edited over 100 times. Each mutation is small, but costs will add up. Do not worry about cost right now.
+
+Security should be designed for from day one, Because autonomous coding agents introduces the trifecta of security risk - (1) Untrusted inputs (2) network access, and (3) access to user data (databases, code, secrets, and potentially pii). See security section.
+
+### V1 outcomes (for Rostam):
+- Connect a GitHub repository
+- Execute a change request
+- v1 of security: (see for v1 below)
+- API / sandbox deployed to modal
 
 ## Technology Stack
 - **Language**: Python
-- **API Framework**: FastAPI
+- **API Framework**: Modal Sandbox App serving FastAPI
 - **Database**: MongoDB (flexible, but preferred)
-- **Execution Environment**: Rapid-scale option (Modal, Fly.io, or similar) - must spin up in <10 seconds, support 20+ concurrent environments per user
+- **Execution Environment**: Modal Sandbox. (must spin up in <10 seconds, support 20+ concurrent environments per user)
 
 ## Components
 
-### API (FastAPI)
+### API (FastAPI served by Modal app)
 
 #### POST /execute_step
-Executes one optimization step: applies a mutation, runs the program, returns output for GEPA reward calculation.
+Receives a change request from GEPA optimization as input, and executes that single optimization step: applies a mutation, runs the program, returns output for GEPA reward calculation.
 
 **Request Payload**:
 ```json
@@ -24,9 +38,9 @@ Executes one optimization step: applies a mutation, runs the program, returns ou
   "parent_program_id": "string (parent program id)",
   "mutation_type": "prompt | code",
 
-  // Program location (path from project root):
+  // AI Workflow program location (path from project root):
   "program_json_path": "path/to/program.json",
-  "entry_point": "module.ClassName",  // DSPy module to instantiate
+  "entry_point": "module.ClassName",  // DSPy module to instantiate < is this needed?
 
   // For prompt mutations - GEPA's candidate format:
   "candidate": {
