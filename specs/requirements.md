@@ -1,27 +1,150 @@
-# CodeEvolver Agents Requirements
+# Requirements
 
 ## Overview
-CodeEvolver Agents is an open source remote service for executing evolutionary code changes. Code evolver agents executes mutations to a AI workflow, directly in the code, and runs mutated the AI workflow pipeline. Another service will be responsible for requesting changes to code. 
+CodeEvolver offers autonomous coding agents for turning static code into self-improving code for AI workflows. 
 
-CodeEvolver agents uses Claude Agents SDK In a fully autonomous, fully permissive mode, which has access to an execution environment for modifying code, running code, and executing bash / grep / glob. After code changes are made, the app needs to run a mutated version of the code, and return the output. 
+This combines several mechanisms:
+- **Optimizer algorithm:** GEPA is a reflective language model algorithm that makes point mutations to the code base, over many iterations, and the best solution is selected, based on a dataset and a reward metric.
+- **Coding agents**: Autonomous agents execute code changes that are requested by the optimizer. 
+- **Git branching:** A git process manages evolving code across many git worktrees  
+- **Sandboxing for security:** Coding agents are a big cyber risk without sandboxing, network policies, etc. 
 
-Users Connect their code with our service by adding Our GitHub app, which adds our organization as a contributor to their GitHub.
+### Optimizer
+The optimizer is handled by a separate repository, which will later be loaded into this repository. Assume code change requests come in the format shown in specs/change_request_payload.json.
 
-Code changes will be made in the context of GEPA optimization - i.e., an evolutionary, thousand step process. Speed and parallel execution of coding changes is important. The AI worfklow code needs to be edited over 100 times. Each mutation is small, but costs will add up. Do not worry about cost right now.
+### Coding Agents
+CodeEvolver agents uses Claude Agents SDK in a fully autonomous, dangerously-skip-permissions mode, which uses a Modal sandbox execution environment for modifying code, running code, and executing bash / grep / glob. After code changes are made, the app needs to run a mutated version of the code, and return the output. 
 
+Code changes will be made in the context of GEPA optimization - i.e., an evolutionary, 100+ step process. Speed and parallel execution of coding changes is important. The AI worfklow code needs to be edited over 100 times. Each mutation is small, but costs will add up. Do not worry about cost right now.
+
+
+### Git branching
+Users Connect their code with our service by adding our GitHub app, which adds our organization as a contributor to their GitHub.
+
+### Security
 Security should be designed for from day one, Because autonomous coding agents introduces the trifecta of security risk - (1) Untrusted inputs (2) network access, and (3) access to user data (databases, code, secrets, and potentially pii). See security section.
 
-### V1 outcomes (for Rostam):
+See security architecture below.
+
+## V1 outcomes (for Rostam):
 - Connect a GitHub repository
 - Execute a change request
 - v1 of security: (see for v1 below)
-- API / sandbox deployed to modal
+- API / sandbox deployed to Modal App
 
-## Technology Stack
+## Technology Stack and Architecture
 - **Language**: Python
 - **API Framework**: Modal Sandbox App serving FastAPI
 - **Database**: MongoDB (flexible, but preferred)
 - **Execution Environment**: Modal Sandbox. (must spin up in <10 seconds, support 20+ concurrent environments per user)
+
+**Sandbox Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Modal Web Endpoint (FastAPI)                                    │
+│  - Receives HTTP requests                                        │
+│  - Creates Modal Sandbox per execution                           │
+│  - Manages MongoDB connections                                   │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            │ Creates Sandbox
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Modal Sandbox (per mutation)                                    │
+│  ───────────────────────────────────────────────────────────── │
+│  /workspace/                                                     │
+│    ├── .git/                                                     │
+│    ├── requirements.txt  ← pip install -r this                  │
+│    ├── src/                                                      │
+│    └── program.json                                              │
+│                                                                  │
+│  Claude Agent SDK runs HERE:                                     │
+│  - Native Bash tool → subprocess.run() ✅                        │
+│  - Native Grep tool → subprocess.run("grep") ✅                  │
+│  - Native Read/Edit → file operations ✅                         │
+│  - pip install → works dynamically ✅                            │
+│                                                                  │
+│  Lifecycle:                                                      │
+│  1. Sandbox.create() → container starts                          │
+│  2. git clone repo, pip install dependencies                     │
+│  3. Run Claude Agent with full capabilities                      │
+│  4. sandbox.terminate() → container destroyed                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Security Architecture
+- **Client-specific isolation (v2):** Execution of code will be isolated in v2. Each client should be in a separate container (e.g., client could have malicious code to steal other clients' data or secrets)
+- **Network Egress Control and whitelists:** Limit urls to allowed domains and ips set by our best practices and by the user (e.g., api.firecrawl.dev)
+- **Secrets management (v2)**: use env file for v1
+- **Monitoring and detection:** omit for v1
+
+
+Here is v2 but we are currently in mvp stage, and do not need to implement all security features for the time being.
+
+┌─────────────────────────────────────────────────────────────────┐
+│                       CodeEvolver Service (v2)                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                      API Gateway                          │   │
+│  │  - Authentication                                         │   │
+│  │  - Rate limiting                                          │   │
+│  │  - Request validation                                     │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Secrets Manager                        │   │
+│  │  - Per-client encrypted secrets                           │   │
+│  │  - Never exposed to agent                                 │   │
+│  │  - Injected via proxy                                     │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │  Client A    │  │  Client B    │  │  Client C    │          │
+│  │  Sandbox     │  │  Sandbox     │  │  Sandbox     │          │
+│  │  ──────────  │  │  ──────────  │  │  ──────────  │          │
+│  │  - Isolated  │  │  - Isolated  │  │  - Isolated  │          │
+│  │  - Own net   │  │  - Own net   │  │  - Own net   │          │
+│  │  - Egress    │  │  - Egress    │  │  - Egress    │          │
+│  │    proxy     │  │    proxy     │  │    proxy     │          │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
+│         │                 │                 │                    │
+│         ▼                 ▼                 ▼                    │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                     Egress Proxy                          │   │
+│  │  - Whitelist domains                                      │   │
+│  │  - Inject secrets as headers                              │   │
+│  │  - Log all outbound traffic                               │   │
+│  │  - Block unauthorized destinations                        │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│                              ▼                                   │
+│                    ┌───────────────────┐                         │
+│                    │ Allowed APIs      │                         │
+│                    │ - Claude          │                         │
+│                    │ - OpenAI          │                         │
+│                    │ - Our whitelist   │                         │
+│                    │ - Users whitelist │                         │
+│                    └───────────────────┘                         │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+**Security needs for v1:** 
+- Keep workers specific to each client
+- go direct to sandbox (Omit separate api gateway)
+- no egress proxy (temp)
+- use env for secrets (temp)
+
+
+-------------------------------------------------------------------------
+
+
+# Ongoing notes on requirements
+
+This is an Ongoing, AI-generated Workspace.
 
 ## Components
 
@@ -231,39 +354,7 @@ Rationale:
 - Client isolation via separate sandboxes
 
 **Architecture:**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Modal Web Endpoint (FastAPI)                                    │
-│  - Receives HTTP requests                                        │
-│  - Creates Modal Sandbox per execution                           │
-│  - Manages MongoDB connections                                   │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                            │ Creates Sandbox
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Modal Sandbox (per mutation)                                    │
-│  ───────────────────────────────────────────────────────────── │
-│  /workspace/                                                     │
-│    ├── .git/                                                     │
-│    ├── requirements.txt  ← pip install -r this                  │
-│    ├── src/                                                      │
-│    └── program.json                                              │
-│                                                                  │
-│  Claude Agent SDK runs HERE:                                     │
-│  - Native Bash tool → subprocess.run() ✅                        │
-│  - Native Grep tool → subprocess.run("grep") ✅                  │
-│  - Native Read/Edit → file operations ✅                         │
-│  - pip install → works dynamically ✅                            │
-│                                                                  │
-│  Lifecycle:                                                      │
-│  1. Sandbox.create() → container starts                          │
-│  2. git clone repo, pip install dependencies                     │
-│  3. Run Claude Agent with full capabilities                      │
-│  4. sandbox.terminate() → container destroyed                    │
-└─────────────────────────────────────────────────────────────────┘
-```
+See sandbox architecture above
 
 **Implementation Pattern:**
 
@@ -434,68 +525,6 @@ class CodeEvolverAdapter(GEPAAdapter):
 - Future: Option for users to run execution environment on their own infrastructure
 - No unnecessary third-party services
 
-## Security
-- Cross-client leakage: execution of code should be isolated. Each client should be in a separate container (e.g., client could have malicious code to steal other clients' data or secrets)
-- Network Egress Control and user-defined whitelist: Limit urls to allowed domains and ips (e.g., api.firecrawl.dev)
-- Secrets management
-- Monitoring and detection
-- Note: We are currently in development, and do not need to implement security features for the time being
-
-Security Diagram:
-For v1: 
-- Keep workers specific to each client
-- Omit separate api gateway (go direct to sandbox)
-- no egress proxy (temp)
-- use env for secrets (temp)
-┌─────────────────────────────────────────────────────────────────┐
-│                       CodeEvolver Service                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                      API Gateway                          │   │
-│  │  - Authentication                                         │   │
-│  │  - Rate limiting                                          │   │
-│  │  - Request validation                                     │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                   │
-│                              ▼                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Secrets Manager                        │   │
-│  │  - Per-client encrypted secrets                           │   │
-│  │  - Never exposed to agent                                 │   │
-│  │  - Injected via proxy                                     │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                   │
-│                              ▼                                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │  Client A    │  │  Client B    │  │  Client C    │          │
-│  │  Sandbox     │  │  Sandbox     │  │  Sandbox     │          │
-│  │  ──────────  │  │  ──────────  │  │  ──────────  │          │
-│  │  - Isolated  │  │  - Isolated  │  │  - Isolated  │          │
-│  │  - Own net   │  │  - Own net   │  │  - Own net   │          │
-│  │  - Egress    │  │  - Egress    │  │  - Egress    │          │
-│  │    proxy     │  │    proxy     │  │    proxy     │          │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
-│         │                 │                 │                    │
-│         ▼                 ▼                 ▼                    │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                     Egress Proxy                          │   │
-│  │  - Whitelist domains                                      │   │
-│  │  - Inject secrets as headers                              │   │
-│  │  - Log all outbound traffic                               │   │
-│  │  - Block unauthorized destinations                        │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                   │
-│                              ▼                                   │
-│                    ┌───────────────────┐                         │
-│                    │ Allowed APIs      │                         │
-│                    │ - Claude          │                         │
-│                    │ - OpenAI          │                         │
-│                    │ - Our whitelist   │                         │
-│                    │ - Users whitelist │                         │
-│                    └───────────────────┘                         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
 
 ## Other Requirements
 - Our License will be either MIT or Apache, so cannot incorporate any GNU GPL or Affero licenses
