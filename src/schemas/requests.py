@@ -62,6 +62,10 @@ class ConnectGitRequest(BaseModel):
         description="URL of the git repository to connect",
         examples=["https://github.com/user/project"],
     )
+    installation_id: int | None = Field(
+        default=None,
+        description="GitHub App installation ID for private repository access",
+    )
 
 
 

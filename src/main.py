@@ -40,11 +40,17 @@ async def connect_git(request: ConnectGitRequest) -> ConnectGitResponse:
     Register a client repository for evolutionary optimization.
 
     Clones the repository to the server and returns a client_id for future requests.
+    
+    For private repositories, provide installation_id from your GitHub App installation.
     """
     client_id = GitService.generate_client_id()
 
     try:
-        workspace_path = GitService.clone_repository(request.repo_url, client_id)
+        workspace_path = GitService.clone_repository(
+            request.repo_url,
+            client_id,
+            installation_id=request.installation_id,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -2,8 +2,18 @@
 
 Tests the git service's ability to clone a repository and create worktrees
 for executing code mutations.
+
+For testing with private repositories:
+1. Set up a GitHub App (see test_github_app_auth.py for details)
+2. Set environment variables:
+   - CODEEVOLVER_GITHUB_APP_ID
+   - CODEEVOLVER_GITHUB_APP_PRIVATE_KEY
+   - GITHUB_TEST_INSTALLATION_ID (optional)
+   - GITHUB_TEST_REPO_URL (optional, for private repo testing)
+3. Update TEST_REPO_URL and TEST_INSTALLATION_ID below if testing private repos
 """
 
+import os
 import pytest
 from pathlib import Path
 
@@ -14,6 +24,10 @@ from src.config import settings
 # Test configuration
 TEST_REPO_URL = "https://github.com/julianghadially/FactChecker"
 TEST_BRANCH = "codeevolver-tests"
+
+# For private repository testing (optional)
+TEST_INSTALLATION_ID = os.getenv("GITHUB_TEST_INSTALLATION_ID")
+TEST_PRIVATE_REPO_URL = os.getenv("GITHUB_TEST_REPO_URL")
 
 
 class TestGitWorktreeIntegration:
@@ -41,8 +55,8 @@ class TestGitWorktreeIntegration:
         # Generate a client ID
         client_id = GitService.generate_client_id()
 
-        # Clone the repository
-        main_path = GitService.clone_repository(TEST_REPO_URL, client_id)
+        # Clone the repository (public repo, no authentication needed)
+        main_path = GitService.clone_repository(TEST_REPO_URL, client_id, installation_id=None)
 
         assert main_path.exists(), "Main repo path should exist after cloning"
         assert (main_path / ".git").exists(), "Should be a git repository"
@@ -81,6 +95,47 @@ class TestGitWorktreeIntegration:
         GitService.remove_worktree(client_id, program_id)
         GitService.cleanup_workspace(client_id)
 
+    @pytest.mark.skipif(
+        not TEST_INSTALLATION_ID or not TEST_PRIVATE_REPO_URL,
+        reason="Private repository test configuration not available"
+    )
+    def test_clone_private_repo_and_create_worktree(self, temp_workspace):
+        """
+        Test cloning a private repo with GitHub App authentication and creating a worktree.
+
+        This test requires:
+        - GitHub App credentials configured
+        - GITHUB_TEST_INSTALLATION_ID environment variable
+        - GITHUB_TEST_REPO_URL environment variable pointing to a private repo
+        """
+        client_id = GitService.generate_client_id()
+
+        # Clone private repository with authentication
+        main_path = GitService.clone_repository(
+            TEST_PRIVATE_REPO_URL,
+            client_id,
+            installation_id=int(TEST_INSTALLATION_ID),
+        )
+
+        assert main_path.exists(), "Main repo path should exist after cloning"
+        assert (main_path / ".git").exists(), "Should be a git repository"
+
+        # Create a worktree for a test program mutation
+        program_id = "test_private_mutation_001"
+        worktree_path, branch_name = GitService.create_worktree(
+            client_id,
+            program_id,
+            parent_branch="main",
+        )
+
+        # Verify worktree was created
+        assert worktree_path.exists(), f"Worktree path should exist: {worktree_path}"
+        assert branch_name == f"program_{program_id}"
+
+        # Cleanup
+        GitService.remove_worktree(client_id, program_id)
+        GitService.cleanup_workspace(client_id)
+
     def test_worktree_with_hardcoded_change_request(self, temp_workspace):
         """
         Test creating a worktree with a hard-coded example change request.
@@ -95,8 +150,8 @@ class TestGitWorktreeIntegration:
         """
         client_id = GitService.generate_client_id()
 
-        # Clone the test repo
-        main_path = GitService.clone_repository(TEST_REPO_URL, client_id)
+        # Clone the test repo (public repo, no authentication needed)
+        main_path = GitService.clone_repository(TEST_REPO_URL, client_id, installation_id=None)
 
         # Hard-coded change request (for documentation purposes)
         change_request = {
@@ -151,8 +206,8 @@ def hello_world():
         """
         client_id = GitService.generate_client_id()
 
-        # Clone the repo
-        GitService.clone_repository(TEST_REPO_URL, client_id)
+        # Clone the repo (public repo, no authentication needed)
+        GitService.clone_repository(TEST_REPO_URL, client_id, installation_id=None)
 
         # Create multiple worktrees (simulating parallel mutations)
         program_ids = ["prog_parallel_001", "prog_parallel_002", "prog_parallel_003"]

@@ -545,12 +545,13 @@ class CodeEvolverAdapter(GEPAAdapter):
 - [x] Git worktree management for parallel branches
 - [x] Pydantic schemas for all request/response types
 - [x] Modal app structure with FastAPI web endpoint
+- [x] Private repository authentication (GitHub App)
 
 ### Pending
 - [ ] DSPy runtime integration (ProgramRunner.run_program returns placeholder)
 - [ ] Claude Agents SDK integration for code mutations (runs inside Modal Sandbox)
 - [ ] Modal Sandbox execution (sandbox executor service)
-- [ ] Private repository authentication (GitHub App)
+
 
 ### Implementation Notes
 - **Modal Architecture**: FastAPI runs as Modal web endpoint. Mutations execute in Modal Sandbox where Claude Agent SDK has full bash/python access.

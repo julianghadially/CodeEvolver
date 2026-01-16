@@ -8,6 +8,7 @@ from git import Repo
 from git.exc import GitCommandError
 
 from ..config import settings
+from .github_app import GitHubAppService
 
 
 class GitService:
@@ -15,7 +16,7 @@ class GitService:
 
     @staticmethod
     def generate_client_id() -> str:
-        """Generate a unique client identifier."""
+        """Placeholder function for generating a unique client identifier."""
         return f"client_{uuid4().hex[:12]}"
 
     @staticmethod
@@ -29,28 +30,48 @@ class GitService:
         return GitService.get_workspace_path(client_id) / "main"
 
     @staticmethod
-    def clone_repository(repo_url: str, client_id: str) -> Path:
+    def clone_repository(
+        repo_url: str,
+        client_id: str,
+        installation_id: int | None = None,
+    ) -> Path:
         """
         Clone a repository to the client's workspace.
+
+        Supports both public and private repositories. For private repos,
+        provide a GitHub App installation_id to authenticate.
 
         Args:
             repo_url: URL of the git repository to clone
             client_id: Unique client identifier
+            installation_id: Optional GitHub App installation ID for private repos
 
         Returns:
             Path to the cloned repository (main worktree)
 
         Raises:
             GitCommandError: If cloning fails
-            ValueError: If repo_url is invalid
+            ValueError: If repo_url is invalid or authentication fails
         """
         workspace_path = GitService.get_workspace_path(client_id)
         main_path = workspace_path / "main"
 
         workspace_path.mkdir(parents=True, exist_ok=True)
 
+        # Handle authentication for private repositories
+        authenticated_url = repo_url
+        if installation_id:
+            try:
+                token = GitHubAppService.get_installation_token(installation_id)
+                authenticated_url = GitHubAppService.get_authenticated_repo_url(
+                    repo_url, token
+                )
+            except ValueError as e:
+                shutil.rmtree(workspace_path, ignore_errors=True)
+                raise ValueError(f"GitHub App authentication failed: {e}") from e
+
         try:
-            Repo.clone_from(repo_url, main_path)
+            Repo.clone_from(authenticated_url, main_path)
         except GitCommandError as e:
             shutil.rmtree(workspace_path, ignore_errors=True)
             raise ValueError(f"Failed to clone repository: {e}") from e
