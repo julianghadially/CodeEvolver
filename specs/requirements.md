@@ -22,14 +22,17 @@ Code changes will be made in the context of GEPA optimization - i.e., an evoluti
 Users Connect their code with our service by adding our GitHub app, which adds our organization as a contributor to their GitHub.
 
 ### Security
-Security should be designed for from day one, Because autonomous coding agents introduces the trifecta of security risk - (1) Untrusted inputs (2) network access, and (3) access to user data (databases, code, secrets, and potentially pii). See security section.
+Security should be designed for from day one, because autonomous coding agents introduce the trifecta of security risk: 
+1. Untrusted inputs, including prompt injection embedded into popular sites
+2. Network access
+3. Access to user data (RAG databases, code, secrets, and possibly PII). 
 
 See security architecture below.
 
 ## V1 outcomes (for Rostam):
 - Connect a GitHub repository
 - Execute a change request
-- v1 of security: (see for v1 below)
+- Complete v1 of security: (see for v1 below)
 - API / sandbox deployed to Modal App
 
 ## Technology Stack and Architecture
@@ -44,7 +47,7 @@ See security architecture below.
 ┌─────────────────────────────────────────────────────────────────┐
 │  Modal Web Endpoint (FastAPI)                                    │
 │  - Receives HTTP requests                                        │
-│  - Creates Modal Sandbox per execution                           │
+│  - Creates Modal sandbox for each change request                 │
 │  - Manages MongoDB connections                                   │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
@@ -80,8 +83,7 @@ See security architecture below.
 - **Monitoring and detection:** omit for v1
 
 
-Here is v2 but we are currently in mvp stage, and do not need to implement all security features for the time being.
-
+```
 ┌─────────────────────────────────────────────────────────────────┐
 │                       CodeEvolver Service (v2)                  │
 ├─────────────────────────────────────────────────────────────────┤
@@ -131,12 +133,13 @@ Here is v2 but we are currently in mvp stage, and do not need to implement all s
 │                    └───────────────────┘                         │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
+```
 
 **Security needs for v1:** 
 - Keep workers specific to each client
-- go direct to sandbox (Omit separate api gateway)
-- no egress proxy (temp)
-- use env for secrets (temp)
+- Make API requests direct to modal / sandbox app (Omit separate api gateway)
+- No egress proxy (temp)
+- Use env for secrets (temp)
 
 
 -------------------------------------------------------------------------
