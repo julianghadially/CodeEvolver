@@ -530,7 +530,7 @@ class CodeEvolverAdapter(GEPAAdapter):
 
 
 ## Other Requirements
-- Our License will be either MIT or Apache, so cannot incorporate any GNU GPL or Affero licenses
+- Our License will be either MIT or Apache, so cannot incorporate any GNU GPL or Affero licenses.
 
 ---
 
