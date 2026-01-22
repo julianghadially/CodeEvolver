@@ -3,7 +3,9 @@
     "allow": [
       "Bash(timeout 5 uvicorn:*)",
       "Bash(uvicorn:*)",
-      "Bash(python -m pytest:*)"
+      "Bash(python -m pytest:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

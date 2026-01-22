@@ -17,7 +17,6 @@ CodeEvolver agents uses Claude Agents SDK in a fully autonomous, dangerously-ski
 
 Code changes will be made in the context of GEPA optimization - i.e., an evolutionary, 100+ step process. Speed and parallel execution of coding changes is important. The AI worfklow code needs to be edited over 100 times. Each mutation is small, but costs will add up. Do not worry about cost right now.
 
-
 ### Git branching
 Users Connect their code with our service by adding our GitHub app, which adds our organization as a contributor to their GitHub.
 
@@ -147,7 +146,7 @@ See security architecture below.
 
 # Ongoing notes on requirements
 
-This is an Ongoing, AI-generated Workspace.
+Below this line is an ongoing, workspace for Claude / AI coding agents. Do not edit text above the line unless it is fully incorrect.
 
 ## Components
 
@@ -364,7 +363,7 @@ See sandbox architecture above
 ```python
 import modal
 
-app = modal.App.lookup("codeevolver-agents", create_if_missing=True)
+app = modal.App.lookup("codeevolver", create_if_missing=True)
 
 # Base image with common tools (user deps installed dynamically)
 BASE_IMAGE = (
@@ -547,16 +546,45 @@ class CodeEvolverAdapter(GEPAAdapter):
 - [x] Modal app structure with FastAPI web endpoint
 - [x] Private repository authentication (GitHub App)
 
-### Pending
-- [ ] DSPy runtime integration (ProgramRunner.run_program returns placeholder)
-- [ ] Claude Agents SDK integration for code mutations (runs inside Modal Sandbox)
-- [ ] Modal Sandbox execution (sandbox executor service)
+### Completed (v0.2.0)
+- [x] Restructured codebase with `src/core/` module (inspired by modal-vibe)
+- [x] SandboxApp class for managing Modal sandbox lifecycle
+- [x] Agent module for Claude SDK integration (generates agent scripts)
+- [x] Program runner module for DSPy execution (generates runner scripts)
+- [x] System prompt module for code mutation prompts
+- [x] Removed old mutation_service.py and sandbox_executor.py (duplicates)
 
+### Pending
+- [ ] DSPy runtime integration (run_program returns placeholder)
+- [ ] Test Claude Agents SDK execution in Modal Sandbox
+- [ ] End-to-end testing of code mutations
 
 ### Implementation Notes
-- **Modal Architecture**: FastAPI runs as Modal web endpoint. Mutations execute in Modal Sandbox where Claude Agent SDK has full bash/python access.
+
+**Architecture (v0.2.0 - modal-vibe inspired):**
+```
+src/
+  core/                    # Core logic (inspired by modal-vibe)
+    __init__.py
+    sandbox.py             # SandboxApp class, execute_mutation()
+    agent.py               # Claude agent script generation
+    program_runner.py      # DSPy program execution
+    system_prompt.py       # Prompts for coding agent
+  services/                # Supporting services
+    git_service.py         # Git operations (clone, worktree, commit)
+    github_app.py          # GitHub App authentication
+  schemas/                 # Pydantic models
+  db/                      # MongoDB integration
+  config.py
+  main.py                  # FastAPI endpoints
+modal_app.py               # Modal app entrypoint
+```
+
+- **Modal Architecture**: FastAPI runs as Modal web endpoint. Mutations execute via `execute_in_sandbox()` which calls `src.core.execute_mutation()`.
+- **SandboxApp Pattern**: Similar to modal-vibe's `SandboxApp`, manages sandbox lifecycle: create -> clone -> install -> mutate -> run -> terminate.
+- **Agent Scripts**: Code mutations generate Python scripts that run Claude Agent SDK inside the sandbox, where native tools work via subprocess.
 - **Git Worktrees**: Using GitPython's `git.worktree` commands. Each program gets its own worktree directory at `{workspace_root}/{client_id}/{program_id}/`
-- **Prompt Mutations**: Directly edit `signature.instructions` in program.json, then commit
-- **Code Mutations**: Return 501 Not Implemented until Claude Agents SDK is integrated
-- **Program Execution**: Returns placeholder outputs - DSPy runtime integration needed
-- **Local Development**: Use `modal serve modal_app.py` for local dev, `modal deploy modal_app.py` for production
+- **Prompt Mutations**: Directly edit `signature.instructions` in program.json via `apply_prompt_mutation()`, then commit
+- **Code Mutations**: Generate and execute agent scripts in sandbox (requires Modal deployment)
+- **Program Execution**: Generates runner scripts for DSPy execution (placeholder until DSPy integration)
+- **Local Development**: Use `modal serve modal_app.py` for dev, `modal deploy modal_app.py` for production

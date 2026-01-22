@@ -21,7 +21,13 @@ from .schemas import (
     MutationType,
     GetProgramResponse,
 )
-from .services import GitService, MutationService, ProgramRunner
+from .services import GitService
+from .core import (
+    apply_prompt_mutation,
+    load_program_json,
+    save_program_json,
+    run_program,
+)
 
 # Check if running on Modal (sandbox execution enabled)
 USE_SANDBOX = os.getenv("CODEEVOLVER_USE_SANDBOX", "false").lower() == "true"
@@ -29,7 +35,7 @@ USE_SANDBOX = os.getenv("CODEEVOLVER_USE_SANDBOX", "false").lower() == "true"
 app = FastAPI(
     title="CodeEvolver Agents",
     description="Remote service for executing evolutionary code changes",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -40,7 +46,7 @@ async def connect_git(request: ConnectGitRequest) -> ConnectGitResponse:
     Register a client repository for evolutionary optimization.
 
     Clones the repository to the server and returns a client_id for future requests.
-    
+
     For private repositories, provide installation_id from your GitHub App installation.
     """
     client_id = GitService.generate_client_id()
@@ -111,7 +117,7 @@ async def execute_step(request: ExecuteStepRequest) -> ExecuteStepResponse:
 
     try:
         # Load program.json
-        program_json = MutationService.load_program_json(
+        program_json = load_program_json(
             worktree_path,
             request.program_json_path,
         )
@@ -123,12 +129,12 @@ async def execute_step(request: ExecuteStepRequest) -> ExecuteStepResponse:
                     status_code=400,
                     detail="candidate is required for prompt mutations",
                 )
-            program_json = MutationService.apply_prompt_mutation(
+            program_json = apply_prompt_mutation(
                 program_json,
                 request.candidate,
             )
             # Save mutated program.json
-            MutationService.save_program_json(
+            save_program_json(
                 worktree_path,
                 request.program_json_path,
                 program_json,
@@ -145,22 +151,15 @@ async def execute_step(request: ExecuteStepRequest) -> ExecuteStepResponse:
                     status_code=400,
                     detail="change_request is required for code mutations",
                 )
-            try:
-                await MutationService.apply_code_mutation(
-                    worktree_path,
-                    request.change_request,
-                    request.change_location,
-                )
-                # Reload program.json after code changes
-                program_json = MutationService.load_program_json(
-                    worktree_path,
-                    request.program_json_path,
-                )
-            except NotImplementedError as e:
-                raise HTTPException(status_code=501, detail=str(e))
+            # Code mutations require sandbox execution
+            # For now, return 501 until sandbox integration is complete
+            raise HTTPException(
+                status_code=501,
+                detail="Code mutations require sandbox execution. Use Modal deployment.",
+            )
 
         # Run program on test examples
-        outputs, traces = await ProgramRunner.run_program(
+        run_result = await run_program(
             worktree_path,
             request.program_json_path,
             request.entry_point,
@@ -183,10 +182,10 @@ async def execute_step(request: ExecuteStepRequest) -> ExecuteStepResponse:
             program_id=request.program_id,
             status="success",
             pipeline_outputs=[
-                PipelineOutput(example_id=o["example_id"], output=o["output"])
-                for o in outputs
+                PipelineOutput(example_id=o.example_id, output=o.output)
+                for o in run_result.outputs
             ],
-            traces=traces,
+            traces=run_result.traces,
             branch_name=branch_name,
             program_json=program_json,
         )
@@ -253,4 +252,4 @@ async def get_program(program_id: str) -> GetProgramResponse:
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy"}
+    return {"status": "healthy", "version": "0.2.0"}

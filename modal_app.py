@@ -2,8 +2,13 @@
 
 This is the main entry point for deploying to Modal.
 
-Run locally: modal serve modal_app.py
-Deploy:      modal deploy modal_app.py
+Run on Modal: modal serve modal_app.py  # Runs on Modal cloud with local code mounts
+Deploy:       modal deploy modal_app.py
+
+The architecture follows the modal-vibe pattern:
+- FastAPI serves the API endpoints
+- SandboxApp manages isolated sandbox execution for mutations
+- Core logic lives in src/core/
 """
 
 import modal
@@ -26,165 +31,147 @@ web_image = (
         "motor>=3.6.0",
         "pydantic-settings>=2.6.0",
         "gitpython>=3.1.0",
+        "httpx>=0.27.0",
+        "pyjwt[cryptography]>=2.8.0",
+        "cryptography>=41.0.0",
     )
+    .add_local_dir(".", remote_path="/app")
 )
 
 # Base image for sandbox execution (Claude Agent SDK + DSPy)
+# This is used by SandboxApp.create() from src/core/sandbox.py
+# Includes httpx and pyjwt for GitHubAppService authentication
 sandbox_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git", "curl", "build-essential")
     .pip_install(
         "gitpython>=3.1.0",
         "dspy>=2.5.0",
-        # "claude-agent-sdk",  # Uncomment when available
+        "claude-agent-sdk>=0.1.21",
+        "httpx>=0.27.0",
+        "pyjwt[cryptography]>=2.8.0",
+        "pydantic-settings>=2.6.0",
     )
+    .add_local_dir(".", remote_path="/app")
 )
 
 
 @app.function(
     image=web_image,
     volumes={"/workspaces": workspaces_volume},
-    secrets=[modal.Secret.from_name("codeevolver-secrets", required=False)],
-    keep_warm=1,  # Keep one instance warm to minimize cold starts
-    allow_concurrent_inputs=100,
+    secrets=[modal.Secret.from_name("codeevolver-secrets")],
+    min_containers=1,
 )
+@modal.concurrent(max_inputs=100)
 @modal.asgi_app()
 def fastapi_app():
     """
     FastAPI web application running on Modal.
-    
-    This serves the API endpoints and orchestrates sandbox execution.
+
+    Serves the API endpoints and orchestrates sandbox execution.
     """
     import os
-    
-    # Override workspace root to use Modal volume
+    import sys
+
+    os.chdir("/app")
+    if "/app" not in sys.path:
+        sys.path.insert(0, "/app")
+
     os.environ["CODEEVOLVER_WORKSPACE_ROOT"] = "/workspaces"
-    
-    # Import after setting env vars
+
     from src.main import app as fastapi_instance
-    
+
     return fastapi_instance
 
 
 @app.function(
     image=sandbox_image,
-    timeout=600,  # 10 minute max per sandbox execution
+    timeout=600,
     cpu=2,
     memory=4096,
+    secrets=[modal.Secret.from_name("codeevolver-secrets")],
 )
 async def execute_in_sandbox(
+    client_id: str,
+    program_id: str,
     repo_url: str,
-    workspace_path: str,
-    mutation: dict,
-    client_secrets: dict | None = None,
+    mutation_type: str,
+    program_json_path: str,
+    entry_point: str,
+    candidate: dict | None = None,
+    change_request: str | None = None,
+    change_location: str | None = None,
+    test_examples: list | None = None,
+    capture_traces: bool = False,
+    installation_id: int | None = None,
 ) -> dict:
     """
     Execute a mutation inside an isolated Modal Sandbox.
-    
-    The Claude Agent SDK runs INSIDE the sandbox, so its native tools
-    (Bash, Grep, Glob, Read, Edit) work via subprocess.
-    
+
+    This function is called remotely from the FastAPI endpoints.
+    It creates a SandboxApp instance and runs the mutation workflow.
+    Uses GitHubAppService for private repository authentication.
+
     Args:
+        client_id: Client identifier
+        program_id: Program identifier
         repo_url: Git repository URL to clone
-        workspace_path: Path where repo should be cloned
-        mutation: Mutation configuration dict
-        client_secrets: Optional secrets to inject as env vars
-    
+        mutation_type: "prompt" or "code"
+        program_json_path: Path to program.json
+        entry_point: DSPy module class
+        candidate: For prompt mutations
+        change_request: For code mutations
+        change_location: Optional hint for code mutations
+        test_examples: Examples to run
+        capture_traces: Whether to capture traces
+        installation_id: Optional GitHub App installation ID for private repos
+
     Returns:
         Execution result dict
     """
-    import json
-    import subprocess
-    
-    result = {"status": "success", "output": None, "error": None}
-    
-    try:
-        # Clone the repository
-        subprocess.run(
-            ["git", "clone", repo_url, workspace_path],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        
-        # Install dependencies if requirements.txt exists
-        requirements_path = f"{workspace_path}/requirements.txt"
-        import os
-        if os.path.exists(requirements_path):
-            subprocess.run(
-                ["pip", "install", "-r", requirements_path],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        
-        # Inject secrets as environment variables
-        if client_secrets:
-            for key, value in client_secrets.items():
-                os.environ[key] = value
-        
-        # For code mutations, run Claude Agent SDK
-        if mutation.get("mutation_type") == "code":
-            # TODO: Implement Claude Agent SDK execution
-            # The agent runs in this process, so its native tools work
-            #
-            # from claude_agent_sdk import query, ClaudeAgentOptions
-            # 
-            # for message in query(
-            #     prompt=mutation["change_request"],
-            #     options=ClaudeAgentOptions(
-            #         cwd=workspace_path,
-            #         allowed_tools=["Bash", "Read", "Edit", "Glob", "Grep"],
-            #         permission_mode="acceptEdits",
-            #     )
-            # ):
-            #     pass
-            
-            result["error"] = "Code mutations not yet implemented"
-            result["status"] = "failed"
-        
-        # For prompt mutations, apply directly
-        elif mutation.get("mutation_type") == "prompt":
-            program_json_path = f"{workspace_path}/{mutation['program_json_path']}"
-            
-            # Load program.json
-            with open(program_json_path) as f:
-                program_json = json.load(f)
-            
-            # Apply mutation
-            candidate = mutation.get("candidate", {})
-            for component_name, new_instruction in candidate.items():
-                if component_name in program_json:
-                    program_json[component_name]["signature"]["instructions"] = new_instruction
-            
-            # Save modified program.json
-            with open(program_json_path, "w") as f:
-                json.dump(program_json, f, indent=2)
-            
-            # Commit changes
-            subprocess.run(
-                ["git", "-C", workspace_path, "add", "-A"],
-                check=True,
-            )
-            subprocess.run(
-                ["git", "-C", workspace_path, "commit", "-m", 
-                 f"Apply prompt mutation: {mutation.get('program_id', 'unknown')}"],
-                check=True,
-            )
-            
-            result["program_json"] = program_json
-        
-        # TODO: Run DSPy program and capture outputs
-        # This would load the entry_point module and run it on test_examples
-        
-    except subprocess.CalledProcessError as e:
-        result["status"] = "failed"
-        result["error"] = f"Command failed: {e.cmd}\nstderr: {e.stderr}"
-    except Exception as e:
-        result["status"] = "failed"
-        result["error"] = str(e)
-    
-    return result
+    import os
+
+    # Import core module
+    import sys
+
+    sys.path.insert(0, "/app")
+
+    from src.core import execute_mutation
+
+    # Build secrets dict from environment
+    secrets = {}
+    if os.getenv("ANTHROPIC_API_KEY"):
+        secrets["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY")
+    if os.getenv("OPENAI_API_KEY"):
+        secrets["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+
+    result = await execute_mutation(
+        app=app,
+        client_id=client_id,
+        program_id=program_id,
+        repo_url=repo_url,
+        mutation_type=mutation_type,
+        program_json_path=program_json_path,
+        entry_point=entry_point,
+        candidate=candidate,
+        change_request=change_request,
+        change_location=change_location,
+        test_examples=test_examples,
+        capture_traces=capture_traces,
+        secrets=secrets,
+        installation_id=installation_id,
+    )
+
+    # Convert dataclass to dict for serialization
+    return {
+        "status": result.status,
+        "program_id": result.program_id,
+        "program_json": result.program_json,
+        "pipeline_outputs": result.pipeline_outputs,
+        "traces": result.traces,
+        "branch_name": result.branch_name,
+        "error": result.error,
+    }
 
 
 @app.local_entrypoint()
@@ -193,7 +180,7 @@ def main():
     print("CodeEvolver Agents Modal App")
     print("----------------------------")
     print("Commands:")
-    print("  modal serve modal_app.py    # Run locally with hot reload")
+    print("  modal serve modal_app.py    # Run on Modal with hot reload")
     print("  modal deploy modal_app.py   # Deploy to Modal cloud")
     print()
     print("Once deployed, the API will be available at:")

@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     workspace_root: str = "/tmp/codeevolver/workspaces"
     
     # Modal settings
-    modal_app_name: str = "codeevolver-agents"
+    modal_app_name: str = "codeevolver"
     sandbox_timeout: int = 600  # 10 minutes
     sandbox_cpu: int = 2
     sandbox_memory: int = 4096  # MB
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     
     # GitHub App authentication (for private repositories)
-    github_app_id: Optional[str] = None
+    github_app_id: str = "2671751" 
     github_app_private_key: Optional[str] = None  # PEM format, can be base64 encoded or raw
 
     model_config = {"env_prefix": "CODEEVOLVER_"}

@@ -11,3 +11,8 @@ mlartifacts/*
 results/old/*
 results/optimization/gepa_optimization*
 *.sqlite
+# Local images folder (contents ignored, but folder structure tracked)
+.images/*
+.images
+!.images/.gitkeep
+secrets/
