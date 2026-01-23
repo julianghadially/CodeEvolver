@@ -56,7 +56,7 @@ async def run_code_mutation_agent(
     try:
         output_messages = []
 
-        for message in query(
+        async for message in query(
             prompt=prompt,
             options=ClaudeAgentOptions(
                 cwd=workspace_path,
@@ -118,6 +118,7 @@ if os.path.exists(env_file):
                 os.environ[key] = value
 
 try:
+    import anyio
     from claude_agent_sdk import ClaudeAgentOptions, query
 
     change_request = """{escaped_request}"""
@@ -128,16 +129,18 @@ try:
     if change_location:
         prompt = f"Focus on {{change_location}}. " + prompt
 
-    for message in query(
-        prompt=prompt,
-        options=ClaudeAgentOptions(
-            cwd=workspace,
-            allowed_tools=["Bash", "Read", "Edit", "Glob", "Grep"],
-            permission_mode="acceptEdits",
-        ),
-    ):
-        pass
+    async def main():
+        async for message in query(
+            prompt=prompt,
+            options=ClaudeAgentOptions(
+                cwd=workspace,
+                allowed_tools=["Bash", "Read", "Edit", "Glob", "Grep"],
+                permission_mode="acceptEdits",
+            ),
+        ):
+            pass
 
+    anyio.run(main)
     print("AGENT_SUCCESS")
 
 except ImportError as e:

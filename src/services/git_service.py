@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 from git import Repo
 from git.exc import GitCommandError
 
@@ -191,3 +192,68 @@ class GitService:
         """Remove a client's workspace directory."""
         workspace_path = GitService.get_workspace_path(client_id)
         shutil.rmtree(workspace_path, ignore_errors=True)
+
+    @staticmethod
+    def fetch_github_file(
+        repo_url: str,
+        file_path: str,
+        branch: str = "main",
+        installation_id: int | None = None,
+    ) -> str:
+        """
+        Fetch a file from a GitHub repository via the raw content API.
+
+        Args:
+            repo_url: Repository URL (https://github.com/owner/repo)
+            file_path: Path to file within the repository
+            branch: Branch name to fetch from
+            installation_id: Optional GitHub App installation ID for private repos
+
+        Returns:
+            File contents as a string
+
+        Raises:
+            ValueError: If the file cannot be fetched
+        """
+        # Parse owner/repo from URL
+        if repo_url.startswith("https://github.com/"):
+            parts = repo_url.replace("https://github.com/", "").rstrip("/").split("/")
+        elif repo_url.startswith("git@github.com:"):
+            parts = repo_url.replace("git@github.com:", "").replace(".git", "").split("/")
+        else:
+            raise ValueError(f"Unsupported repository URL format: {repo_url}")
+
+        if len(parts) < 2:
+            raise ValueError(f"Could not parse owner/repo from URL: {repo_url}")
+
+        owner = parts[0]
+        repo = parts[1].replace(".git", "")
+
+        # Build headers
+        headers = {
+            "Accept": "application/vnd.github.raw+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        # Add auth token if we have installation ID
+        if installation_id:
+            token = GitHubAppService.get_installation_token(installation_id)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+        # Use GitHub API to fetch file contents
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={branch}"
+
+        with httpx.Client() as client:
+            response = client.get(api_url, headers=headers, timeout=30.0)
+
+            if response.status_code == 404:
+                raise ValueError(
+                    f"File not found: {file_path} on branch {branch} in {owner}/{repo}"
+                )
+            elif response.status_code != 200:
+                raise ValueError(
+                    f"Failed to fetch file: HTTP {response.status_code} - {response.text}"
+                )
+
+            return response.text

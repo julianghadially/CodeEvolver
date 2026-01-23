@@ -40,9 +40,10 @@ INSTRUCTIONS:
 5. After making changes, verify they are syntactically correct
 
 CONSTRAINTS:
-- Only modify files directly related to the change request
+- Only modify files directly related to the change request and AI workflow.
+- Do not modify databases, data files, or any functionality not related to the AI workflow.
+- Make only one change at a time. 
 - Preserve existing code style and conventions
-- Do not add unnecessary features or refactoring beyond the request
 - Do not modify configuration files unless explicitly requested
 
 When complete, the changes should be ready to commit."""

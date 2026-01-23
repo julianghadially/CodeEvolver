@@ -37,3 +37,14 @@ class ConnectGitResponse(BaseModel):
     client_id: str = Field(..., description="Unique identifier for this client")
     status: str = Field(..., description="Connection status")
 
+
+class ExecuteSandboxResponse(BaseModel):
+    """Response payload for /execute_sandbox endpoint."""
+
+    status: Literal["success", "failed"]
+    program_id: str | None = Field(default=None)
+    program_json: dict[str, Any] | None = Field(default=None)
+    pipeline_outputs: list[Any] | None = Field(default=None)
+    traces: list[Any] | None = Field(default=None)
+    branch_name: str | None = Field(default=None)
+    error: str | None = Field(default=None)

@@ -14,7 +14,7 @@ The architecture follows the modal-vibe pattern:
 import modal
 
 # Create or lookup the Modal app
-app = modal.App("codeevolver-agents")
+app = modal.App("codeevolver")
 
 # Shared volume for git workspaces (persists across function calls)
 workspaces_volume = modal.Volume.from_name(
@@ -104,6 +104,9 @@ async def execute_in_sandbox(
     test_examples: list | None = None,
     capture_traces: bool = False,
     installation_id: int | None = None,
+    skip_program_run: bool = False,
+    branch_name: str | None = None,
+    push_to_remote: bool = False,
 ) -> dict:
     """
     Execute a mutation inside an isolated Modal Sandbox.
@@ -125,6 +128,9 @@ async def execute_in_sandbox(
         test_examples: Examples to run
         capture_traces: Whether to capture traces
         installation_id: Optional GitHub App installation ID for private repos
+        skip_program_run: If True, skip running the DSPy program (code-only mode)
+        branch_name: Optional branch name to use (otherwise auto-generated)
+        push_to_remote: If True, push changes to remote after mutation
 
     Returns:
         Execution result dict
@@ -140,10 +146,10 @@ async def execute_in_sandbox(
 
     # Build secrets dict from environment
     secrets = {}
-    if os.getenv("ANTHROPIC_API_KEY"):
-        secrets["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY")
-    if os.getenv("OPENAI_API_KEY"):
-        secrets["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+    if os.getenv("CLAUDE_KEY"):
+        secrets["CLAUDE_KEY"] = os.getenv("CLAUDE_KEY")
+    if os.getenv("OPENAI_KEY"):
+        secrets["OPENAI_KEY"] = os.getenv("OPENAI_KEY")
 
     result = await execute_mutation(
         app=app,
@@ -160,6 +166,9 @@ async def execute_in_sandbox(
         capture_traces=capture_traces,
         secrets=secrets,
         installation_id=installation_id,
+        skip_program_run=skip_program_run,
+        branch_name=branch_name,
+        push_to_remote=push_to_remote,
     )
 
     # Convert dataclass to dict for serialization
@@ -184,4 +193,4 @@ def main():
     print("  modal deploy modal_app.py   # Deploy to Modal cloud")
     print()
     print("Once deployed, the API will be available at:")
-    print("  https://<your-modal-username>--codeevolver-agents-fastapi-app.modal.run")
+    print("  https://<your-modal-username>--codeevolver-fastapi-app.modal.run")

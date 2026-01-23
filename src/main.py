@@ -15,6 +15,8 @@ from .schemas import (
     ClientRecord,
     ExecuteStepRequest,
     ExecuteStepResponse,
+    ExecuteSandboxRequest,
+    ExecuteSandboxResponse,
     PipelineOutput,
     ProgramRecord,
     ProgramStatus,
@@ -253,3 +255,113 @@ async def get_program(program_id: str) -> GetProgramResponse:
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "version": "0.2.0"}
+
+
+@app.get("/debug_secrets")
+async def debug_secrets():
+    """Debug endpoint to check secret configuration (does not expose full secrets)."""
+    import os
+    from .config import settings
+    
+    # Get raw env var for comparison
+    raw_key = os.getenv("CODEEVOLVER_GITHUB_APP_PRIVATE_KEY", "")
+    processed_key = settings.github_app_private_key or ""
+    
+    return {
+        "github_app_id": settings.github_app_id,
+        "anthropic_api_key_set": bool(settings.anthropic_api_key),
+        "openai_api_key_set": bool(settings.openai_api_key),
+        "github_app_private_key": {
+            "raw_env_length": len(raw_key),
+            "raw_env_first_50": raw_key[:50] if raw_key else None,
+            "raw_env_last_30": raw_key[-30:] if raw_key else None,
+            "raw_contains_begin": "BEGIN" in raw_key,
+            "raw_contains_newlines": "\n" in raw_key,
+            "raw_newline_count": raw_key.count("\n"),
+            "processed_length": len(processed_key),
+            "processed_first_50": processed_key[:50] if processed_key else None,
+            "processed_last_30": processed_key[-30:] if processed_key else None,
+            "processed_contains_begin": "BEGIN" in processed_key,
+            "processed_contains_newlines": "\n" in processed_key,
+            "processed_newline_count": processed_key.count("\n"),
+            "is_valid_pem_format": (
+                processed_key.strip().startswith("-----BEGIN") 
+                if processed_key else False
+            ),
+        },
+        "env_vars_present": {
+            "CODEEVOLVER_GITHUB_APP_PRIVATE_KEY": bool(raw_key),
+            "GITHUB_TEST_INSTALLATION_ID": os.getenv("GITHUB_TEST_INSTALLATION_ID"),
+            "CLAUDE_KEY": bool(os.getenv("CLAUDE_KEY"))
+        }
+    }
+
+
+@app.post("/execute_sandbox", response_model=ExecuteSandboxResponse)
+async def execute_sandbox(request: ExecuteSandboxRequest) -> ExecuteSandboxResponse:
+    """
+    Execute a mutation in the Modal sandbox.
+    
+    This endpoint directly invokes the Modal sandbox function for code mutations.
+    It's useful for testing and for cases where you want to bypass the /execute_step
+    workflow.
+    
+    The sandbox will:
+    1. Clone the repository
+    2. Create a branch
+    3. Apply the code mutation (using Claude Agent)
+    4. Optionally push to remote
+    5. Return the result
+    """
+    try:
+        # Import the execute_in_sandbox function from modal_app
+        # This works because we're running inside the Modal context
+        import sys
+        if "/app" not in sys.path:
+            sys.path.insert(0, "/app")
+        
+        from modal_app import execute_in_sandbox
+        
+        # Call the sandbox function remotely
+        result = await execute_in_sandbox.remote.aio(
+            client_id=request.client_id,
+            program_id=request.program_id,
+            repo_url=request.repo_url,
+            mutation_type=request.mutation_type,
+            program_json_path=request.program_json_path,
+            entry_point=request.entry_point,
+            candidate=request.candidate,
+            change_request=request.change_request,
+            change_location=request.change_location,
+            test_examples=request.test_examples,
+            capture_traces=request.capture_traces,
+            installation_id=request.installation_id,
+            skip_program_run=request.skip_program_run,
+            branch_name=request.branch_name,
+            push_to_remote=request.push_to_remote,
+        )
+        
+        return ExecuteSandboxResponse(
+            status=result.get("status", "failed"),
+            program_id=result.get("program_id"),
+            program_json=result.get("program_json"),
+            pipeline_outputs=result.get("pipeline_outputs"),
+            traces=result.get("traces"),
+            branch_name=result.get("branch_name"),
+            error=result.get("error"),
+        )
+        
+    except ImportError as e:
+        # Not running on Modal - provide helpful error
+        return ExecuteSandboxResponse(
+            status="failed",
+            error=(
+                f"Cannot import modal_app: {e}. "
+                "This endpoint only works when running on Modal (modal serve or modal deploy)."
+            ),
+        )
+    except Exception as e:
+        return ExecuteSandboxResponse(
+            status="failed",
+            error=f"Sandbox execution failed: {e}",
+        )

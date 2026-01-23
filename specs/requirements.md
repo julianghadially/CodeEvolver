@@ -219,7 +219,8 @@ Registers a client repository. Minimal payload - paths provided per-request in `
 **Request**:
 ```json
 {
-  "repo_url": "https://github.com/user/project"
+  "repo_url": "https://github.com/user/project",
+  "installation_id": 12345  // Optional: GitHub App installation ID for private repos
 }
 ```
 
@@ -231,7 +232,9 @@ Registers a client repository. Minimal payload - paths provided per-request in `
 }
 ```
 
-- Public repos initially, private repo support later
+- Supports both public and private repositories
+- Private repos require `installation_id` from GitHub App installation
+- Uses `GitHubAppService` for token-based authentication
 - Clones repo to server storage
 - Returns `client_id` for future requests
 
@@ -358,54 +361,57 @@ Rationale:
 **Architecture:**
 See sandbox architecture above
 
-**Implementation Pattern:**
+**Implementation Pattern (src/core/sandbox.py):**
 
 ```python
 import modal
+from ..services.github_app import GitHubAppService
 
-app = modal.App.lookup("codeevolver", create_if_missing=True)
+class SandboxApp:
+    """Manages a Modal sandbox for executing code mutations."""
 
-# Base image with common tools (user deps installed dynamically)
-BASE_IMAGE = (
-    modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git", "curl", "build-essential")
-    .pip_install("claude-agent-sdk", "gitpython", "dspy")
-)
+    @staticmethod
+    async def create(
+        app: modal.App,
+        client_id: str,
+        program_id: str,
+        repo_url: str,
+        installation_id: int | None = None,  # For private repos
+        secrets: dict[str, str] | None = None,
+    ) -> "SandboxApp":
+        # Handle private repo authentication via GitHubAppService
+        authenticated_url = repo_url
+        if installation_id:
+            token = GitHubAppService.get_installation_token(installation_id)
+            authenticated_url = GitHubAppService.get_authenticated_repo_url(repo_url, token)
 
-async def execute_in_sandbox(client_id: str, mutation: dict) -> dict:
-    # Create isolated sandbox
-    sandbox = modal.Sandbox.create(
-        app=app,
-        image=BASE_IMAGE,
-        timeout=600,
-    )
-    
+        sandbox = modal.Sandbox.create(app=app, image=get_sandbox_image(), timeout=600)
+        sandbox_app = SandboxApp(sandbox, metadata)
+
+        await sandbox_app._clone_repo(authenticated_url)
+        await sandbox_app._install_deps()
+        if secrets:
+            await sandbox_app._inject_secrets(secrets)
+
+        return sandbox_app
+
+    async def apply_code_mutation(self, change_request: str) -> MutationResult:
+        # Generate agent script that runs Claude SDK inside sandbox
+        script = generate_agent_script(self._workspace, change_request)
+        self.sandbox.exec("bash", "-c", f"cat > /tmp/agent.py << 'EOF'\n{script}\nEOF").wait()
+        p = self.sandbox.exec("python", "/tmp/agent.py")
+        p.wait()
+        return parse_agent_output(p.stdout.read(), p.stderr.read(), p.returncode)
+
+# Main entry point
+async def execute_mutation(app, client_id, program_id, repo_url, ..., installation_id=None):
+    sandbox_app = await SandboxApp.create(app, client_id, program_id, repo_url, installation_id)
     try:
-        # Clone repo and install dependencies
-        sandbox.exec("git", "clone", repo_url, "/workspace").wait()
-        sandbox.exec("bash", "-c", 
-            "cd /workspace && pip install -r requirements.txt").wait()
-        
-        # Write and run agent script INSIDE sandbox
-        # Native tools work because Claude SDK runs inside the sandbox
-        agent_script = '''
-from claude_agent_sdk import query, ClaudeAgentOptions
-
-for message in query(
-    prompt=change_request,
-    options=ClaudeAgentOptions(
-        cwd="/workspace",
-        allowed_tools=["Bash", "Read", "Edit", "Glob", "Grep"],
-        permission_mode="acceptEdits",  # Safe inside isolated sandbox
-    )
-):
-    pass
-'''
-        sandbox.exec("python", "-c", agent_script).wait()
-        
-        return {"status": "success"}
+        mutation_result = await sandbox_app.apply_code_mutation(change_request)
+        run_result = await sandbox_app.run_program(...)
+        return ExecutionResult(...)
     finally:
-        sandbox.terminate()
+        sandbox_app.terminate()
 ```
 
 **Why Sandbox over Modal Function:**
@@ -553,6 +559,7 @@ class CodeEvolverAdapter(GEPAAdapter):
 - [x] Program runner module for DSPy execution (generates runner scripts)
 - [x] System prompt module for code mutation prompts
 - [x] Removed old mutation_service.py and sandbox_executor.py (duplicates)
+- [x] Integrated GitHubAppService into sandbox.py for private repo authentication
 
 ### Pending
 - [ ] DSPy runtime integration (run_program returns placeholder)
@@ -572,7 +579,7 @@ src/
     system_prompt.py       # Prompts for coding agent
   services/                # Supporting services
     git_service.py         # Git operations (clone, worktree, commit)
-    github_app.py          # GitHub App authentication
+    github_app.py          # GitHub App authentication (used by sandbox.py)
   schemas/                 # Pydantic models
   db/                      # MongoDB integration
   config.py
@@ -582,9 +589,15 @@ modal_app.py               # Modal app entrypoint
 
 - **Modal Architecture**: FastAPI runs as Modal web endpoint. Mutations execute via `execute_in_sandbox()` which calls `src.core.execute_mutation()`.
 - **SandboxApp Pattern**: Similar to modal-vibe's `SandboxApp`, manages sandbox lifecycle: create -> clone -> install -> mutate -> run -> terminate.
+- **Private Repo Authentication**: `SandboxApp.create()` accepts optional `installation_id` parameter. When provided, uses `GitHubAppService.get_installation_token()` and `get_authenticated_repo_url()` to clone private repositories.
 - **Agent Scripts**: Code mutations generate Python scripts that run Claude Agent SDK inside the sandbox, where native tools work via subprocess.
 - **Git Worktrees**: Using GitPython's `git.worktree` commands. Each program gets its own worktree directory at `{workspace_root}/{client_id}/{program_id}/`
 - **Prompt Mutations**: Directly edit `signature.instructions` in program.json via `apply_prompt_mutation()`, then commit
 - **Code Mutations**: Generate and execute agent scripts in sandbox (requires Modal deployment)
 - **Program Execution**: Generates runner scripts for DSPy execution (placeholder until DSPy integration)
 - **Local Development**: Use `modal serve modal_app.py` for dev, `modal deploy modal_app.py` for production
+
+**Service Integration:**
+- `src/core/sandbox.py` imports and uses `GitHubAppService` from `src/services/github_app.py`
+- `src/services/git_service.py` handles local git operations (clone, worktree, commit) for the FastAPI layer
+- Both services share the same authentication pattern for private repos via GitHub App tokens

@@ -84,6 +84,7 @@ def get_sandbox_image() -> modal.Image:
             "gitpython>=3.1.0",
             "dspy>=2.5.0",
             "claude-agent-sdk>=0.1.21",
+            "anyio>=4.0.0",
         )
     )
 
@@ -125,6 +126,7 @@ class SandboxApp:
         timeout: int = 600,
         cpu: int = 2,
         memory: int = 4096,
+        branch_name: str | None = None,
     ) -> "SandboxApp":
         """
         Create a new sandbox and clone the repository.
@@ -142,6 +144,7 @@ class SandboxApp:
             timeout: Sandbox timeout in seconds
             cpu: CPU allocation
             memory: Memory allocation in MB
+            branch_name: Optional branch name to checkout/create after cloning
 
         Returns:
             SandboxApp instance ready for mutation
@@ -150,8 +153,10 @@ class SandboxApp:
             ValueError: If private repo authentication fails
         """
         # Handle authentication for private repositories
+        print(f"[SANDBOX.create] Starting sandbox creation...")
         authenticated_url = repo_url
         if installation_id:
+            print(f"[SANDBOX.create] Getting installation token for {installation_id}...")
             token = GitHubAppService.get_installation_token(installation_id)
             if not token:
                 raise ValueError(
@@ -160,7 +165,9 @@ class SandboxApp:
             authenticated_url = GitHubAppService.get_authenticated_repo_url(
                 repo_url, token
             )
+            print(f"[SANDBOX.create] Got authenticated URL")
 
+        print(f"[SANDBOX.create] Creating Modal sandbox...")
         sandbox = modal.Sandbox.create(
             app=app,
             image=get_sandbox_image(),
@@ -168,6 +175,7 @@ class SandboxApp:
             cpu=cpu,
             memory=memory,
         )
+        print(f"[SANDBOX.create] Modal sandbox created")
 
         metadata = SandboxMetadata(
             sandbox_id=sandbox.object_id,
@@ -179,15 +187,27 @@ class SandboxApp:
         sandbox_app = SandboxApp(sandbox, metadata)
 
         # Clone repository (uses authenticated URL if private)
+        print(f"[SANDBOX.create] Cloning repository...")
         await sandbox_app._clone_repo(authenticated_url)
+        print(f"[SANDBOX.create] Repository cloned")
+
+        # Checkout/create branch if specified
+        if branch_name:
+            print(f"[SANDBOX.create] Checking out branch: {branch_name}")
+            await sandbox_app.checkout_branch(branch_name, create=True)
+            print(f"[SANDBOX.create] Branch checked out")
 
         # Install dependencies
+        print(f"[SANDBOX.create] Installing dependencies...")
         await sandbox_app._install_deps()
+        print(f"[SANDBOX.create] Dependencies installed")
 
         # Inject secrets
         if secrets:
+            print(f"[SANDBOX.create] Injecting secrets...")
             await sandbox_app._inject_secrets(secrets)
 
+        print(f"[SANDBOX.create] Sandbox setup complete")
         return sandbox_app
 
     async def _clone_repo(self, repo_url: str) -> None:
@@ -307,16 +327,19 @@ class SandboxApp:
         Returns:
             MutationResult with status
         """
+        print(f"[apply_code_mutation] Starting code mutation...")
         self.metadata.status = SandboxStatus.MUTATING
         self.metadata.updated_at = datetime.now()
 
         # Generate and write the agent script
+        print(f"[apply_code_mutation] Generating agent script...")
         script = generate_agent_script(
             workspace_path=self._workspace,
             change_request=change_request,
             change_location=change_location,
         )
 
+        print(f"[apply_code_mutation] Writing agent script to sandbox...")
         self.sandbox.exec(
             "bash",
             "-c",
@@ -324,11 +347,15 @@ class SandboxApp:
         ).wait()
 
         # Run the agent
+        print(f"[apply_code_mutation] Running Claude agent (this may take a few minutes)...")
         p = self.sandbox.exec("python", "/tmp/agent_script.py")
         p.wait()
 
         stdout = p.stdout.read()
         stderr = p.stderr.read()
+        print(f"[apply_code_mutation] Agent finished. Return code: {p.returncode}")
+        if stderr:
+            print(f"[apply_code_mutation] Stderr: {stderr[:500]}...")
         result = parse_agent_output(stdout, stderr, p.returncode)
 
         if not result.success:
@@ -411,6 +438,46 @@ class SandboxApp:
         except Exception as e:
             self.metadata.error = f"Failed to terminate: {e}"
 
+    async def checkout_branch(self, branch_name: str, create: bool = True) -> None:
+        """
+        Checkout or create a branch.
+
+        Args:
+            branch_name: Name of the branch to checkout
+            create: If True, create the branch if it doesn't exist
+        """
+        if create:
+            # Create and checkout new branch
+            p = self.sandbox.exec(
+                "git", "-C", self._workspace, "checkout", "-b", branch_name
+            )
+        else:
+            # Just checkout existing branch
+            p = self.sandbox.exec(
+                "git", "-C", self._workspace, "checkout", branch_name
+            )
+        p.wait()
+
+        if p.returncode != 0:
+            stderr = p.stderr.read()
+            raise RuntimeError(f"Failed to checkout branch {branch_name}: {stderr}")
+
+    async def push_to_remote(self, branch_name: str) -> None:
+        """
+        Push the current branch to remote.
+
+        Args:
+            branch_name: Name of the branch to push
+        """
+        p = self.sandbox.exec(
+            "git", "-C", self._workspace, "push", "-u", "origin", branch_name
+        )
+        p.wait()
+
+        if p.returncode != 0:
+            stderr = p.stderr.read()
+            raise RuntimeError(f"Failed to push to remote: {stderr}")
+
 
 async def execute_mutation(
     app: modal.App,
@@ -427,6 +494,9 @@ async def execute_mutation(
     capture_traces: bool = False,
     secrets: dict[str, str] | None = None,
     installation_id: int | None = None,
+    skip_program_run: bool = False,
+    branch_name: str | None = None,
+    push_to_remote: bool = False,
 ) -> ExecutionResult:
     """
     Execute a complete mutation workflow in a sandbox.
@@ -449,6 +519,9 @@ async def execute_mutation(
         capture_traces: Whether to capture traces
         secrets: Secrets to inject
         installation_id: Optional GitHub App installation ID for private repos
+        skip_program_run: If True, skip running the DSPy program (code-only mode)
+        branch_name: Optional branch name to use (otherwise auto-generated)
+        push_to_remote: If True, push changes to remote after mutation
 
     Returns:
         ExecutionResult with all outputs
@@ -456,6 +529,9 @@ async def execute_mutation(
     sandbox_app = None
 
     try:
+        print(f"[SANDBOX] Creating sandbox for {repo_url}...")
+        print(f"[SANDBOX] Branch: {branch_name}, Installation ID: {installation_id}")
+
         # Create sandbox and clone repo (handles private repo auth via GitHubAppService)
         sandbox_app = await SandboxApp.create(
             app=app,
@@ -464,7 +540,9 @@ async def execute_mutation(
             repo_url=repo_url,
             installation_id=installation_id,
             secrets=secrets,
+            branch_name=branch_name,
         )
+        print(f"[SANDBOX] Sandbox created successfully")
 
         # Apply mutation
         if mutation_type == "prompt":
@@ -484,9 +562,11 @@ async def execute_mutation(
                     program_id=program_id,
                     error="change_request required for code mutation",
                 )
+            print(f"[SANDBOX] Applying code mutation...")
             mutation_result = await sandbox_app.apply_code_mutation(
                 change_request, change_location
             )
+            print(f"[SANDBOX] Code mutation result: success={mutation_result.success}")
         else:
             return ExecutionResult(
                 status="failed",
@@ -499,6 +579,22 @@ async def execute_mutation(
                 status="failed",
                 program_id=program_id,
                 error=mutation_result.error,
+            )
+
+        # Push to remote if requested
+        actual_branch_name = branch_name or f"program_{program_id}"
+        if push_to_remote:
+            print(f"[SANDBOX] Pushing to remote branch: {actual_branch_name}...")
+            await sandbox_app.push_to_remote(actual_branch_name)
+            print(f"[SANDBOX] Push completed")
+
+        # Skip program run if requested (code-only mode)
+        if skip_program_run:
+            return ExecutionResult(
+                status="success",
+                program_id=program_id,
+                program_json=mutation_result.program_json,
+                branch_name=actual_branch_name,
             )
 
         # Run program on test examples
@@ -518,6 +614,7 @@ async def execute_mutation(
                 for o in run_result.outputs
             ],
             traces=run_result.traces,
+            branch_name=actual_branch_name,
             error=run_result.error,
         )
 

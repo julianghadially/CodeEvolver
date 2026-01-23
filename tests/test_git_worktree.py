@@ -266,3 +266,4 @@ class TestGitServiceUnit:
         assert path == tmp_path / client_id / "main"
 
         settings.workspace_root = original_root
+
