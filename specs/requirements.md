@@ -291,10 +291,12 @@ Key mutation targets:
 Executes the actual code/prompt changes using Claude Agents SDK.
 
 **SDK Details** (from research):
+- **Requires Claude Code CLI** - The Python SDK (`claude-agent-sdk`) is a wrapper that spawns the Claude Code CLI (`@anthropic-ai/claude-code`) as a subprocess. Both must be installed.
 - **Requires files on disk** - cannot work with in-memory files
 - **API Access**: Use `query()` or `ClaudeSDKClient` from `claude_agent_sdk`
 - **Concurrent execution**: Each agent needs its own `cwd` (working directory)
-- **Permission mode**: `acceptEdits` for autonomous code modifications
+- **Permission mode**: `acceptEdits` for autonomous code modifications (no human prompts)
+- **Tools available**: Read, Write, Edit, Bash, Glob, Grep (Write for new files, Edit for existing)
 
 **Implementation Pattern**:
 ```python
@@ -563,8 +565,23 @@ class CodeEvolverAdapter(GEPAAdapter):
 
 ### Pending
 - [ ] DSPy runtime integration (run_program returns placeholder)
-- [ ] Test Claude Agents SDK execution in Modal Sandbox
 - [ ] End-to-end testing of code mutations
+
+### Implementation Notes (v0.2.1)
+**Claude Agent SDK Architecture:**
+The Claude Agent SDK is a Python wrapper around the Claude Code CLI. The SDK spawns the CLI as a subprocess, which connects to the Anthropic API and manages the agentic loop.
+
+```
+Your Code (Python) → claude-agent-sdk (pip) → Claude Code CLI (npm) → Anthropic API
+```
+
+**Required installations in sandbox:**
+1. `npm install -g @anthropic-ai/claude-code` - The actual coding agent
+2. `pip install claude-agent-sdk` - Python wrapper for programmatic access
+
+**Permission modes for autonomous operation:**
+- `acceptEdits` - Auto-accepts file edits, logs actions (recommended)
+- `bypassPermissions` - Full autonomy, bypasses all checks (use with caution)
 
 ### Implementation Notes
 

@@ -292,7 +292,7 @@ async def debug_secrets():
         "env_vars_present": {
             "CODEEVOLVER_GITHUB_APP_PRIVATE_KEY": bool(raw_key),
             "GITHUB_TEST_INSTALLATION_ID": os.getenv("GITHUB_TEST_INSTALLATION_ID"),
-            "CLAUDE_KEY": bool(os.getenv("CLAUDE_KEY"))
+            "ANTHROPIC_API_KEY": bool(os.getenv("ANTHROPIC_API_KEY"))
         }
     }
 

@@ -76,10 +76,18 @@ class ExecutionResult:
 
 # Base image for sandbox execution
 def get_sandbox_image() -> modal.Image:
-    """Get the Modal image for sandbox execution."""
+    """Get the Modal image for sandbox execution.
+
+    IMPORTANT: The Claude Agent SDK requires the Claude Code CLI (Node.js)
+    to be installed. The Python SDK is just a wrapper that spawns the CLI.
+    """
     return (
         modal.Image.debian_slim(python_version="3.11")
-        .apt_install("git", "curl", "build-essential")
+        .apt_install("git", "curl", "build-essential", "nodejs", "npm")
+        .run_commands(
+            # Install Claude Code CLI globally
+            "npm install -g @anthropic-ai/claude-code",
+        )
         .pip_install(
             "gitpython>=3.1.0",
             "dspy>=2.5.0",
@@ -354,8 +362,16 @@ class SandboxApp:
         stdout = p.stdout.read()
         stderr = p.stderr.read()
         print(f"[apply_code_mutation] Agent finished. Return code: {p.returncode}")
+
+        # Log agent output for debugging
+        if stdout:
+            print(f"[apply_code_mutation] Agent output:")
+            for line in stdout.split("\n"):
+                if line.strip():
+                    print(f"  {line}")
         if stderr:
-            print(f"[apply_code_mutation] Stderr: {stderr[:500]}...")
+            print(f"[apply_code_mutation] Stderr: {stderr[:1000]}")
+
         result = parse_agent_output(stdout, stderr, p.returncode)
 
         if not result.success:

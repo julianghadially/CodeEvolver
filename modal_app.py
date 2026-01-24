@@ -41,9 +41,16 @@ web_image = (
 # Base image for sandbox execution (Claude Agent SDK + DSPy)
 # This is used by SandboxApp.create() from src/core/sandbox.py
 # Includes httpx and pyjwt for GitHubAppService authentication
+#
+# IMPORTANT: The Claude Agent SDK requires the Claude Code CLI (Node.js)
+# to be installed. The Python SDK is just a wrapper that spawns the CLI.
 sandbox_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git", "curl", "build-essential")
+    .apt_install("git", "curl", "build-essential", "nodejs", "npm")
+    .run_commands(
+        # Install Claude Code CLI globally - required for claude-agent-sdk
+        "npm install -g @anthropic-ai/claude-code",
+    )
     .pip_install(
         "gitpython>=3.1.0",
         "dspy>=2.5.0",
@@ -146,8 +153,8 @@ async def execute_in_sandbox(
 
     # Build secrets dict from environment
     secrets = {}
-    if os.getenv("CLAUDE_KEY"):
-        secrets["CLAUDE_KEY"] = os.getenv("CLAUDE_KEY")
+    if os.getenv("ANTHROPIC_API_KEY"):
+        secrets["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY")
     if os.getenv("OPENAI_KEY"):
         secrets["OPENAI_KEY"] = os.getenv("OPENAI_KEY")
 
