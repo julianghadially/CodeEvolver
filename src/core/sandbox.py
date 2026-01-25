@@ -4,9 +4,9 @@ Inspired by modal-vibe's SandboxApp pattern, but adapted for
 autonomous code mutations and DSPy program execution.
 
 Uses GitHubAppService for private repository authentication.
+Uses SandboxGitService for git operations within the sandbox.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -24,6 +24,7 @@ from .program_runner import (
     save_program_json,
 )
 from ..services.github_app import GitHubAppService
+from ..services.git_sandbox import SandboxGitService, clone_repository
 
 
 class SandboxStatus(str, Enum):
@@ -107,6 +108,8 @@ class SandboxApp:
     3. Applying mutations (prompt or code)
     4. Running the DSPy program
     5. Returning results
+
+    Uses SandboxGitService for all git operations.
     """
 
     def __init__(
@@ -117,11 +120,20 @@ class SandboxApp:
         self.sandbox = sandbox
         self.metadata = metadata
         self._workspace = "/workspace"
+        # Git service initialized after clone (needs workspace to exist)
+        self._git: SandboxGitService | None = None
 
     @property
     def id(self) -> str:
         """Get the sandbox ID."""
         return self.metadata.sandbox_id
+
+    @property
+    def git(self) -> SandboxGitService:
+        """Get the git service for this sandbox."""
+        if self._git is None:
+            self._git = SandboxGitService(self.sandbox, self._workspace)
+        return self._git
 
     @staticmethod
     async def create(
@@ -223,13 +235,17 @@ class SandboxApp:
         self.metadata.status = SandboxStatus.CLONING
         self.metadata.updated_at = datetime.now()
 
-        p = self.sandbox.exec("git", "clone", repo_url, self._workspace)
-        p.wait()
-
-        if p.returncode != 0:
+        # Clone using the standalone function (workspace doesn't exist yet)
+        result = clone_repository(self.sandbox, repo_url, self._workspace)
+        if not result.success:
             self.metadata.status = SandboxStatus.FAILED
-            self.metadata.error = f"Git clone failed: {p.stderr.read()}"
+            self.metadata.error = f"Git clone failed: {result.stderr}"
             raise RuntimeError(self.metadata.error)
+
+        # Configure git user for commits (required for git commit to work)
+        config_result = self.git.configure_user()
+        if not config_result.success:
+            print(f"[_clone_repo] Warning: Failed to configure git user: {config_result.stderr}")
 
     async def _install_deps(self) -> None:
         """Install dependencies if requirements.txt exists."""
@@ -307,16 +323,16 @@ class SandboxApp:
             f"cat > {full_path} << 'EOFPROGRAMJSON'\n{modified_json}\nEOFPROGRAMJSON",
         ).wait()
 
-        # Commit changes
-        self.sandbox.exec("git", "-C", self._workspace, "add", "-A").wait()
-        self.sandbox.exec(
-            "git",
-            "-C",
-            self._workspace,
-            "commit",
-            "-m",
-            f"Apply prompt mutation for program {self.metadata.program_id}",
-        ).wait()
+        # Commit changes using git service
+        commit_result = self.git.stage_and_commit(
+            f"Apply prompt mutation for program {self.metadata.program_id}"
+        )
+        if not commit_result.success:
+            return MutationResult(
+                success=False,
+                error=f"Git commit failed: {commit_result.stderr}",
+                program_json=program_json,
+            )
 
         return MutationResult(success=True, program_json=program_json)
 
@@ -377,16 +393,24 @@ class SandboxApp:
         if not result.success:
             return MutationResult(success=False, error=result.error)
 
-        # Commit changes made by the agent
-        self.sandbox.exec("git", "-C", self._workspace, "add", "-A").wait()
-        self.sandbox.exec(
-            "git",
-            "-C",
-            self._workspace,
-            "commit",
-            "-m",
-            f"Apply code mutation for program {self.metadata.program_id}: {change_request[:50]}...",
-        ).wait()
+        # Commit changes made by the agent using git service
+        print(f"[apply_code_mutation] Committing changes via git service...")
+        commit_msg = f"Apply code mutation for program {self.metadata.program_id}: {change_request[:50]}..."
+        commit_result = self.git.stage_and_commit(commit_msg)
+
+        if not commit_result.success:
+            return MutationResult(
+                success=False,
+                error=f"Git commit failed: {commit_result.stderr}",
+            )
+
+        # Check if there were actually changes (stage_and_commit returns success even if no changes)
+        if "no changes" in commit_result.operation:
+            print(f"[apply_code_mutation] WARNING: No changes to commit!")
+            return MutationResult(success=True, error="No changes were made by the agent")
+
+        # Verify commit was created
+        self.git.log_recent(1)
 
         return MutationResult(success=True)
 
@@ -462,21 +486,9 @@ class SandboxApp:
             branch_name: Name of the branch to checkout
             create: If True, create the branch if it doesn't exist
         """
-        if create:
-            # Create and checkout new branch
-            p = self.sandbox.exec(
-                "git", "-C", self._workspace, "checkout", "-b", branch_name
-            )
-        else:
-            # Just checkout existing branch
-            p = self.sandbox.exec(
-                "git", "-C", self._workspace, "checkout", branch_name
-            )
-        p.wait()
-
-        if p.returncode != 0:
-            stderr = p.stderr.read()
-            raise RuntimeError(f"Failed to checkout branch {branch_name}: {stderr}")
+        result = self.git.checkout(branch_name, create=create)
+        if not result.success:
+            raise RuntimeError(f"Failed to checkout branch {branch_name}: {result.stderr}")
 
     async def push_to_remote(self, branch_name: str) -> None:
         """
@@ -485,14 +497,15 @@ class SandboxApp:
         Args:
             branch_name: Name of the branch to push
         """
-        p = self.sandbox.exec(
-            "git", "-C", self._workspace, "push", "-u", "origin", branch_name
-        )
-        p.wait()
+        # Show what we're about to push
+        print(f"[push_to_remote] Preparing to push to origin/{branch_name}...")
+        self.git.log_recent(3)
+        self.git.status_short()
 
-        if p.returncode != 0:
-            stderr = p.stderr.read()
-            raise RuntimeError(f"Failed to push to remote: {stderr}")
+        # Push
+        result = self.git.push(branch_name)
+        if not result.success:
+            raise RuntimeError(f"Failed to push to remote: {result.stderr}")
 
 
 async def execute_mutation(

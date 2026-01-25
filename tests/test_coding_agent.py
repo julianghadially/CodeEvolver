@@ -112,7 +112,8 @@ class TestCodingAgent:
         print(f"{'='*60}\n")
 
         # First, check that the Modal app is reachable
-        async with httpx.AsyncClient(timeout=600.0) as client:
+        # Note: follow_redirects=True is needed because Modal may return 303 redirects
+        async with httpx.AsyncClient(timeout=600.0, follow_redirects=True) as client:
             # Health check
             try:
                 health_response = await client.get(f"{modal_url}/health")

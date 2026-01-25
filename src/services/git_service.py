@@ -1,4 +1,8 @@
-"""Git operations service for cloning and managing repositories."""
+"""Git operations service for cloning and managing repositories.
+
+See git_sandbox.py for CLI git commands
+See github_app.py for private repository authentication
+"""
 
 import shutil
 from pathlib import Path
