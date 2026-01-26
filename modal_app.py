@@ -190,6 +190,126 @@ async def execute_in_sandbox(
     }
 
 
+# Image for GEPA optimization (DSPy, litellm, pymongo, gepa)
+# Uses pymongo (sync) because GEPA's optimize() loop is synchronous.
+gepa_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git")
+    .pip_install(
+        "pymongo>=4.6.0",
+        "pydantic-settings>=2.6.0",
+        "gitpython>=3.1.0",
+        "dspy>=2.5.0",
+        "litellm>=1.64.0",
+        "httpx>=0.27.0",
+        "pyjwt[cryptography]>=2.8.0",
+        "tqdm>=4.66.1",
+    )
+    # Development: install GEPA from local source
+    # Production: replace with .pip_install("gepa @ git+https://github.com/<org>/GEPA-CodeEvolver.git")
+    .add_local_dir(
+        "/Users/julianghadially/Documents/0. Fine Tuning as a Service/2. Product/GEPA-CodeEvolver",
+        remote_path="/gepa-src",
+    )
+    .run_commands("pip install -e /gepa-src")
+    .add_local_dir(".", remote_path="/app")
+)
+
+
+@app.function(
+    image=gepa_image,
+    volumes={"/workspaces": workspaces_volume},
+    secrets=[modal.Secret.from_name("codeevolver-secrets")],
+    timeout=3600,
+    cpu=4,
+    memory=8192,
+)
+def run_optimization(
+    job_id: str,
+    repo_url: str,
+    program_json_path: str,
+    entry_point: str,
+    metric_path: str,
+    metric_fn_name: str,
+    trainset_json: list,
+    valset_json: list | None = None,
+    task_lm: str = "openai/gpt-5-mini",
+    reflection_lm: str = "openai/gpt-5-mini",
+    max_metric_calls: int = 1000,
+    installation_id: int | None = None,
+    input_keys: list[str] | None = None,
+    num_threads: int = 1,
+    seed: int = 0,
+) -> dict:
+    """Run GEPA optimization in a dedicated Modal function.
+
+    This is a long-running synchronous function. GEPA's optimize() blocks
+    until completion, cancellation, or budget exhaustion.
+    """
+    import os
+    import subprocess
+    import sys
+
+    sys.path.insert(0, "/app")
+    os.chdir("/app")
+
+    from src.config import settings
+    from src.services.github_app import GitHubAppService
+
+    # Clone repo to workspace
+    workspace_path = f"/workspaces/gepa_{job_id}/main"
+    os.makedirs(f"/workspaces/gepa_{job_id}", exist_ok=True)
+
+    # Handle private repo authentication
+    authenticated_url = repo_url
+    if installation_id:
+        token = GitHubAppService.get_installation_token(installation_id)
+        if token:
+            authenticated_url = GitHubAppService.get_authenticated_repo_url(
+                repo_url, token
+            )
+
+    # Clone
+    subprocess.run(
+        ["git", "clone", authenticated_url, workspace_path],
+        check=True,
+    )
+
+    # Install user's requirements.txt if present
+    req_path = os.path.join(workspace_path, "requirements.txt")
+    if os.path.exists(req_path):
+        subprocess.run(
+            ["pip", "install", "-r", req_path],
+            check=True,
+        )
+
+    # API keys are already available via Modal secrets in the environment
+    from src.gepa.optimizer import run_gepa_optimization
+
+    mongodb_url = os.getenv("CODEEVOLVER_MONGODB_URL", settings.mongodb_url)
+
+    result = run_gepa_optimization(
+        job_id=job_id,
+        workspace_path=workspace_path,
+        program_json_path=program_json_path,
+        entry_point=entry_point,
+        metric_path=metric_path,
+        metric_fn_name=metric_fn_name,
+        trainset_json=trainset_json,
+        valset_json=valset_json,
+        task_lm=task_lm,
+        reflection_lm=reflection_lm,
+        max_metric_calls=max_metric_calls,
+        mongodb_url=mongodb_url,
+        database_name=settings.database_name,
+        input_keys=input_keys,
+        num_threads=num_threads,
+        seed=seed,
+    )
+
+    return result
+
+
 @app.local_entrypoint()
 def main():
     """Local entrypoint for testing."""

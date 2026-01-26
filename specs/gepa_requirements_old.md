@@ -1,5 +1,6 @@
-# GEPA Integration Requirements
+# GEPA Integration Requirements (Old)
 
+Do not use this file. Use the gepa_plan.md.
 ## Overview
 
 CodeEvolver integrates GEPA (Genetic-Pareto) for optimizing AI workflows. We will **fork** gepa-ai/gepa and extend it with tool-augmented reflection and code mutation support.

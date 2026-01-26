@@ -27,8 +27,13 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     
     # GitHub App authentication (for private repositories)
-    github_app_id: str = "2671751" 
+    github_app_id: str = "2671751"
     github_app_private_key: Optional[str] = None  # PEM format, can be base64 encoded or raw
+
+    # GEPA optimization settings
+    gepa_optimization_timeout: int = 3600  # 1 hour default
+    gepa_optimization_cpu: int = 4
+    gepa_optimization_memory: int = 8192  # MB
 
     model_config = {"env_prefix": "CODEEVOLVER_"}
     

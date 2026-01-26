@@ -1,7 +1,7 @@
 # Requirements
 
 ## Overview
-CodeEvolver offers autonomous coding agents for turning static code into self-improving code for AI workflows. 
+CodeEvolver offers autonomous coding agents for high reliability AI systems. It uses GEPA optimization to evolve your AI system code until it performs optimally for a given dataset and outcome metric.
 
 This combines several mechanisms:
 - **Optimizer algorithm:** GEPA is a reflective language model algorithm that makes point mutations to the code base, over many iterations, and the best solution is selected, based on a dataset and a reward metric.
@@ -10,7 +10,7 @@ This combines several mechanisms:
 - **Sandboxing for security:** Coding agents are a big cyber risk without sandboxing, network policies, etc. 
 
 ### Optimizer
-The optimizer is handled by a separate repository, which will later be loaded into this repository. Assume code change requests come in the format shown in specs/change_request_payload.json.
+The optimizer is handled by a separate repository, which will later be loaded into this repository, as defined by specs/gepa_plan.md. This repository will create a /optimize endpoint to run GEPA optimization orchestration, and Will interface with that package as defined in gepa_plan.md. 
 
 ### Coding Agents
 CodeEvolver agents uses Claude Agents SDK in a fully autonomous, dangerously-skip-permissions mode, which uses a Modal sandbox execution environment for modifying code, running code, and executing bash / grep / glob. After code changes are made, the app needs to run a mutated version of the code, and return the output. 
@@ -28,9 +28,10 @@ Security should be designed for from day one, because autonomous coding agents i
 
 See security architecture below.
 
-## V1 outcomes (for Rostam):
-- Connect a GitHub repository
-- Execute a change request
+## V1 outcomes (current goal):
+- Connect a GitHub repository [complete]
+- Execute a change request [complete]
+- GEPA optimizer runs in CodeEvolver [WIP]
 - Complete v1 of security: (see for v1 below)
 - API / sandbox deployed to Modal App
 
@@ -140,6 +141,10 @@ See security architecture below.
 - No egress proxy (temp)
 - Use env for secrets (temp)
 
+### Privacy
+- Future: Option for users to run execution environment on their own private cloud
+- No unnecessary third-party services. Necessary third parties include modal.
+
 
 -------------------------------------------------------------------------
 
@@ -151,6 +156,33 @@ Below this line is an ongoing, workspace for Claude / AI coding agents. Do not e
 ## Components
 
 ### API (FastAPI served by Modal app)
+
+### POST /optimize API (CodeEvolver endpoint)
+
+**Request:**
+```json
+{
+  "repo_url": "https://github.com/user/project",
+  "program_json_path": "path/to/program.json",
+  "entry_point": "module.ClassName",
+  "dataset": [...],
+  "config": {
+    "num_iterations": 100,
+    "batch_size": 10,
+    "mutation_type": "prompt | code | both"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "status": "completed",
+  "best_candidate": {"git_branch": "...", "module_1.predict": "..."},
+  "best_score": 0.92,
+  "logs_url": "..."
+}
+```
 
 #### POST /execute_step
 Receives a change request from GEPA optimization as input, and executes that single optimization step: applies a mutation, runs the program, returns output for GEPA reward calculation.
@@ -238,26 +270,46 @@ Registers a client repository. Minimal payload - paths provided per-request in `
 - Clones repo to server storage
 - Returns `client_id` for future requests
 
-#### GET /program/{program_id}
-Retrieves program details and `program_json`.
+#### GET /job/{job_id}
+Retrieves job status, progress, and current best candidate.
 
-### Program Database (MongoDB)
-Stores all program versions and their optimized prompts.
+**Response**:
+```json
+{
+  "job_id": "string",
+  "status": "running | completed | failed | paused",
+  "current_iteration": 42,
+  "total_iterations": 100,
+  "best_candidate": {"git_branch": "...", "module_1.predict": "..."},
+  "best_score": 0.87,
+  "created_at": "2026-01-26T...",
+  "updated_at": "2026-01-26T..."
+}
+```
+
+### Job Database (MongoDB)
+Stores optimization jobs with GEPAState for resumption and coordination. Individual program candidates live inside `gepa_state.program_candidates`.
 
 | Field | Description |
 |-------|-------------|
-| `client_id` | Internal client identifier |
-| `program_id` | Unique program version identifier |
-| `parent_program_id` | Parent program(s) - 1 for mutation, 2 for crossover |
-| `program_json` | DSPy optimized program JSON (see `specs/example_program.json`) |
-| `branch_name` | Git branch for this program version |
-| `created_at` | Timestamp |
-| `status` | pending / in_progress / completed / failed |
+| `job_id` | Unique optimization job identifier |
+| `client_id` | Client identifier |
+| `repo_url` | Repository being optimized |
+| `config` | Job configuration (iterations, batch_size, mutation_type, etc.) |
+| `status` | `pending` / `running` / `completed` / `failed` / `paused` |
+| `gepa_state` | Full GEPAState object (for resumption) |
+| `current_iteration` | Progress tracking |
+| `best_candidate` | Current best candidate (denormalized for quick access) |
+| `best_score` | Current best score |
+| `created_at` | Job creation timestamp |
+| `updated_at` | Last state update timestamp |
 
-**Purpose**: Centralizes prompt changes for direct editing by external optimizer (GEPA).
+**State Persistence**: GEPAState saved every iteration to enable job resumption after failures.
+
+**Purpose**: Enables long-running optimization jobs to survive failures and coordinate across servers. Final GEPAState returned to client on completion.
 
 ### DSPy Program JSON Structure
-The `program_json` is the serialized output of DSPy's `program.save()`. Structure:
+The `program_json` is the serialized output of DSPy's `program.save()`. It is created from the GEPA state candidates by using adapter.build_program(). Program JSON Format:
 
 ```json
 {
@@ -443,97 +495,29 @@ Handles version control for code mutations.
 - For 2-parent crossover: merge strategy TBD
 - Can be handled by auto-coder agent or separate bot
 
-## External Integration
+## GEPA Integration
+GEPA orchestrates the evolutionary optimization. Runs on this service via /optimize.
 
-### GEPA Integration (gepa-ai/gepa)
-GEPA orchestrates the evolutionary optimization. Currently runs on client machine, will eventually run fully on this service.
+**GEPA Plan**: see specs/gepa_plan.md
 
-**GEPA Architecture** (from codebase analysis):
-- Uses `GEPAAdapter` protocol for program execution
-- **Candidate format**: `dict[str, str]` mapping component names → instruction text
-- DSPy programs wrapped via `DspyAdapter` which calls `named_predictors()`
-- Pareto frontier tracks best programs per validation instance
-- Mutations selected from frontier programs (may span different branches)
+### Mutation Types
 
-**Integration Pattern - CodeEvolverAdapter**:
-GEPA will use a custom adapter that calls our API:
-
-```python
-class CodeEvolverAdapter(GEPAAdapter):
-    def __init__(self, api_endpoint: str, client_id: str,
-                 program_json_path: str, entry_point: str, metric_fn):
-        self.api_endpoint = api_endpoint
-        self.client_id = client_id
-        self.program_json_path = program_json_path
-        self.entry_point = entry_point
-        self.metric_fn = metric_fn  # Scoring done client-side
-
-    def evaluate(
-        self,
-        batch: list[Example],
-        candidate: dict[str, str],
-        capture_traces: bool = False,
-    ) -> EvaluationBatch:
-        response = requests.post(
-            f"{self.api_endpoint}/execute_step",
-            json={
-                "client_id": self.client_id,
-                "program_id": generate_program_id(),
-                "parent_program_id": self.current_parent_id,
-                "mutation_type": "prompt",
-                "program_json_path": self.program_json_path,
-                "entry_point": self.entry_point,
-                "candidate": candidate,
-                "test_examples": [ex.toDict() for ex in batch],
-                "capture_traces": capture_traces
-            }
-        )
-        result = response.json()
-
-        # Scores computed client-side by GEPA
-        outputs = result["pipeline_outputs"]
-        scores = [self.metric_fn(ex, out) for ex, out in zip(batch, outputs)]
-
-        return EvaluationBatch(
-            outputs=outputs,
-            scores=scores,
-            trajectories=result.get("traces")
-        )
-```
-
-**Communication Flow**:
-1. GEPA runs locally (for now), selects candidate from Pareto frontier
-2. GEPA calls `/execute_step` with candidate + test examples
-3. CodeEvolver service: spins up environment, applies mutation, runs program
-4. Returns `pipeline_outputs` → GEPA computes reward with ground truth labels
-5. GEPA updates Pareto frontier, selects next mutation
-
-**Future**: GEPA runs entirely on CodeEvolver service (once mutation logic is finalized)
-
-## Mutation Types
-
-### Prompt Mutations (most common)
+#### Prompt Mutations (most common)
 - Edit `signature.instructions` in `program_json` for specific components
 - GEPA sends candidate as `dict[str, str]`: `{"component_name": "new instruction text"}`
-- Still requires code checkout to run the program after mutation
-- Example: `{"fire_judge.judge.predict": "You are a fact-checking judge. Be more conservative..."}`
+- Still requires code checkout to run the correct program branch after mutation
 
-### Code Mutations (less common)
+#### Code Mutations
 - Edit Python DSPy module code in repository (add modules, change structure)
 - Requires Claude agent to understand and modify code
 - Creates new branch, commits changes
 - Example: "Add a sub-module that searches company websites before classification"
 
-## Performance Requirements
+### GEPA Performance Requirements
 - Optimization runs are slow, so parallelization is critical
-- Target: 20 mutations tested simultaneously per user
+- Target: 10 mutations tested simultaneously per user
 - Environment spin-up: <10 seconds
 - Prompt mutations should be near-instant (DB-only path)
-
-## Privacy Considerations
-- Minimize data hops: User → Our Server → Claude → Execution Env
-- Future: Option for users to run execution environment on their own infrastructure
-- No unnecessary third-party services
 
 
 ## Other Requirements
@@ -546,7 +530,7 @@ class CodeEvolverAdapter(GEPAAdapter):
 ### Completed (v0.1.0)
 - [x] POST /connect-git - Clone repository and register client
 - [x] POST /execute_step - Apply mutations (prompt only), run program (placeholder)
-- [x] GET /program/{program_id} - Retrieve program details
+- [ ] GET /job/{job_id} - Retrieve job status and best candidate
 - [x] GET /health - Health check
 - [x] MongoDB integration with Motor (async)
 - [x] Git worktree management for parallel branches
@@ -562,10 +546,24 @@ class CodeEvolverAdapter(GEPAAdapter):
 - [x] System prompt module for code mutation prompts
 - [x] Removed old mutation_service.py and sandbox_executor.py (duplicates)
 - [x] Integrated GitHubAppService into sandbox.py for private repo authentication
+- [x] Successfully tested single code mutations
+
+### Completed (v0.3.0 - GEPA Integration)
+- [x] CodeEvolverDSPyAdapter implementing GEPAAdapter protocol (src/gepa/adapter.py)
+- [x] MongoDBProgressTracker for per-iteration state persistence (src/gepa/progress.py)
+- [x] GEPA optimization orchestrator (src/gepa/optimizer.py)
+- [x] POST /optimize endpoint - starts GEPA optimization job
+- [x] GET /job/{job_id} endpoint - returns job status and progress
+- [x] Job schemas (OptimizeRequest, JobStatusResponse, JobRecord)
+- [x] Modal function for long-running GEPA optimization (run_optimization)
+- [x] GEPA image with DSPy, litellm, pymongo dependencies
 
 ### Pending
-- [ ] DSPy runtime integration (run_program returns placeholder)
-- [ ] End-to-end testing of code mutations
+- [ ] End-to-end testing of GEPA optimization (/optimize)
+- [ ] Implementation of run_program and evaluate (standalone)
+- [ ] End-to-end testing of code mutations + run_program and evaluate
+- [ ] Code mutations in GEPA optimization (v2: Claude Agent SDK reflection)
+
 
 ### Implementation Notes (v0.2.1)
 **Claude Agent SDK Architecture:**
@@ -585,7 +583,7 @@ Your Code (Python) → claude-agent-sdk (pip) → Claude Code CLI (npm) → Anth
 
 ### Implementation Notes
 
-**Architecture (v0.2.0 - modal-vibe inspired):**
+**Architecture (v0.3.0 - GEPA integration):**
 ```
 src/
   core/                    # Core logic (inspired by modal-vibe)
@@ -594,14 +592,20 @@ src/
     agent.py               # Claude agent script generation
     program_runner.py      # DSPy program execution
     system_prompt.py       # Prompts for coding agent
+  gepa/                    # GEPA optimization integration
+    __init__.py
+    adapter.py             # CodeEvolverDSPyAdapter (GEPAAdapter protocol)
+    optimizer.py            # run_gepa_optimization() orchestrator
+    progress.py            # MongoDBProgressTracker (StopperProtocol)
   services/                # Supporting services
     git_service.py         # Git operations (clone, worktree, commit)
     github_app.py          # GitHub App authentication (used by sandbox.py)
   schemas/                 # Pydantic models
+    job_schemas.py         # OptimizeRequest, JobStatusResponse, JobRecord
   db/                      # MongoDB integration
   config.py
   main.py                  # FastAPI endpoints
-modal_app.py               # Modal app entrypoint
+modal_app.py               # Modal app entrypoint (includes run_optimization)
 ```
 
 - **Modal Architecture**: FastAPI runs as Modal web endpoint. Mutations execute via `execute_in_sandbox()` which calls `src.core.execute_mutation()`.
@@ -618,3 +622,94 @@ modal_app.py               # Modal app entrypoint
 - `src/core/sandbox.py` imports and uses `GitHubAppService` from `src/services/github_app.py`
 - `src/services/git_service.py` handles local git operations (clone, worktree, commit) for the FastAPI layer
 - Both services share the same authentication pattern for private repos via GitHub App tokens
+
+### Implementation Notes (v0.3.0 - GEPA Integration)
+
+**GEPA Optimization Architecture:**
+- POST /optimize creates a job in MongoDB and spawns a Modal function via `.spawn()` (fire-and-forget)
+- The `run_optimization` Modal function runs `gepa.optimize()` synchronously (blocking)
+- `CodeEvolverDSPyAdapter` implements the `GEPAAdapter` protocol (structural typing, no inheritance)
+- `MongoDBProgressTracker` implements `StopperProtocol` — called each iteration to persist state and check cancellation
+- Uses `pymongo` (sync) inside the optimization loop; FastAPI endpoints use `motor` (async)
+
+**Sync/Async Strategy:**
+GEPA's `optimize()` is synchronous. The Modal function is sync. The adapter uses DSPy's `Evaluate` (sync) and `bootstrap_trace_data` (sync). MongoDB operations inside the optimization loop use `pymongo` (sync driver), not `motor`.
+
+**GEPA Package:**
+- Development: installed from local GEPA-CodeEvolver dir via `add_local_dir()` + `pip install -e`
+- Production: will switch to `pip install gepa @ git+https://github.com/<org>/GEPA-CodeEvolver.git`
+
+**V1 Scope (prompt-only):**
+- Candidates are `dict[str, str]` mapping predictor names to instruction text
+- No git branching — instructions applied in-memory via `pred.signature.with_instructions()`
+- Reflection uses GEPA's default `InstructionProposalSignature` with litellm
+- No Claude Agent SDK for reflection (deferred to v2 with code mutations)
+
+**Metric Script:**
+Users provide a metric script path in their repo (e.g., `eval/metric.py`) and function name. The function signature must be `metric(example: dspy.Example, prediction: dspy.Prediction) -> float`.
+
+### Implementation Notes (v0.3.1 - Unified Calling Pattern)
+
+**Unified Candidate Structure:**
+All candidates now include a `git_branch` key for consistent tracking across prompt-only and code mutations:
+
+```python
+candidate = {
+    "git_branch": "main",  # or "codeevolver-abc123" for mutations
+    "claim_extractor.predict": "Extract factual claims...",
+    "fire_judge.predict": "Evaluate the claim...",
+    "aggregator.predict": "Aggregate verdicts...",
+}
+```
+
+**Execution Modes:**
+The `CodeEvolverDSPyAdapter` supports two execution modes:
+
+1. **Local mode** (`use_sandbox=False`): Fast in-memory execution for prompt-only optimization.
+   - No sandbox overhead
+   - Adapter imports DSPy module directly and runs `dspy.Evaluate`
+   - `git_branch` tracked but not checked out
+
+2. **Sandbox mode** (`use_sandbox=True`): Full isolation with git branch checkout.
+   - Creates Modal sandbox and checks out `candidate["git_branch"]`
+   - Executes `eval/run_program.py` (or generated script) in sandbox
+   - Required for code mutations
+
+**User Repository Requirements:**
+Users must provide these files for GEPA optimization:
+
+| File | Required | Purpose |
+|------|----------|---------|
+| `eval/metric.py` | Yes | Scoring function: `metric(example, prediction) -> float` |
+| `eval/run_program.py` | For sandbox mode | Program runner script executed in sandbox |
+| `program.json` | Optional | Saved DSPy state; seed created from class if missing |
+
+Template files are provided in `specs/user_templates/`.
+
+**Runner Script Protocol:**
+The sandbox executes `eval/run_program.py` with JSON config via stdin:
+
+```json
+{
+  "entry_point": "src.module.ClassName",
+  "program_json_path": "program.json",
+  "candidate_prompts": {"predictor.predict": "instruction..."},
+  "batch": [{"input_field": "...", "label": "..."}],
+  "input_keys": ["input_field"],
+  "metric_path": "eval/metric.py",
+  "metric_fn_name": "metric",
+  "task_lm": "openai/gpt-5-mini",
+  "capture_traces": false
+}
+```
+
+Output JSON (via stdout with `GEPA_RESULT:` prefix):
+
+```json
+{
+  "success": true,
+  "outputs": [{"verdict": "...", ...}],
+  "scores": [1.0, 0.0, ...],
+  "trajectories": null
+}
+```

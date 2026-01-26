@@ -21,6 +21,13 @@ from .db_schemas import (
     ClientRecord,
     ProgramRecord,
 )
+from .job_schemas import (
+    JobStatus,
+    OptimizeRequest,
+    OptimizeResponse,
+    JobStatusResponse,
+    JobRecord,
+)
 
 __all__ = [
     "ConnectGitRequest",
@@ -35,4 +42,9 @@ __all__ = [
     "PipelineOutput",
     "ProgramRecord",
     "GetProgramResponse",
+    "JobStatus",
+    "OptimizeRequest",
+    "OptimizeResponse",
+    "JobStatusResponse",
+    "JobRecord",
 ]

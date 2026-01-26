@@ -22,6 +22,11 @@ from .schemas import (
     ProgramStatus,
     MutationType,
     GetProgramResponse,
+    OptimizeRequest,
+    OptimizeResponse,
+    JobStatusResponse,
+    JobRecord,
+    JobStatus,
 )
 from .services import GitService
 from .core import (
@@ -228,33 +233,113 @@ async def execute_step(request: ExecuteStepRequest) -> ExecuteStepResponse:
             branch_name=branch_name,
         )
 
+@app.post("/optimize", response_model=OptimizeResponse)
+async def optimize(request: OptimizeRequest) -> OptimizeResponse:
+    """Start a GEPA optimization job.
 
-@app.get("/program/{program_id}", response_model=GetProgramResponse)
-async def get_program(program_id: str) -> GetProgramResponse:
+    Clones the repository, creates a job record in MongoDB, and spawns
+    a Modal function to run the GEPA optimization loop asynchronously.
+    Returns a job_id for polling status via GET /job/{job_id}.
     """
-    Retrieve program details and program_json.
-    """
+    from uuid import uuid4
+
+    job_id = f"job_{uuid4().hex[:12]}"
+    client_id = GitService.generate_client_id()
+
+    # Clone repository
+    try:
+        workspace_path = GitService.clone_repository(
+            request.repo_url,
+            client_id,
+            installation_id=request.installation_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Store client record
+    client_record = ClientRecord(
+        client_id=client_id,
+        repo_url=request.repo_url,
+        workspace_path=str(workspace_path),
+    )
     db = get_database()
+    await db.clients.insert_one(client_record.model_dump())
 
-    program = await db.programs.find_one({"program_id": program_id})
-    if not program:
-        raise HTTPException(status_code=404, detail=f"Program not found: {program_id}")
+    # Create job record
+    job_record = JobRecord(
+        job_id=job_id,
+        client_id=client_id,
+        repo_url=request.repo_url,
+        config=request.model_dump(),
+    )
+    await db.jobs.insert_one(job_record.model_dump())
 
-    return GetProgramResponse(
-        program_id=program["program_id"],
-        client_id=program["client_id"],
-        parent_program_id=program["parent_program_id"],
-        program_json=program["program_json"],
-        branch_name=program["branch_name"],
-        status=program["status"],
-        created_at=program["created_at"],
+    # Spawn Modal function for optimization (fire-and-forget)
+    try:
+        import sys
+        if "/app" not in sys.path:
+            sys.path.insert(0, "/app")
+        from modal_app import run_optimization
+
+        run_optimization.spawn(
+            job_id=job_id,
+            repo_url=request.repo_url,
+            program_json_path=request.program_json_path,
+            entry_point=request.entry_point,
+            metric_path=request.metric_path,
+            metric_fn_name=request.metric_fn_name,
+            trainset_json=request.trainset,
+            valset_json=request.valset,
+            task_lm=request.task_lm,
+            reflection_lm=request.reflection_lm,
+            max_metric_calls=request.max_metric_calls,
+            installation_id=request.installation_id,
+            input_keys=request.input_keys,
+            num_threads=request.num_threads,
+            seed=request.seed,
+        )
+    except ImportError:
+        # Not running on Modal — update job status to failed
+        await db.jobs.update_one(
+            {"job_id": job_id},
+            {"$set": {
+                "status": JobStatus.FAILED.value,
+                "error": "Optimization requires Modal deployment. Use 'modal serve modal_app.py'.",
+            }},
+        )
+        return OptimizeResponse(job_id=job_id, status="failed")
+
+    return OptimizeResponse(job_id=job_id, status="pending")
+
+
+@app.get("/job/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str) -> JobStatusResponse:
+    """Get optimization job status, progress, and current best candidate."""
+    db = get_database()
+    job = await db.jobs.find_one({"job_id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    return JobStatusResponse(
+        job_id=job["job_id"],
+        status=job["status"],
+        current_iteration=job.get("current_iteration"),
+        total_metric_calls=job.get("total_metric_calls"),
+        num_candidates=job.get("num_candidates"),
+        best_candidate=job.get("best_candidate"),
+        best_score=job.get("best_score"),
+        error=job.get("error"),
+        created_at=job.get("created_at"),
+        started_at=job.get("started_at"),
+        completed_at=job.get("completed_at"),
+        updated_at=job.get("updated_at"),
     )
 
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "version": "0.2.0"}
+    return {"status": "healthy", "version": "0.3.0"}
 
 
 @app.get("/debug_secrets")
