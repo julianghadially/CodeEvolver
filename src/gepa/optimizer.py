@@ -5,89 +5,32 @@ GEPA optimization loop. It loads user code, creates the adapter,
 and calls gepa.optimize().
 """
 
-import importlib
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
-
-import dspy
-from dspy.primitives import Example
+from typing import Any
 
 from gepa import optimize as gepa_optimize
 from gepa.core.result import GEPAResult
 
 from .adapter import CodeEvolverDSPyAdapter
 from .progress import MongoDBProgressTracker
-
-
-def load_metric_function(
-    workspace_path: str,
-    metric_path: str,
-    metric_fn_name: str,
-) -> Callable:
-    """Dynamically load the user's metric function from their repository.
-
-    Args:
-        workspace_path: Path to the cloned repo root.
-        metric_path: Relative path to metric module (e.g., "eval/metric.py").
-        metric_fn_name: Function name within the module (e.g., "accuracy").
-
-    Returns:
-        The metric function callable.
-    """
-    ws = str(workspace_path)
-    if ws not in sys.path:
-        sys.path.insert(0, ws)
-
-    # Convert file path to Python module path
-    module_path = metric_path
-    if module_path.endswith(".py"):
-        module_path = module_path[:-3]
-    module_path = module_path.replace("/", ".").replace("\\", ".")
-
-    mod = importlib.import_module(module_path)
-    return getattr(mod, metric_fn_name)
-
-
-def load_dataset(
-    dataset_json: list[dict[str, Any]],
-    input_keys: list[str] | None = None,
-) -> list[Example]:
-    """Convert JSON dataset to dspy.Example objects.
-
-    Args:
-        dataset_json: List of dicts, each representing one example.
-        input_keys: Explicit input field names. If provided, these fields
-            are marked as inputs via with_inputs(). If None, all keys are
-            treated as both inputs and labels (DSPy default).
-
-    Returns:
-        List of dspy.Example objects.
-    """
-    examples = []
-    for item in dataset_json:
-        ex = Example(**item)
-        if input_keys:
-            ex = ex.with_inputs(*input_keys)
-        examples.append(ex)
-    return examples
+from .utils import load_import_path, resolve_dataset
 
 
 def run_gepa_optimization(
     job_id: str,
     workspace_path: str,
-    program_json_path: str,
-    entry_point: str,
-    metric_path: str,
-    metric_fn_name: str,
-    trainset_json: list[dict[str, Any]],
-    valset_json: list[dict[str, Any]] | None,
-    task_lm: str,
+    program: str,
+    metric: str,
     reflection_lm: str,
     max_metric_calls: int,
     mongodb_url: str,
     database_name: str,
+    saved_program_json_path: str | None = None,
+    trainset_json: list[dict[str, Any]] | None = None,
+    trainset_path: str | None = None,
+    valset_json: list[dict[str, Any]] | None = None,
+    valset_path: str | None = None,
     input_keys: list[str] | None = None,
     num_threads: int = 1,
     seed: int = 0,
@@ -99,25 +42,27 @@ def run_gepa_optimization(
     Args:
         job_id: Unique job identifier.
         workspace_path: Path to cloned user repo.
-        program_json_path: Relative path to program.json.
-        entry_point: DSPy module class path (e.g., "fire.FIREJudge").
-        metric_path: Relative path to metric module.
-        metric_fn_name: Metric function name.
-        trainset_json: Training data as list of dicts.
-        valset_json: Validation data (optional, defaults to trainset).
-        task_lm: LM for running the DSPy program.
+        program: Dotted import path to DSPy module class.
+        metric: Dotted import path to metric function.
         reflection_lm: LM for GEPA reflection.
         max_metric_calls: Budget for optimization.
         mongodb_url: MongoDB connection string.
         database_name: MongoDB database name.
+        saved_program_json_path: Relative path to program.json (optional).
+        trainset_json: Training data as inline list of dicts.
+        trainset_path: Path to training data file in repo.
+        valset_json: Validation data as inline list of dicts.
+        valset_path: Path to validation data file in repo.
         input_keys: Optional explicit list of input field names.
-        num_threads: Parallelism for DSPy Evaluate.
+        num_threads: Parallelism for evaluation.
         seed: Random seed for reproducibility.
 
     Returns:
         Dict with optimization results.
     """
     from pymongo import MongoClient
+
+    ws = Path(workspace_path)
 
     # Update job status to running
     client = MongoClient(mongodb_url)
@@ -135,19 +80,18 @@ def run_gepa_optimization(
     tracker = None
     try:
         # Load user's metric function
-        metric_fn = load_metric_function(workspace_path, metric_path, metric_fn_name)
+        metric_fn = load_import_path(workspace_path, metric)
 
-        # Convert datasets to DSPy Examples
-        trainset = load_dataset(trainset_json, input_keys)
-        valset = load_dataset(valset_json, input_keys) if valset_json else None
+        # Resolve datasets
+        trainset = resolve_dataset(ws, trainset_json, trainset_path, input_keys, required=True)
+        valset = resolve_dataset(ws, valset_json, valset_path, input_keys, required=False)
 
         # Create the adapter
         adapter = CodeEvolverDSPyAdapter(
             workspace_path=workspace_path,
-            program_json_path=program_json_path,
-            entry_point=entry_point,
+            program=program,
             metric_fn=metric_fn,
-            task_lm=task_lm,
+            saved_program_json_path=saved_program_json_path,
             num_threads=num_threads,
         )
 

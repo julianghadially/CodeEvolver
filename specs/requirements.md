@@ -163,16 +163,20 @@ Below this line is an ongoing, workspace for Claude / AI coding agents. Do not e
 ```json
 {
   "repo_url": "https://github.com/user/project",
-  "program_json_path": "path/to/program.json",
-  "entry_point": "module.ClassName",
-  "dataset": [...],
-  "config": {
-    "num_iterations": 100,
-    "batch_size": 10,
-    "mutation_type": "prompt | code | both"
-  }
+  "program": "src.module.ClassName",
+  "metric": "eval.evaluate.metric",
+  "trainset_path": "data/train.jsonl",
+  "reflection_lm": "openai/gpt-5-mini",
+  "max_metric_calls": 1000,
+  "num_threads": 1
 }
 ```
+
+- `program`: Dotted import path to DSPy program class. Last component is class name.
+- `metric`: Dotted import path to metric function. Last component is function name.
+- `trainset_path`: Path to training data file in repo (.json, .jsonl, or .csv). Alternative: send inline `trainset` list.
+- `valset_path`: Optional path to validation data file. Alternative: send inline `valset` list.
+- `saved_program_json_path`: Optional path to saved DSPy program state (program.json).
 
 **Response:**
 ```json
@@ -645,8 +649,8 @@ GEPA's `optimize()` is synchronous. The Modal function is sync. The adapter uses
 - Reflection uses GEPA's default `InstructionProposalSignature` with litellm
 - No Claude Agent SDK for reflection (deferred to v2 with code mutations)
 
-**Metric Script:**
-Users provide a metric script path in their repo (e.g., `eval/metric.py`) and function name. The function signature must be `metric(example: dspy.Example, prediction: dspy.Prediction) -> float`.
+**Metric Function:**
+Users provide a metric as a single dotted import path (e.g., `eval.evaluate.metric`). Last component is the function name. The function signature must be `metric(example: dspy.Example, prediction: dspy.Prediction) -> float`.
 
 ### Implementation Notes (v0.3.1 - Unified Calling Pattern)
 
@@ -662,54 +666,26 @@ candidate = {
 }
 ```
 
-**Execution Modes:**
-The `CodeEvolverDSPyAdapter` supports two execution modes:
+**Evaluation: DSPy-native (v0.3.2)**
+The adapter evaluates directly using DSPy — no eval script needed for prompt-only optimization.
+The adapter imports the user's DSPy module, applies candidate prompt instructions in-memory,
+runs each example, and scores with the user's metric function.
 
-1. **Local mode** (`use_sandbox=False`): Fast in-memory execution for prompt-only optimization.
-   - No sandbox overhead
-   - Adapter imports DSPy module directly and runs `dspy.Evaluate`
-   - `git_branch` tracked but not checked out
-
-2. **Sandbox mode** (`use_sandbox=True`): Full isolation with git branch checkout.
-   - Creates Modal sandbox and checks out `candidate["git_branch"]`
-   - Executes `eval/run_program.py` (or generated script) in sandbox
-   - Required for code mutations
+Sandbox mode with eval scripts is deferred to v2 (code mutations).
 
 **User Repository Requirements:**
-Users must provide these files for GEPA optimization:
+Users provide:
 
-| File | Required | Purpose |
-|------|----------|---------|
-| `eval/metric.py` | Yes | Scoring function: `metric(example, prediction) -> float` |
-| `eval/run_program.py` | For sandbox mode | Program runner script executed in sandbox |
-| `program.json` | Optional | Saved DSPy state; seed created from class if missing |
+| What | Format | Example |
+|------|--------|---------|
+| DSPy program | `program` dotted path | `src.factchecker.FactCheckerPipeline` |
+| Metric function | `metric` dotted path | `eval.evaluate.metric` |
+| Training data | `trainset_path` file in repo | `data/train.jsonl` |
+| Program state | `saved_program_json_path` (optional) | `program.json` |
 
-Template files are provided in `specs/user_templates/`.
+No eval script, no runner script. Template files in `specs/user_templates/`.
 
-**Runner Script Protocol:**
-The sandbox executes `eval/run_program.py` with JSON config via stdin:
-
-```json
-{
-  "entry_point": "src.module.ClassName",
-  "program_json_path": "program.json",
-  "candidate_prompts": {"predictor.predict": "instruction..."},
-  "batch": [{"input_field": "...", "label": "..."}],
-  "input_keys": ["input_field"],
-  "metric_path": "eval/metric.py",
-  "metric_fn_name": "metric",
-  "task_lm": "openai/gpt-5-mini",
-  "capture_traces": false
-}
-```
-
-Output JSON (via stdout with `GEPA_RESULT:` prefix):
-
-```json
-{
-  "success": true,
-  "outputs": [{"verdict": "...", ...}],
-  "scores": [1.0, 0.0, ...],
-  "trajectories": null
-}
+**Dataset Loading:**
+Server loads data from `trainset_path` after cloning. Supports `.json`, `.jsonl`, `.csv`.
+Alternatively, send inline `trainset` in the API request.
 ```

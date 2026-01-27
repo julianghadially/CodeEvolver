@@ -150,10 +150,12 @@ candidate = {
 - Instead of inheriting From GEPAAdapter, the adapter conforms via duck typing
 
 #### evaluate()
-1. Checkout git_branch from candidate
-2. Load DSPy program from program.json, apply candidate prompt texts
-3. Run program on batch (in sandbox)
-4. Return EvaluationBatch(outputs, scores, trajectories if capture_traces)
+DSPy-native evaluation (no sandbox for prompt-only v1):
+1. Instantiate DSPy module, load program.json, apply candidate prompt texts
+2. Run each example through the program in-process
+3. Score with user's metric function
+4. Optionally capture DSPy traces for reflection
+5. Return EvaluationBatch(outputs, scores, trajectories if capture_traces)
 
 ### Optimization Loop (runs in CodeEvolver)
 Creates a CodeEvolver.GEPA optimize manager class with CodeEvolverAdapter -> _build_seed_candidate -> gepa.optimize.compile
@@ -166,7 +168,7 @@ Follows the DSPy GEPA pattern from `dspy/teleprompt/gepa/gepa.py`
 The GEPA optimization interface
 1. **__init__**: 
    - Store config (reflection_lm model, budget, etc.)
-   - metric - User provides a metric script path in their repo (e.g., `eval/metric.py`) and function name. 
+   - metric - User provides a dotted import path to their metric function (e.g., `eval.evaluate.metric`).
 2. **_build_seed_candidate(student_module)**:
    - Extract initial instructions from DSPy module predictors
    - Add `git_branch` key pointing to initial branch

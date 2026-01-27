@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class JobStatus(str, Enum):
@@ -16,37 +16,44 @@ class JobStatus(str, Enum):
 
 
 class OptimizeRequest(BaseModel):
-    """Request payload for POST /optimize."""
+    """Request payload for POST /optimize.
+
+    Users must provide either inline `trainset` data or a `trainset_path`
+    pointing to a data file in their repository.
+    """
 
     repo_url: str = Field(..., description="Git repository URL")
-    program_json_path: str = Field(
+    program: str = Field(
         ...,
-        description="Path to program.json from project root",
-        examples=["src/fire/program.json"],
+        description="Dotted import path of dspy.module program that will undergo optimization (e.g., 'src.fire.AgentPipeline'). Specify from project root and include the class itself (not just the file)",
     )
-    entry_point: str = Field(
+    metric: str = Field(
         ...,
-        description="DSPy module class (e.g., 'fire.FIREJudge')",
+        description=(
+            "Dotted import path of dspy metric function (e.g., 'eval.metric.accuracy). Specify from project root and include the class itself (not just the file)"
+        ),
     )
-
-    # Metric
-    metric_path: str = Field(
-        ...,
-        description="Path to metric script in repo (e.g., 'eval/metric.py')",
+    saved_program_json_path: str | None = Field(
+        default=None,
+        description="Path to a previously DSPY saved program.json (e.g., from a prior optimization). JSON includes module structures, instructions, etc. Specify from the project root (optional)",
+        examples=["program.json"],
     )
-    metric_fn_name: str = Field(
-        default="metric",
-        description="Metric function name within the script",
+    # Dataset — provide inline data OR a path to a file in the repo
+    trainset: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Training dataset as inline list of dicts",
     )
-
-    # Dataset
-    trainset: list[dict[str, Any]] = Field(
-        ...,
-        description="Training dataset as list of dicts",
+    trainset_path: str | None = Field(
+        default=None,
+        description="Path to training data file in repo (json/jsonl/csv)",
     )
     valset: list[dict[str, Any]] | None = Field(
         default=None,
         description="Validation dataset (defaults to trainset if not provided)",
+    )
+    valset_path: str | None = Field(
+        default=None,
+        description="Path to validation data file in repo (json/jsonl/csv)",
     )
     input_keys: list[str] | None = Field(
         default=None,
@@ -54,10 +61,6 @@ class OptimizeRequest(BaseModel):
     )
 
     # LM configuration
-    task_lm: str = Field(
-        default="openai/gpt-5-mini",
-        description="LM for running the DSPy program",
-    )
     reflection_lm: str = Field(
         default="openai/gpt-5-mini",
         description="LM for GEPA reflection (instruction proposal)",
@@ -82,6 +85,12 @@ class OptimizeRequest(BaseModel):
         default=None,
         description="GitHub App installation ID for private repos",
     )
+
+    @model_validator(mode="after")
+    def check_trainset_provided(self) -> "OptimizeRequest":
+        if self.trainset is None and self.trainset_path is None:
+            raise ValueError("Provide either 'trainset' (inline data) or 'trainset_path' (file in repo)")
+        return self
 
 
 class OptimizeResponse(BaseModel):

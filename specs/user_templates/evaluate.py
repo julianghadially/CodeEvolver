@@ -1,95 +1,34 @@
-#!/usr/bin/env python3
-"""Evaluation script for CodeEvolver GEPA optimization.
+"""Example metric function for CodeEvolver GEPA optimization.
 
 CONTRACT:
-    python eval/evaluate.py \
-        --candidate /tmp/candidate.json \
-        --batch /tmp/batch.json \
-        --output /tmp/results.json
+    Your metric function receives a dspy.Example (ground truth) and a
+    dspy.Prediction (model output), and returns a float score (0.0–1.0).
 
-INPUT FILES (written by CodeEvolver):
-    candidate.json: {"predictor.predict": "instruction text", ...}
-    batch.json: [{"statement": "...", "label": "..."}, ...]
+    CodeEvolver handles everything else: loading your DSPy module,
+    applying candidate prompts, running examples, and collecting scores.
 
-OUTPUT FILE (written by your script):
-    results.json: {"scores": [1.0, 0.0, ...], "outputs": [...]}
+USAGE:
+    In your create_job.py, reference this function with a dotted import path:
+
+        "metric": "eval.evaluate.metric"
+
+    This means: from eval.evaluate, import the function named 'metric'.
 """
 
-import argparse
-import json
-
-# =============================================================================
-# YOUR IMPORTS - Add your project imports here
-# =============================================================================
-
-# from src.your_module import YourPipeline
-# from src.your_metrics import compute_accuracy
+import dspy
 
 
-# =============================================================================
-# IMPLEMENT THESE FUNCTIONS
-# =============================================================================
+def metric(example: dspy.Example, prediction: dspy.Prediction) -> float:
+    """Score a single prediction against ground truth.
 
-def load_program(candidate: dict):
-    """Load your program and apply candidate prompt configurations.
-    
     Args:
-        candidate: {"predictor.predict": "instruction text", ...}
-    
+        example: Ground truth with all fields (inputs + labels).
+        prediction: Model output from your DSPy program's forward().
+
     Returns:
-        Your initialized program ready to run.
+        Score between 0.0 and 1.0.
     """
-    # TODO: Load your DSPy pipeline
-    # TODO: Apply candidate prompts to predictors
-    raise NotImplementedError("Implement load_program()")
-
-
-def run_and_score(program, example: dict) -> tuple[dict, float]:
-    """Run program on one example and compute score.
-    
-    Args:
-        program: Your initialized program
-        example: Single example from batch (e.g., {"statement": "...", "label": "..."})
-    
-    Returns:
-        (output_dict, score) where score is 0.0-1.0
-    """
-    # TODO: Run your program on the example
-    # TODO: Compute score against ground truth
-    raise NotImplementedError("Implement run_and_score()")
-
-
-# =============================================================================
-# MAIN - No changes needed below
-# =============================================================================
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--candidate", required=True)
-    parser.add_argument("--batch", required=True)
-    parser.add_argument("--output", required=True)
-    args = parser.parse_args()
-    
-    with open(args.candidate) as f:
-        candidate = json.load(f)
-    with open(args.batch) as f:
-        batch = json.load(f)
-    
-    program = load_program(candidate)
-    
-    scores, outputs = [], []
-    for example in batch:
-        try:
-            output, score = run_and_score(program, example)
-            outputs.append(output)
-            scores.append(score)
-        except Exception as e:
-            outputs.append({"error": str(e)})
-            scores.append(0.0)
-    
-    with open(args.output, "w") as f:
-        json.dump({"scores": scores, "outputs": outputs}, f)
-
-
-if __name__ == "__main__":
-    main()
+    # TODO: Implement your scoring logic
+    # Example: exact match on a 'label' field
+    # return float(prediction.label == example.label)
+    raise NotImplementedError("Implement your metric function")

@@ -3,16 +3,16 @@
 Implements the GEPAAdapter protocol via structural typing (no inheritance).
 Follows the pattern from gepa.adapters.dspy_adapter.DspyAdapter.
 
-Evaluation runs in Modal sandbox using user's eval/evaluate.py script.
+Evaluation runs in a sandbox for security and worktree isolation.
+The adapter delegates to a sandbox_manager which handles git branch
+checkout and running the user's DSPy program in an isolated environment.
 
 Copyright notice for GEPA-derived patterns:
 Copyright (c) 2025 Lakshya A Agrawal and the GEPA contributors
 """
 
-import importlib
-import json
+import logging
 import random
-import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable
@@ -22,12 +22,13 @@ from dspy.primitives import Example, Prediction
 
 from gepa.core.adapter import EvaluationBatch
 
+from .utils import load_import_path
+
+
+logger = logging.getLogger(__name__)
 
 # Reserved key for git branch in candidate dict
 GIT_BRANCH_KEY = "git_branch"
-
-# Default path to user's evaluation script
-DEFAULT_EVAL_SCRIPT = "eval/evaluate.py"
 
 
 class CodeEvolverDSPyAdapter:
@@ -35,39 +36,34 @@ class CodeEvolverDSPyAdapter:
 
     Conforms to GEPAAdapter[Example, TraceData, Prediction] protocol.
 
-    Evaluation runs in Modal sandbox by calling user's eval script:
-        python eval/evaluate.py --candidate X --batch Y --output Z
+    Evaluation is delegated to a sandbox_manager for security isolation.
+    The sandbox checks out the correct git branch, runs the user's DSPy
+    program, and returns scores.
 
     Args:
         workspace_path: Path to the cloned user repository.
-        entry_point: DSPy module class path (e.g., "src.factchecker.FactCheckerPipeline").
+        program: DSPy module class path (e.g., "src.factchecker.FactCheckerPipeline").
         metric_fn: Callable metric(example, prediction) -> float.
-        program_json_path: Relative path to program.json within the repo (optional).
-        eval_script: Path to user's evaluation script (default: eval/evaluate.py).
-        task_lm: DSPy LM model string (e.g., "openai/gpt-5-mini").
+        saved_program_json_path: Relative path to program.json within the repo (optional).
         failure_score: Score to assign on evaluation failure.
-        num_threads: Number of threads for DSPy Evaluate.
+        num_threads: Number of threads for parallel evaluation.
         initial_branch: Initial git branch name for seed candidate.
     """
 
     def __init__(
         self,
         workspace_path: str,
-        entry_point: str,
+        program: str,
         metric_fn: Callable,
-        program_json_path: str | None = None,
-        eval_script: str = DEFAULT_EVAL_SCRIPT,
-        task_lm: str = "openai/gpt-5-mini",
+        saved_program_json_path: str | None = None,
         failure_score: float = 0.0,
         num_threads: int = 1,
         initial_branch: str = "main",
     ):
         self.workspace_path = Path(workspace_path)
-        self.entry_point = entry_point
+        self.program_path = program
         self.metric_fn = metric_fn
-        self.program_json_path = program_json_path
-        self.eval_script = eval_script
-        self.task_lm = task_lm
+        self.saved_program_json_path = saved_program_json_path
         self.failure_score = failure_score
         self.num_threads = num_threads
         self.initial_branch = initial_branch
@@ -76,23 +72,13 @@ class CodeEvolverDSPyAdapter:
         # Sandbox manager is injected by the optimizer
         self._sandbox_manager = None
 
-        # Ensure workspace is on sys.path for user code imports
-        ws_str = str(self.workspace_path)
-        if ws_str not in sys.path:
-            sys.path.insert(0, ws_str)
-
-        # Configure DSPy with task LM
-        dspy.configure(lm=dspy.LM(task_lm))
-
         # Import the user's DSPy module class
-        module_path, class_name = entry_point.rsplit(".", 1)
-        mod = importlib.import_module(module_path)
-        self.student_class = getattr(mod, class_name)
+        self.student_class = load_import_path(workspace_path, program)
 
         # Load a seed instance to discover predictor names
         seed_instance = self.student_class()
-        if self.program_json_path:
-            full_path = self.workspace_path / self.program_json_path
+        if self.saved_program_json_path:
+            full_path = self.workspace_path / self.saved_program_json_path
             if full_path.exists():
                 seed_instance.load(str(full_path))
         self._named_predictor_names = [name for name, _ in seed_instance.named_predictors()]
@@ -112,8 +98,8 @@ class CodeEvolverDSPyAdapter:
             Example: {"git_branch": "main", "predictor.predict": "instruction..."}
         """
         program = self.student_class()
-        if self.program_json_path:
-            full_path = self.workspace_path / self.program_json_path
+        if self.saved_program_json_path:
+            full_path = self.workspace_path / self.saved_program_json_path
             if full_path.exists():
                 program.load(str(full_path))
 
@@ -133,8 +119,8 @@ class CodeEvolverDSPyAdapter:
     def _build_program(self, candidate: dict[str, str]) -> dspy.Module:
         """Instantiate DSPy module, load program.json state, apply candidate instructions."""
         program = self.student_class()
-        if self.program_json_path:
-            full_path = self.workspace_path / self.program_json_path
+        if self.saved_program_json_path:
+            full_path = self.workspace_path / self.saved_program_json_path
             if full_path.exists():
                 program.load(str(full_path))
 
@@ -151,18 +137,16 @@ class CodeEvolverDSPyAdapter:
         candidate: dict[str, str],
         capture_traces: bool = False,
     ) -> EvaluationBatch:
-        """Run evaluation in sandbox using user's eval script.
+        """Run evaluation via sandbox manager.
 
-        The sandbox:
-        1. Checks out candidate's git_branch
-        2. Writes candidate.json and batch.json
-        3. Runs: python {eval_script} --candidate X --batch Y --output Z
-        4. Reads and returns results
+        The sandbox manager handles git branch checkout and runs the
+        user's DSPy program in an isolated environment for security.
 
         Args:
             batch: List of DSPy Examples to evaluate.
             candidate: Dict with 'git_branch' and predictor instructions.
-            capture_traces: Whether to request traces (passed to user script).
+            capture_traces: Whether to capture DSPy execution traces
+                for use in GEPA's reflective dataset.
 
         Returns:
             EvaluationBatch with outputs, scores, and optional trajectories.
@@ -182,14 +166,12 @@ class CodeEvolverDSPyAdapter:
         # Run evaluation in sandbox
         result = self._sandbox_manager.run_evaluation(
             git_branch=git_branch,
-            eval_script=self.eval_script,
             candidate_json=prompt_texts,
             batch_json=batch_json,
             capture_traces=capture_traces,
         )
 
         if not result.get("success", False):
-            # Return failure scores for all examples
             return EvaluationBatch(
                 outputs=[None] * len(batch),
                 scores=[self.failure_score] * len(batch),
@@ -230,6 +212,8 @@ class CodeEvolverDSPyAdapter:
 
             items: list[dict[str, Any]] = []
             for data in eval_batch.trajectories or []:
+                if data is None:
+                    continue
                 trace = data.get("trace", [])
                 example = data.get("example")
                 prediction = data.get("prediction")
@@ -309,43 +293,3 @@ class CodeEvolverDSPyAdapter:
             return float(score_obj)
         except (TypeError, ValueError):
             return self.failure_score
-
-
-def parse_eval_output(result_json: dict[str, Any]) -> dict[str, Any]:
-    """Parse and validate output from user's evaluation script.
-
-    Expected format:
-    {
-        "scores": [1.0, 0.0, ...],
-        "outputs": [{"verdict": "..."}, ...],
-        "traces": [...]  // optional
-    }
-
-    Returns:
-        Dict with 'success', 'scores', 'outputs', 'traces'
-    """
-    if not isinstance(result_json, dict):
-        return {
-            "success": False,
-            "error": "Result is not a dict",
-            "scores": [],
-            "outputs": [],
-            "traces": None,
-        }
-
-    scores = result_json.get("scores", [])
-    if not isinstance(scores, list):
-        return {
-            "success": False,
-            "error": "scores is not a list",
-            "scores": [],
-            "outputs": [],
-            "traces": None,
-        }
-
-    return {
-        "success": True,
-        "scores": scores,
-        "outputs": result_json.get("outputs", []),
-        "traces": result_json.get("traces"),
-    }
