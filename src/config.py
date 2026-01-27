@@ -1,16 +1,25 @@
 """Application configuration using pydantic-settings."""
 
 import base64
-from typing import Optional
+from typing import Optional, Literal
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
+import os
 
+def determine_environment() -> Literal['local', 'dev', 'prod']:
+    """Determine the current environment."""
+    app_mode: Literal['local', 'dev', 'prod'] = str(os.getenv('APP_MODE', 'dev')).lower()
+    if os.getenv('LOCATION', '') == 'local':
+        app_mode = 'local'
+    return app_mode
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Database
-    mongodb_url: str = "mongodb://localhost:27017"
+    # Priority: CODEEVOLVER_MONGODB_URL > MONGO_KEY > localhost fallback
+    mongo_key: Optional[str] = os.environ.get("MONGO_KEY")
+    mongodb_url: str = f"mongodb+srv://julianghadially:{mongo_key}@ce1.lbnamk9.mongodb.net/?appName=ce1" if os.environ.get("MONGO_KEY") else ""
     database_name: str = "codeevolver"
     
     # Workspace (overridden to /workspaces when running on Modal)
@@ -34,6 +43,10 @@ class Settings(BaseSettings):
     gepa_optimization_timeout: int = 3600  # 1 hour default
     gepa_optimization_cpu: int = 4
     gepa_optimization_memory: int = 8192  # MB
+
+    # JWT / callback settings (for GEPA sandbox → FastAPI communication)
+    jwt_secret: Optional[str] = None       # CODEEVOLVER_JWT_SECRET (HS256 key)
+    callback_url: str = ""                 # CODEEVOLVER_CALLBACK_URL (Modal web endpoint)
 
     model_config = {"env_prefix": "CODEEVOLVER_"}
     

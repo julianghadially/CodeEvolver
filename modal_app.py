@@ -34,6 +34,7 @@ web_image = (
         "httpx>=0.27.0",
         "pyjwt[cryptography]>=2.8.0",
         "cryptography>=41.0.0",
+        "certifi",
     )
     .add_local_dir(".", remote_path="/app")
 )
@@ -190,13 +191,12 @@ async def execute_in_sandbox(
     }
 
 
-# Image for GEPA optimization (DSPy, litellm, pymongo, gepa)
-# Uses pymongo (sync) because GEPA's optimize() loop is synchronous.
+# Image for GEPA optimization (DSPy, litellm, gepa)
+# DB drivers (pymongo/motor) are NOT needed here — progress is reported via HTTP callbacks.
 gepa_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
     .pip_install(
-        "pymongo>=4.6.0",
         "pydantic-settings>=2.6.0",
         "gitpython>=3.1.0",
         "dspy>=2.5.0",
@@ -204,14 +204,8 @@ gepa_image = (
         "httpx>=0.27.0",
         "pyjwt[cryptography]>=2.8.0",
         "tqdm>=4.66.1",
+        "gepa>=0.0.26",
     )
-    # Development: install GEPA from local source
-    # Production: replace with .pip_install("gepa @ git+https://github.com/<org>/GEPA-CodeEvolver.git")
-    .add_local_dir(
-        "/Users/julianghadially/Documents/0. Fine Tuning as a Service/2. Product/GEPA-CodeEvolver",
-        remote_path="/gepa-src",
-    )
-    .run_commands("pip install -e /gepa-src")
     .add_local_dir(".", remote_path="/app")
 )
 
@@ -219,7 +213,7 @@ gepa_image = (
 @app.function(
     image=gepa_image,
     volumes={"/workspaces": workspaces_volume},
-    secrets=[modal.Secret.from_name("codeevolver-secrets")],
+    secrets=[modal.Secret.from_name("codeevolver-sandbox-secrets")],
     timeout=3600,
     cpu=4,
     memory=8192,
@@ -240,6 +234,8 @@ def run_optimization(
     input_keys: list[str] | None = None,
     num_threads: int = 1,
     seed: int = 0,
+    callback_url: str = "",
+    jwt_token: str = "",
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 
@@ -286,17 +282,15 @@ def run_optimization(
     # API keys are already available via Modal secrets in the environment
     from src.gepa.optimizer import run_gepa_optimization
 
-    mongodb_url = os.getenv("CODEEVOLVER_MONGODB_URL", settings.mongodb_url)
-
     result = run_gepa_optimization(
         job_id=job_id,
+        callback_url=callback_url,
+        jwt_token=jwt_token,
         workspace_path=workspace_path,
         program=program,
         metric=metric,
         reflection_lm=reflection_lm,
         max_metric_calls=max_metric_calls,
-        mongodb_url=mongodb_url,
-        database_name=settings.database_name,
         saved_program_json_path=saved_program_json_path,
         trainset_json=trainset_json,
         trainset_path=trainset_path,

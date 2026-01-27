@@ -9,6 +9,7 @@ Uses pymongo (sync driver) because GEPA's optimize() loop is synchronous.
 from datetime import datetime, timezone
 
 from gepa.core.state import GEPAState
+from src.db.mongo import get_mongo_db
 
 
 class MongoDBProgressTracker:
@@ -25,14 +26,9 @@ class MongoDBProgressTracker:
 
     def __init__(
         self,
-        mongodb_url: str,
-        database_name: str,
         job_id: str,
     ):
-        from pymongo import MongoClient
-
-        self.client = MongoClient(mongodb_url)
-        self.db = self.client[database_name]
+        self.db = get_mongo_db()
         self.job_id = job_id
 
     def __call__(self, gepa_state: GEPAState) -> bool:
@@ -77,5 +73,5 @@ class MongoDBProgressTracker:
         return False
 
     def close(self):
-        """Close the MongoDB connection."""
-        self.client.close()
+        '''Not needed with global client'''
+        pass

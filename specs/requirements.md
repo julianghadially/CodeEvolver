@@ -81,6 +81,7 @@ See security architecture below.
 - **Network Egress Control and whitelists:** Limit urls to allowed domains and ips set by our best practices and by the user (e.g., api.firecrawl.dev)
 - **Secrets management (v2)**: use env file for v1
 - **Monitoring and detection:** omit for v1
+- Ensure that sandboxes have limited database access
 
 
 ```
@@ -199,9 +200,9 @@ Receives a change request from GEPA optimization as input, and executes that sin
   "parent_program_id": "string (parent program id)",
   "mutation_type": "prompt | code",
 
-  // AI Workflow program location (path from project root):
-  "program_json_path": "path/to/program.json",
-  "entry_point": "module.ClassName",  // DSPy module to instantiate < is this needed?
+  // DSPy program module (dotted import path):
+  "program": "module.ClassName",  // DSPy module class to import and instantiate
+  "saved_program_json_path": "path/to/program.json",  // Optional: saved program state
 
   // For prompt mutations - GEPA's candidate format:
   "candidate": {
@@ -223,8 +224,8 @@ Receives a change request from GEPA optimization as input, and executes that sin
 ```
 
 **Field Details**:
-- `program_json_path`: Path to program.json from project root (we have the code via /connect-git)
-- `entry_point`: DSPy module class to instantiate and run (e.g., `"fire.FIREJudge"`)
+- `program`: Dotted import path to DSPy program class to import and instantiate (e.g., `"fire.FIREJudge"`)
+- `saved_program_json_path`: Optional path to saved program.json from project root (if provided, loads saved state)
 - `candidate`: For prompt mutations - `dict[str, str]` mapping component names to new instruction text
 - `change_request`: For code mutations - natural language description for Claude agent
 - `test_examples`: DSPy Examples for running the mutated program
@@ -619,7 +620,7 @@ modal_app.py               # Modal app entrypoint (includes run_optimization)
 - **Git Worktrees**: Using GitPython's `git.worktree` commands. Each program gets its own worktree directory at `{workspace_root}/{client_id}/{program_id}/`
 - **Prompt Mutations**: Directly edit `signature.instructions` in program.json via `apply_prompt_mutation()`, then commit
 - **Code Mutations**: Generate and execute agent scripts in sandbox (requires Modal deployment)
-- **Program Execution**: Generates runner scripts for DSPy execution (placeholder until DSPy integration)
+- **Program Execution**: Imports and instantiates DSPy modules directly (no runner scripts needed)
 - **Local Development**: Use `modal serve modal_app.py` for dev, `modal deploy modal_app.py` for production
 
 **Service Integration:**

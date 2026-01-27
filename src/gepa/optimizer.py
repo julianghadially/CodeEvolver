@@ -5,7 +5,6 @@ GEPA optimization loop. It loads user code, creates the adapter,
 and calls gepa.optimize().
 """
 
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,19 +12,19 @@ from gepa import optimize as gepa_optimize
 from gepa.core.result import GEPAResult
 
 from .adapter import CodeEvolverDSPyAdapter
-from .progress import MongoDBProgressTracker
+from .callback import CallbackJobUpdater, CallbackProgressTracker
 from .utils import load_import_path, resolve_dataset
 
 
 def run_gepa_optimization(
     job_id: str,
+    callback_url: str,
+    jwt_token: str,
     workspace_path: str,
     program: str,
     metric: str,
     reflection_lm: str,
     max_metric_calls: int,
-    mongodb_url: str,
-    database_name: str,
     saved_program_json_path: str | None = None,
     trainset_json: list[dict[str, Any]] | None = None,
     trainset_path: str | None = None,
@@ -46,8 +45,8 @@ def run_gepa_optimization(
         metric: Dotted import path to metric function.
         reflection_lm: LM for GEPA reflection.
         max_metric_calls: Budget for optimization.
-        mongodb_url: MongoDB connection string.
-        database_name: MongoDB database name.
+        callback_url: Base URL for HTTP callbacks to FastAPI.
+        jwt_token: Job-scoped JWT for authenticating callbacks.
         saved_program_json_path: Relative path to program.json (optional).
         trainset_json: Training data as inline list of dicts.
         trainset_path: Path to training data file in repo.
@@ -60,24 +59,12 @@ def run_gepa_optimization(
     Returns:
         Dict with optimization results.
     """
-    from pymongo import MongoClient
-
     ws = Path(workspace_path)
+    updater = CallbackJobUpdater(callback_url, jwt_token, job_id)
 
     # Update job status to running
-    client = MongoClient(mongodb_url)
-    db = client[database_name]
-    db.jobs.update_one(
-        {"job_id": job_id},
-        {"$set": {
-            "status": "running",
-            "started_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-        }},
-    )
-    client.close()
+    updater.set_running()
 
-    tracker = None
     try:
         # Load user's metric function
         metric_fn = load_import_path(workspace_path, metric)
@@ -98,12 +85,8 @@ def run_gepa_optimization(
         # Build seed candidate from program.json
         seed_candidate = adapter.build_seed_candidate()
 
-        # Create MongoDB progress tracker (also handles cancellation)
-        tracker = MongoDBProgressTracker(
-            mongodb_url=mongodb_url,
-            database_name=database_name,
-            job_id=job_id,
-        )
+        # Create callback progress tracker (also handles cancellation)
+        tracker = CallbackProgressTracker(callback_url, jwt_token, job_id)
 
         # Run GEPA optimization (synchronous, blocking)
         result: GEPAResult = gepa_optimize(
@@ -129,40 +112,17 @@ def run_gepa_optimization(
             "total_metric_calls": result.total_metric_calls,
         }
 
-        # Persist final results to MongoDB
-        client = MongoClient(mongodb_url)
-        db = client[database_name]
-        db.jobs.update_one(
-            {"job_id": job_id},
-            {"$set": {
-                "status": "completed",
-                "best_candidate": result.best_candidate,
-                "best_score": result.val_aggregate_scores[best_idx],
-                "total_metric_calls": result.total_metric_calls,
-                "num_candidates": result.num_candidates,
-                "completed_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
-            }},
+        # Persist final results via callback
+        updater.set_completed(
+            best_candidate=result.best_candidate,
+            best_score=result.val_aggregate_scores[best_idx],
+            total_metric_calls=result.total_metric_calls,
+            num_candidates=result.num_candidates,
         )
-        client.close()
 
         return result_dict
 
     except Exception as e:
-        # Update job status to failed
-        client = MongoClient(mongodb_url)
-        db = client[database_name]
-        db.jobs.update_one(
-            {"job_id": job_id},
-            {"$set": {
-                "status": "failed",
-                "error": str(e),
-                "updated_at": datetime.now(timezone.utc),
-            }},
-        )
-        client.close()
+        # Update job status to failed via callback
+        updater.set_failed(str(e))
         raise
-
-    finally:
-        if tracker:
-            tracker.close()

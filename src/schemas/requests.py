@@ -3,9 +3,10 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .program_schemas import MutationType
+from .job_schemas import JobStatus
 
 
 class ExecuteStepRequest(BaseModel):
@@ -137,3 +138,99 @@ class ExecuteSandboxRequest(BaseModel):
         description="If True, push changes to remote after mutation",
     )
 
+class OptimizeRequest(BaseModel):
+    """Request payload for POST /optimize.
+
+    Users must provide either inline `trainset` data or a `trainset_path`
+    pointing to a data file in their repository.
+    """
+
+    repo_url: str = Field(..., description="Git repository URL")
+    program: str = Field(
+        ...,
+        description="Dotted import path of dspy.module program that will undergo optimization (e.g., 'src.fire.AgentPipeline'). Specify from project root and include the class itself (not just the file)",
+    )
+    metric: str = Field(
+        ...,
+        description=(
+            "Dotted import path of dspy metric function (e.g., 'eval.metric.accuracy). Specify from project root and include the class itself (not just the file)"
+        ),
+    )
+    saved_program_json_path: str | None = Field(
+        default=None,
+        description="Path to a previously DSPY saved program.json (e.g., from a prior optimization). JSON includes module structures, instructions, etc. Specify from the project root (optional)",
+        examples=["program.json"],
+    )
+    # Dataset — provide inline data OR a path to a file in the repo
+    trainset: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Training dataset as inline list of dicts",
+    )
+    trainset_path: str | None = Field(
+        default=None,
+        description="Path to training data file in repo (json/jsonl/csv)",
+    )
+    valset: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Validation dataset (defaults to trainset if not provided)",
+    )
+    valset_path: str | None = Field(
+        default=None,
+        description="Path to validation data file in repo (json/jsonl/csv)",
+    )
+    input_keys: list[str] | None = Field(
+        default=None,
+        description="Explicit input field names for dspy.Example.with_inputs()",
+    )
+
+    # LM configuration
+    reflection_lm: str = Field(
+        default="openai/gpt-5-mini",
+        description="LM for GEPA reflection (instruction proposal)",
+    )
+
+    # Optimization config
+    max_metric_calls: int = Field(
+        default=1000,
+        description="Max metric evaluations (optimization budget)",
+    )
+    num_threads: int = Field(
+        default=1,
+        description="Threads for parallel DSPy evaluation",
+    )
+    seed: int = Field(
+        default=0,
+        description="Random seed for reproducibility",
+    )
+
+    # Authentication
+    installation_id: int | None = Field(
+        default=None,
+        description="GitHub App installation ID for private repos",
+    )
+
+    @model_validator(mode="after")
+    def check_trainset_provided(self) -> "OptimizeRequest":
+        if self.trainset is None and self.trainset_path is None:
+            raise ValueError("Provide either 'trainset' (inline data) or 'trainset_path' (file in repo)")
+        return self
+
+class JobStatusUpdateRequest(BaseModel):
+    """PUT /internal/job/{job_id}/status — update job status from GEPA sandbox."""
+
+    status: str
+    best_candidate: dict[str, str] | None = None
+    best_score: float | None = None
+    total_metric_calls: int | None = None
+    num_candidates: int | None = None
+    error: str | None = None
+
+
+class JobProgressUpdateRequest(BaseModel):
+    """PUT /internal/job/{job_id}/progress — iteration progress from GEPA."""
+
+    current_iteration: int
+    best_score: float
+    best_candidate: dict[str, str]
+    total_metric_calls: int
+    num_candidates: int

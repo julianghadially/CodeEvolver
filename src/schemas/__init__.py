@@ -10,23 +10,26 @@ from .requests import (
     ExecuteStepRequest,
     ConnectGitRequest,
     ExecuteSandboxRequest,
+    OptimizeRequest,
+    JobStatusUpdateRequest,
+    JobProgressUpdateRequest,
 )
 from .responses import (
     ExecuteStepResponse,
     ConnectGitResponse,
     GetProgramResponse,
     ExecuteSandboxResponse,
+    OptimizeResponse,
+    JobStatusResponse,
+    CancelCheckResponse,
 )
 from .db_schemas import (
     ClientRecord,
     ProgramRecord,
+    JobRecord,
 )
 from .job_schemas import (
     JobStatus,
-    OptimizeRequest,
-    OptimizeResponse,
-    JobStatusResponse,
-    JobRecord,
 )
 
 __all__ = [
@@ -46,5 +49,8 @@ __all__ = [
     "OptimizeRequest",
     "OptimizeResponse",
     "JobStatusResponse",
+    "JobStatusUpdateRequest",
+    "JobProgressUpdateRequest",
+    "CancelCheckResponse",
     "JobRecord",
 ]

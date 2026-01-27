@@ -151,7 +151,7 @@ candidate = {
 
 #### evaluate()
 DSPy-native evaluation (no sandbox for prompt-only v1):
-1. Instantiate DSPy module, load program.json, apply candidate prompt texts
+1. Import and instantiate DSPy module (from dotted import path), load program.json, apply candidate prompt texts
 2. Run each example through the program in-process
 3. Score with user's metric function
 4. Optionally capture DSPy traces for reflection

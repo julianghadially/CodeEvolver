@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 from .program_schemas import PipelineOutput
-
+from .job_schemas import JobStatus
 
 class GetProgramResponse(BaseModel):
     """Response payload for GET /program/{program_id}."""
@@ -48,3 +48,58 @@ class ExecuteSandboxResponse(BaseModel):
     traces: list[Any] | None = Field(default=None)
     branch_name: str | None = Field(default=None)
     error: str | None = Field(default=None)
+
+class OptimizeResponse(BaseModel):
+    """Response payload for POST /optimize."""
+
+    job_id: str
+    status: str = "pending"
+
+
+class JobStatusResponse(BaseModel):
+    """Response payload for GET /job/{job_id}."""
+
+    job_id: str
+    status: JobStatus
+    current_iteration: int | None = None
+    total_metric_calls: int | None = None
+    num_candidates: int | None = None
+    best_candidate: dict[str, str] | None = None
+    best_score: float | None = None
+    error: str | None = None
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    updated_at: datetime | None = None
+
+class OptimizeResponse(BaseModel):
+    """Response payload for POST /optimize."""
+
+    job_id: str
+    status: str = "pending"
+
+
+class JobStatusResponse(BaseModel):
+    """Response payload for GET /job/{job_id}."""
+
+    job_id: str
+    status: JobStatus
+    current_iteration: int | None = None
+    total_metric_calls: int | None = None
+    num_candidates: int | None = None
+    best_candidate: dict[str, str] | None = None
+    best_score: float | None = None
+    error: str | None = None
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+
+
+class CancelCheckResponse(BaseModel):
+    """GET /internal/job/{job_id}/check-cancelled."""
+
+    cancelled: bool
+

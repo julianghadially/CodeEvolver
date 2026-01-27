@@ -5,9 +5,11 @@ Run on Modal: modal serve modal_app.py (or modal deploy modal_app.py)
 """
 
 import os
+from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 
+from .config import settings
 from .db import get_database, lifespan
 from .schemas import (
     ConnectGitRequest,
@@ -25,16 +27,21 @@ from .schemas import (
     OptimizeRequest,
     OptimizeResponse,
     JobStatusResponse,
+    JobStatusUpdateRequest,
+    JobProgressUpdateRequest,
+    CancelCheckResponse,
     JobRecord,
     JobStatus,
 )
 from .services import GitService
+from .services.jwt_service import mint_job_token, validate_job_token
 from .core import (
     apply_prompt_mutation,
     load_program_json,
     save_program_json,
     run_program,
 )
+from modal_app import run_optimization
 
 # Check if running on Modal (sandbox execution enabled)
 USE_SANDBOX = os.getenv("CODEEVOLVER_USE_SANDBOX", "false").lower() == "true"
@@ -274,12 +281,21 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
     )
     await db.jobs.insert_one(job_record.model_dump())
 
+    # Mint a job-scoped JWT for sandbox→API callbacks
+    jwt_token = ""
+    callback_url = settings.callback_url
+    if settings.jwt_secret:
+        jwt_token = mint_job_token(
+            job_id,
+            ttl_seconds=settings.gepa_optimization_timeout + 300,
+        )
+
     # Spawn Modal function for optimization (fire-and-forget)
     try:
         import sys
         if "/app" not in sys.path:
             sys.path.insert(0, "/app")
-        from modal_app import run_optimization
+        
 
         run_optimization.spawn(
             job_id=job_id,
@@ -297,6 +313,8 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
             input_keys=request.input_keys,
             num_threads=request.num_threads,
             seed=request.seed,
+            callback_url=callback_url,
+            jwt_token=jwt_token,
         )
     except ImportError:
         # Not running on Modal — update job status to failed
@@ -450,3 +468,93 @@ async def execute_sandbox(request: ExecuteSandboxRequest) -> ExecuteSandboxRespo
             status="failed",
             error=f"Sandbox execution failed: {e}",
         )
+
+
+# ---------------------------------------------------------------------------
+# Internal callback endpoints (called by GEPA sandbox via JWT)
+# ---------------------------------------------------------------------------
+
+def _validate_internal_jwt(job_id: str, authorization: str | None) -> None:
+    """Extract Bearer token and validate it against the given job_id.
+
+    Raises HTTPException on any auth failure.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        validate_job_token(token, job_id)
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@app.put("/internal/job/{job_id}/status")
+async def internal_update_job_status(
+    job_id: str,
+    body: JobStatusUpdateRequest,
+    authorization: str | None = Header(default=None),
+):
+    """Update job status (called by GEPA sandbox via callback)."""
+    _validate_internal_jwt(job_id, authorization)
+
+    update: dict = {"status": body.status, "updated_at": datetime.now(timezone.utc)}
+
+    if body.status == "running":
+        update["started_at"] = datetime.now(timezone.utc)
+    if body.status in ("completed", "failed"):
+        update["completed_at"] = datetime.now(timezone.utc)
+
+    if body.best_candidate is not None:
+        update["best_candidate"] = body.best_candidate
+    if body.best_score is not None:
+        update["best_score"] = body.best_score
+    if body.total_metric_calls is not None:
+        update["total_metric_calls"] = body.total_metric_calls
+    if body.num_candidates is not None:
+        update["num_candidates"] = body.num_candidates
+    if body.error is not None:
+        update["error"] = body.error
+
+    db = get_database()
+    await db.jobs.update_one({"job_id": job_id}, {"$set": update})
+    return {"ok": True}
+
+
+@app.put("/internal/job/{job_id}/progress")
+async def internal_update_job_progress(
+    job_id: str,
+    body: JobProgressUpdateRequest,
+    authorization: str | None = Header(default=None),
+):
+    """Update iteration progress (called each GEPA iteration)."""
+    _validate_internal_jwt(job_id, authorization)
+
+    update = {
+        "current_iteration": body.current_iteration,
+        "best_score": body.best_score,
+        "best_candidate": body.best_candidate,
+        "total_metric_calls": body.total_metric_calls,
+        "num_candidates": body.num_candidates,
+        "updated_at": datetime.now(timezone.utc),
+    }
+
+    db = get_database()
+    await db.jobs.update_one({"job_id": job_id}, {"$set": update})
+    return {"ok": True}
+
+
+@app.get("/internal/job/{job_id}/check-cancelled", response_model=CancelCheckResponse)
+async def internal_check_cancelled(
+    job_id: str,
+    authorization: str | None = Header(default=None),
+):
+    """Check if a job has been cancelled (polled by GEPA progress tracker)."""
+    _validate_internal_jwt(job_id, authorization)
+
+    db = get_database()
+    job = await db.jobs.find_one({"job_id": job_id}, {"status": 1})
+    cancelled = bool(job and job.get("status") == "cancelled")
+    return CancelCheckResponse(cancelled=cancelled)
