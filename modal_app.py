@@ -253,7 +253,7 @@ def run_optimization(
     os.chdir("/app")
 
     from src.services.github_app import GitHubAppService
-    from src.gepa.eval_sandbox import GEPAEvalSandbox
+    from src.gepa.gepa_sandbox import GEPASandbox
     from src.gepa.optimizer import run_gepa_optimization
 
     # Clone repo to workspace (for dataset file access by the orchestrator)
@@ -275,8 +275,8 @@ def run_optimization(
         check=True,
     )
 
-    # Create and start the eval sandbox (client deps installed there, not here)
-    sandbox = GEPAEvalSandbox(
+    # Create and start the GEPA sandbox (client deps installed there, not here)
+    sandbox = GEPASandbox(
         app=app,
         repo_url=repo_url,
         installation_id=installation_id,

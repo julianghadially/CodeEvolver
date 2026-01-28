@@ -28,20 +28,80 @@ Security should be designed for from day one, because autonomous coding agents i
 
 See security architecture below.
 
+
+### Optimizer Infrastructure (incl. ClientSandbox)
+
+CodeEvolver Optimizers must execute client code in a sandbox that Matches the clients environment and provides a security layer. (we are executing client code as well as AI generated code).
+
+Meanwhile, The optimizer process is a long-running process that manages the code evolution / optimization.
+
+Our modal function controls for security risks. We are downloading and reading code from clients, and a coding agent is writing code to the client repo. This Function should be scoped to the client data only and not to other clients - i.e., we take away CodeEvolver database access. Instead, it is restricted to pre-defined CodeEvolver mongodb endpoints. That is, it cannot access other clients data. (Uses JWT tokens).
+
+#### ClientSandbox class is a base class for optimizer sandboxes. It provides:
+- `start()` — Create Modal sandbox, clone repo, install client's `requirements.txt`
+- `stop()` — Terminate sandbox
+- `reinstall_deps()` — Re-run pip install if requirements change
+- `exec_bash(command)` — Execute arbitrary bash commands
+- `exec_prebuilt(command)` — Abstract method for subclasses to implement prebuilt script executions for each optimizer
+
+Subclasses (e.g., `GEPASandbox`) implements `exec_prebuilt()` to run domain-specific scripts inside the sandbox. This enables process-level isolation — the orchestrator (Modal Function) can run without client dependencies installed.
+
+#### Architecture
+The GEPA orchestrator (Modal Function) Is an isolated process that runs without `dspy` installed. Client code (DSPy programs, metrics) runs in a separate `GEPASandbox`. Communication happens via JSON IPC through prebuilt scripts.
+
+```
+Modal Function (gepa_image — no dspy)         Modal Sandbox (client's env)
+┌─────────────────────────────────────┐       ┌──────────────────────────────────┐
+│ run_optimization()                  │       │ /workspace/ (cloned from GitHub) │
+│                                     │       │ pip install -r requirements.txt  │
+│ GEPA loop:                          │       │                                  │
+│   adapter.build_seed_candidate()    │       │ sandbox_scripts/master.py        │
+│     → sandbox.exec_prebuilt()     ──┼──────>│   dispatches to dspy/*.py        │
+│     ← JSON result                 <─┼───────│                                  │
+│   adapter.evaluate(batch, cand)     │       │ EVAL_RESULT:{json} on stdout     │
+│   adapter.make_reflective_dataset() │       │                                  │
+│   GEPA reflection (litellm)         │       │                                  │
+└─────────────────────────────────────┘       └──────────────────────────────────┘
+```
+
+This avoids dependency conflicts between GEPA's orchestration deps and the client's dspy version.
+
+**Prebuilt Scripts** (`src/core/sandbox_scripts/`):
+Scripts copied into the sandbox image and executed via `sandbox.exec()`. They have full access to the client's Python environment. The `master.py` dispatcher routes commands to appropriate handlers.
+
+For GEPA-specific sandbox details, see `specs/gepa_plan.md`.
+
+
+### Privacy
+- Future: Option for users to run execution environment on their own private cloud
+- No unnecessary third-party services. Necessary third parties include modal.
+
+### Technology Stack and Architecture
+- **Language**: Python
+- **API Framework**: Modal Sandbox App serving FastAPI
+- **Database**: MongoDB (flexible, but preferred)
+- **Execution Environment**: Modal Sandbox. (must spin up in <10 seconds, support 20+ concurrent environments per user)
+
 ## V1 outcomes (current goal):
 - Connect a GitHub repository [complete]
 - Execute a change request [complete]
 - GEPA optimizer runs in CodeEvolver [WIP]
 - Complete v1 of security: (see for v1 below)
 - API / sandbox deployed to Modal App
+- **Security needs for v1:**
+  - Keep workers specific to each client
+  - Make API requests direct to modal / sandbox app (Omit separate api gateway)
+  - No egress proxy (temp)
+  - Use env for secrets (temp)
+-------------------------------------------------------------------------
 
-## Technology Stack and Architecture
-- **Language**: Python
-- **API Framework**: Modal Sandbox App serving FastAPI
-- **Database**: MongoDB (flexible, but preferred)
-- **Execution Environment**: Modal Sandbox. (must spin up in <10 seconds, support 20+ concurrent environments per user)
+# Temporary space for old SandBox
 
-**Sandbox Architecture:**
+We previously created a sandbox app architecture for making code change requirements. This is not going to be the architecture we end up using. However, I am referencing it, to remove any confusion.
+
+
+
+**SandboxApp Architecture (Old):**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -136,19 +196,16 @@ See security architecture below.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Security needs for v1:** 
-- Keep workers specific to each client
-- Make API requests direct to modal / sandbox app (Omit separate api gateway)
-- No egress proxy (temp)
-- Use env for secrets (temp)
-
-### Privacy
-- Future: Option for users to run execution environment on their own private cloud
-- No unnecessary third-party services. Necessary third parties include modal.
 
 
--------------------------------------------------------------------------
 
+
+
+
+
+
+
+--------------------------------------------------------------------------------
 
 # Ongoing notes on requirements
 
@@ -555,13 +612,14 @@ GEPA orchestrates the evolutionary optimization. Runs on this service via /optim
 
 ### Completed (v0.3.0 - GEPA Integration)
 - [x] CodeEvolverDSPyAdapter implementing GEPAAdapter protocol (src/gepa/adapter.py)
-- [x] MongoDBProgressTracker for per-iteration state persistence (src/gepa/progress.py)
+- [x] CallbackProgressTracker for per-iteration state persistence via HTTP (src/gepa/callback.py)
 - [x] GEPA optimization orchestrator (src/gepa/optimizer.py)
 - [x] POST /optimize endpoint - starts GEPA optimization job
 - [x] GET /job/{job_id} endpoint - returns job status and progress
 - [x] Job schemas (OptimizeRequest, JobStatusResponse, JobRecord)
 - [x] Modal function for long-running GEPA optimization (run_optimization)
-- [x] GEPA image with DSPy, litellm, pymongo dependencies
+- [x] Process-level isolation: ClientSandbox base class + GEPASandbox (no dspy in orchestrator)
+- [x] Sandbox prebuilt scripts for DSPy evaluation (src/core/sandbox_scripts/)
 
 ### Pending
 - [ ] End-to-end testing of GEPA optimization (/optimize)
@@ -588,23 +646,34 @@ Your Code (Python) → claude-agent-sdk (pip) → Claude Code CLI (npm) → Anth
 
 ### Implementation Notes
 
-**Architecture (v0.3.0 - GEPA integration):**
+**Architecture (v0.3.2 - Process Isolation):**
 ```
 src/
   core/                    # Core logic (inspired by modal-vibe)
     __init__.py
-    sandbox.py             # SandboxApp class, execute_mutation()
+    sandbox.py             # SandboxApp class, execute_mutation() (short-lived, per-mutation)
+    client_sandbox.py      # ClientSandbox base class (long-lived, for optimizers)
     agent.py               # Claude agent script generation
     program_runner.py      # DSPy program execution
     system_prompt.py       # Prompts for coding agent
+    sandbox_scripts/       # Scripts that run inside client sandboxes
+      __init__.py
+      master.py            # Main dispatcher (entry point)
+      dspy/                # DSPy-specific handlers
+        __init__.py        # Shared utilities
+        build_seed_candidate.py
+        evaluate.py
+        make_reflective_dataset.py
   gepa/                    # GEPA optimization integration
     __init__.py
-    adapter.py             # CodeEvolverDSPyAdapter (GEPAAdapter protocol)
-    optimizer.py            # run_gepa_optimization() orchestrator
-    progress.py            # MongoDBProgressTracker (StopperProtocol)
+    adapter.py             # CodeEvolverDSPyAdapter (RPC proxy to sandbox)
+    gepa_sandbox.py        # GEPASandbox (extends ClientSandbox)
+    optimizer.py           # run_gepa_optimization() orchestrator
+    callback.py            # CallbackProgressTracker (StopperProtocol via HTTP)
+    utils.py               # Dataset loading utilities (no dspy)
   services/                # Supporting services
     git_service.py         # Git operations (clone, worktree, commit)
-    github_app.py          # GitHub App authentication (used by sandbox.py)
+    github_app.py          # GitHub App authentication
   schemas/                 # Pydantic models
     job_schemas.py         # OptimizeRequest, JobStatusResponse, JobRecord
   db/                      # MongoDB integration
@@ -634,15 +703,13 @@ modal_app.py               # Modal app entrypoint (includes run_optimization)
 - POST /optimize creates a job in MongoDB and spawns a Modal function via `.spawn()` (fire-and-forget)
 - The `run_optimization` Modal function runs `gepa.optimize()` synchronously (blocking)
 - `CodeEvolverDSPyAdapter` implements the `GEPAAdapter` protocol (structural typing, no inheritance)
-- `MongoDBProgressTracker` implements `StopperProtocol` — called each iteration to persist state and check cancellation
-- Uses `pymongo` (sync) inside the optimization loop; FastAPI endpoints use `motor` (async)
+- `CallbackProgressTracker` implements `StopperProtocol` — called each iteration to persist state via HTTP callbacks
+- FastAPI endpoints use `motor` (async); optimization callbacks use `httpx` (sync)
 
-**Sync/Async Strategy:**
-GEPA's `optimize()` is synchronous. The Modal function is sync. The adapter uses DSPy's `Evaluate` (sync) and `bootstrap_trace_data` (sync). MongoDB operations inside the optimization loop use `pymongo` (sync driver), not `motor`.
+
 
 **GEPA Package:**
-- Development: installed from local GEPA-CodeEvolver dir via `add_local_dir()` + `pip install -e`
-- Production: will switch to `pip install gepa @ git+https://github.com/<org>/GEPA-CodeEvolver.git`
+- Installed from PyPI: `pip install gepa>=0.0.26`
 
 **V1 Scope (prompt-only):**
 - Candidates are `dict[str, str]` mapping predictor names to instruction text
@@ -652,6 +719,8 @@ GEPA's `optimize()` is synchronous. The Modal function is sync. The adapter uses
 
 **Metric Function:**
 Users provide a metric as a single dotted import path (e.g., `eval.evaluate.metric`). Last component is the function name. The function signature must be `metric(example: dspy.Example, prediction: dspy.Prediction) -> float`.
+
+For detailed GEPA architecture, see `specs/gepa_plan.md`.
 
 ### Implementation Notes (v0.3.1 - Unified Calling Pattern)
 
@@ -667,12 +736,16 @@ candidate = {
 }
 ```
 
-**Evaluation: DSPy-native (v0.3.2)**
-The adapter evaluates directly using DSPy — no eval script needed for prompt-only optimization.
-The adapter imports the user's DSPy module, applies candidate prompt instructions in-memory,
-runs each example, and scores with the user's metric function.
+**Evaluation: Sandbox-Isolated (v0.3.2)**
+The adapter delegates all DSPy operations to `GEPASandbox` via `exec_prebuilt()`. The sandbox runs prebuilt scripts (`sandbox_scripts/dspy/evaluate.py`) that:
+1. Import the user's DSPy module
+2. Apply candidate prompt instructions in-memory
+3. Run each example through the program
+4. Score with the user's metric function
+5. Optionally capture traces for reflection
+6. Return results as JSON via stdout
 
-Sandbox mode with eval scripts is deferred to v2 (code mutations).
+This process isolation prevents dependency conflicts between the orchestrator and client code.
 
 **User Repository Requirements:**
 Users provide:

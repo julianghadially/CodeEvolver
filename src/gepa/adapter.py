@@ -1,7 +1,7 @@
 """CodeEvolver DSPy adapter for GEPA optimization.
 
 Implements the GEPAAdapter protocol via structural typing (no inheritance).
-All DSPy operations are delegated to a GEPAEvalSandbox via JSON IPC,
+All DSPy operations are delegated to a GEPASandbox via JSON IPC,
 providing process-level isolation between the GEPA orchestrator and client code.
 
 Copyright notice for GEPA-derived patterns:
@@ -28,7 +28,7 @@ class CodeEvolverDSPyAdapter:
     No dspy is imported in this module.
 
     Args:
-        sandbox_manager: GEPAEvalSandbox instance (already started).
+        sandbox_manager: GEPASandbox instance (already started).
         program: DSPy module class path (e.g., "src.factchecker.FactCheckerPipeline").
         metric: Dotted import path to metric function (e.g., "eval.metric").
         saved_program_json_path: Relative path to program.json within the repo (optional).
@@ -67,7 +67,7 @@ class CodeEvolverDSPyAdapter:
         Returns:
             Dict with 'git_branch' key and predictor instruction texts.
         """
-        result = self._sandbox.exec_command({
+        result = self._sandbox.exec_prebuilt({
             "command": "build_seed_candidate",
             "program": self.program_path,
             "saved_program_json_path": self.saved_program_json_path,
@@ -112,7 +112,7 @@ class CodeEvolverDSPyAdapter:
             else:
                 batch_json.append(dict(ex))
 
-        result = self._sandbox.exec_command({
+        result = self._sandbox.exec_prebuilt({
             "command": "evaluate",
             "program": self.program_path,
             "metric": self.metric_path,
@@ -147,12 +147,12 @@ class CodeEvolverDSPyAdapter:
     ) -> Mapping[str, Sequence[Mapping[str, Any]]]:
         """Build reflective dataset from DSPy traces via sandbox.
 
-        Delegates to eval_worker which uses signature_key fingerprinting
+        Delegates to sandbox scripts which use signature_key fingerprinting
         to match serialized trace entries to predictors.
         """
         prompt_texts = self._get_prompt_texts(candidate)
 
-        result = self._sandbox.exec_command({
+        result = self._sandbox.exec_prebuilt({
             "command": "make_reflective_dataset",
             "program": self.program_path,
             "saved_program_json_path": self.saved_program_json_path,

@@ -12,6 +12,7 @@ from .sandbox import (
     execute_mutation,
     get_sandbox_image,
 )
+from .client_sandbox import ClientSandbox
 from .agent import (
     AgentResult,
     generate_agent_script,
@@ -43,6 +44,8 @@ __all__ = [
     "MutationResult",
     "execute_mutation",
     "get_sandbox_image",
+    # Client Sandbox (base class for optimizer sandboxes)
+    "ClientSandbox",
     # Agent
     "AgentResult",
     "run_code_mutation_agent",

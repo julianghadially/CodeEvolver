@@ -2,13 +2,13 @@
 
 from .adapter import CodeEvolverDSPyAdapter
 from .callback import CallbackJobUpdater, CallbackProgressTracker
-from .eval_sandbox import GEPAEvalSandbox
+from .gepa_sandbox import GEPASandbox
 from .optimizer import run_gepa_optimization
 
 __all__ = [
     "CodeEvolverDSPyAdapter",
     "CallbackJobUpdater",
     "CallbackProgressTracker",
-    "GEPAEvalSandbox",
+    "GEPASandbox",
     "run_gepa_optimization",
 ]

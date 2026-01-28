@@ -74,7 +74,7 @@ def run_gepa_optimization(
         metric: Dotted import path to metric function.
         reflection_lm: LM for GEPA reflection.
         max_metric_calls: Budget for optimization.
-        sandbox_manager: GEPAEvalSandbox instance (already started).
+        sandbox_manager: GEPASandbox instance (already started).
         callback_url: Base URL for HTTP callbacks to FastAPI.
         jwt_token: Job-scoped JWT for authenticating callbacks.
         saved_program_json_path: Relative path to program.json (optional).

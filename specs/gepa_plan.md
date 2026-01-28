@@ -86,7 +86,7 @@ Read all the assistant responses and the corresponding feedback. Identify all ni
 
 Provide the new instructions within ``` blocks.
 
-## Proposed Plan for CodeEvolver
+## Proposed GEPA Plan for CodeEvolver
 
 ### Two Repositories
 
@@ -98,10 +98,13 @@ Provide the new instructions within ``` blocks.
 ### Optimization jobs to be done 
 Implements gepa.optimizer and runs in /optimize at API in CE. 
 
-#### Jobs
+#### GEPA Jobs
 - /optimize endpoint - CE
-- main GEPA run program and evaluate orchestation - CE imports gepa
-    - Initialize GEPAState with seed_candidate
+- `run_optimization` Create a MODAL function, which runs `run_gepa_optimization`. This is the main GEPA orchestator, Which will perform the following:
+    - Create the trainset (looks like dspy.Example) - CE
+    - Initialize adapter
+    - Build seed candidate
+    - start the GEPA loop
 - LOOP:
     - Select candidate from Pareto frontier - GEPA
     - Sample minibatch from trainset - GEPA
@@ -122,11 +125,10 @@ Implements gepa.optimizer and runs in /optimize at API in CE.
 *GEPA = gepa-ai/gepa, no fork no mod
 *GEPAmod = GEPA-CodeEvolver*
 
+### GEPA Changes:
 
-## Plan:
-
-1. Create a CodeEvolverAdapter that handles the "code" mutation path separately - CE
-    - Update evaluate() 
+1. Create a CodeEvolverAdapter that handles the "code" mutations and prompt mutations - CE
+    - Update Adapter.evaluate() 
     - Can have different adapters for different AI frameworks e.g. A CodeEvolverDSPYAdapter vs opik, etc. 
 2. Add Reflective Agent with tools (via adapter) - CE
     - **Modify proposer, ReflectiveMutationProposer, with tools?:** ToolSet and workspace_context that interacts with codebase. wraps the Claude Agents SDK with full codebase access
@@ -180,6 +182,15 @@ The GEPA optimization interface
    - Return optimized program from `adapter.build_program(result.best_candidate)`
 
 
+### Sandbox Coordination
+The GEPA optimizer process is managed by a long-running MODAL function that manages the code evolution / optimization. It creates a Client sandbox to run client code inside of. See specs/requirements.md for ClientSandbox architecture.
 
+`GEPASandbox` manages the client sandbox environment (long-running), in service of a long-running Modal function that runs the optimization loop.
 
+`GEPASandbox` inherits from `ClientSandbox` (in `src/core/client_sandbox.py`). The client sandbox mimics the client's AI application environment — it installs the client's repository and `requirements.txt`. To run GEPA without any DSPy dependencies in the orchestrator, evaluation commands are delegated to prebuilt scripts inside the sandbox.
 
+**Key Methods:**
+- `GEPASandbox.exec_prebuilt(command)` — Sends JSON command to `master.py`, returns JSON result
+- `ClientSandbox.start()` — Clones repo, installs client requirements.txt
+- `ClientSandbox.exec_bash(command)` — Run arbitrary bash in sandbox
+- `ClientSandbox.stop()` — Terminate sandbox
