@@ -1,8 +1,10 @@
 """GEPA optimization orchestrator for CodeEvolver.
 
 This module is called from the Modal function to set up and run the
-GEPA optimization loop. It loads user code, creates the adapter,
-and calls gepa.optimize().
+GEPA optimization loop. It creates the adapter (which proxies to the
+eval sandbox) and calls gepa.optimize().
+
+No dspy is imported here — all DSPy operations happen inside the sandbox.
 """
 
 from pathlib import Path
@@ -13,7 +15,33 @@ from gepa.core.result import GEPAResult
 
 from .adapter import CodeEvolverDSPyAdapter
 from .callback import CallbackJobUpdater, CallbackProgressTracker
-from .utils import load_import_path, resolve_dataset
+from .utils import load_dataset_from_file
+
+
+def _resolve_dataset_raw(
+    workspace_path: Path,
+    inline_data: list[dict[str, Any]] | None,
+    file_path: str | None,
+    required: bool = True,
+) -> list[dict[str, Any]] | None:
+    """Resolve a dataset as raw dicts (no dspy.Example conversion).
+
+    Args:
+        workspace_path: Root of the cloned repo.
+        inline_data: Dataset provided inline in the API request.
+        file_path: Path to a data file in the repo (relative).
+        required: If True, raises when neither source is provided.
+
+    Returns:
+        List of plain dicts, or None if not required and not provided.
+    """
+    if inline_data is not None:
+        return inline_data
+    if file_path is not None:
+        return load_dataset_from_file(workspace_path / file_path)
+    if required:
+        raise ValueError("No dataset: provide inline data or a file path")
+    return None
 
 
 def run_gepa_optimization(
@@ -25,6 +53,7 @@ def run_gepa_optimization(
     metric: str,
     reflection_lm: str,
     max_metric_calls: int,
+    sandbox_manager: Any,
     saved_program_json_path: str | None = None,
     trainset_json: list[dict[str, Any]] | None = None,
     trainset_path: str | None = None,
@@ -40,11 +69,12 @@ def run_gepa_optimization(
 
     Args:
         job_id: Unique job identifier.
-        workspace_path: Path to cloned user repo.
+        workspace_path: Path to cloned user repo (local to orchestrator).
         program: Dotted import path to DSPy module class.
         metric: Dotted import path to metric function.
         reflection_lm: LM for GEPA reflection.
         max_metric_calls: Budget for optimization.
+        sandbox_manager: GEPAEvalSandbox instance (already started).
         callback_url: Base URL for HTTP callbacks to FastAPI.
         jwt_token: Job-scoped JWT for authenticating callbacks.
         saved_program_json_path: Relative path to program.json (optional).
@@ -66,23 +96,21 @@ def run_gepa_optimization(
     updater.set_running()
 
     try:
-        # Load user's metric function
-        metric_fn = load_import_path(workspace_path, metric)
+        # Resolve datasets as raw dicts (no dspy.Example — conversion happens in sandbox)
+        trainset = _resolve_dataset_raw(ws, trainset_json, trainset_path, required=True)
+        valset = _resolve_dataset_raw(ws, valset_json, valset_path, required=False)
 
-        # Resolve datasets
-        trainset = resolve_dataset(ws, trainset_json, trainset_path, input_keys, required=True)
-        valset = resolve_dataset(ws, valset_json, valset_path, input_keys, required=False)
-
-        # Create the adapter
+        # Create the adapter (RPC proxy to sandbox)
         adapter = CodeEvolverDSPyAdapter(
-            workspace_path=workspace_path,
+            sandbox_manager=sandbox_manager,
             program=program,
-            metric_fn=metric_fn,
+            metric=metric,
             saved_program_json_path=saved_program_json_path,
             num_threads=num_threads,
+            input_keys=input_keys,
         )
 
-        # Build seed candidate from program.json
+        # Build seed candidate from program.json (via sandbox)
         seed_candidate = adapter.build_seed_candidate()
 
         # Create callback progress tracker (also handles cancellation)

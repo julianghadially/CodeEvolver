@@ -191,7 +191,8 @@ async def execute_in_sandbox(
     }
 
 
-# Image for GEPA optimization (DSPy, litellm, gepa)
+# Image for GEPA optimization orchestrator (litellm, gepa — NO dspy).
+# DSPy and client deps are installed inside the eval sandbox instead.
 # DB drivers (pymongo/motor) are NOT needed here — progress is reported via HTTP callbacks.
 gepa_image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -199,7 +200,6 @@ gepa_image = (
     .pip_install(
         "pydantic-settings>=2.6.0",
         "gitpython>=3.1.0",
-        "dspy>=2.5.0",
         "litellm>=1.64.0",
         "httpx>=0.27.0",
         "pyjwt[cryptography]>=2.8.0",
@@ -213,7 +213,7 @@ gepa_image = (
 @app.function(
     image=gepa_image,
     volumes={"/workspaces": workspaces_volume},
-    secrets=[modal.Secret.from_name("codeevolver-sandbox-secrets")],
+    secrets=[modal.Secret.from_name("codeevolver-worker-secrets")],
     timeout=3600,
     cpu=4,
     memory=8192,
@@ -241,6 +241,9 @@ def run_optimization(
 
     This is a long-running synchronous function. GEPA's optimize() blocks
     until completion, cancellation, or budget exhaustion.
+
+    Client code (DSPy programs, metrics) runs in a separate Modal Sandbox
+    to avoid dependency conflicts with the orchestrator.
     """
     import os
     import subprocess
@@ -249,10 +252,11 @@ def run_optimization(
     sys.path.insert(0, "/app")
     os.chdir("/app")
 
-    from src.config import settings
     from src.services.github_app import GitHubAppService
+    from src.gepa.eval_sandbox import GEPAEvalSandbox
+    from src.gepa.optimizer import run_gepa_optimization
 
-    # Clone repo to workspace
+    # Clone repo to workspace (for dataset file access by the orchestrator)
     workspace_path = f"/workspaces/gepa_{job_id}/main"
     os.makedirs(f"/workspaces/gepa_{job_id}", exist_ok=True)
 
@@ -265,43 +269,44 @@ def run_optimization(
                 repo_url, token
             )
 
-    # Clone
+    # Clone (orchestrator needs local copy for dataset file reading)
     subprocess.run(
         ["git", "clone", authenticated_url, workspace_path],
         check=True,
     )
 
-    # Install user's requirements.txt if present
-    req_path = os.path.join(workspace_path, "requirements.txt")
-    if os.path.exists(req_path):
-        subprocess.run(
-            ["pip", "install", "-r", req_path],
-            check=True,
-        )
-
-    # API keys are already available via Modal secrets in the environment
-    from src.gepa.optimizer import run_gepa_optimization
-
-    result = run_gepa_optimization(
-        job_id=job_id,
-        callback_url=callback_url,
-        jwt_token=jwt_token,
-        workspace_path=workspace_path,
-        program=program,
-        metric=metric,
-        reflection_lm=reflection_lm,
-        max_metric_calls=max_metric_calls,
-        saved_program_json_path=saved_program_json_path,
-        trainset_json=trainset_json,
-        trainset_path=trainset_path,
-        valset_json=valset_json,
-        valset_path=valset_path,
-        input_keys=input_keys,
-        num_threads=num_threads,
-        seed=seed,
+    # Create and start the eval sandbox (client deps installed there, not here)
+    sandbox = GEPAEvalSandbox(
+        app=app,
+        repo_url=repo_url,
+        installation_id=installation_id,
+        timeout=3600,
     )
+    sandbox.start()
 
-    return result
+    try:
+        result = run_gepa_optimization(
+            job_id=job_id,
+            callback_url=callback_url,
+            jwt_token=jwt_token,
+            workspace_path=workspace_path,
+            program=program,
+            metric=metric,
+            reflection_lm=reflection_lm,
+            max_metric_calls=max_metric_calls,
+            sandbox_manager=sandbox,
+            saved_program_json_path=saved_program_json_path,
+            trainset_json=trainset_json,
+            trainset_path=trainset_path,
+            valset_json=valset_json,
+            valset_path=valset_path,
+            input_keys=input_keys,
+            num_threads=num_threads,
+            seed=seed,
+        )
+        return result
+    finally:
+        sandbox.stop()
 
 
 @app.local_entrypoint()

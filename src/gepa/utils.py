@@ -1,13 +1,14 @@
-"""Utility functions for GEPA optimization."""
+"""Utility functions for GEPA optimization.
+
+Pure file I/O and import utilities. No dspy dependency.
+"""
 
 import csv
 import importlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, Callable
-
-from dspy.primitives import Example
+from typing import Any
 
 
 def load_import_path(workspace_path: str, dotted_path: str) -> Any:
@@ -71,40 +72,3 @@ def load_dataset_from_file(file_path: Path) -> list[dict[str, Any]]:
         return items
 
     raise ValueError(f"Unsupported dataset format '{suffix}'. Use .json, .jsonl, or .csv")
-
-
-def resolve_dataset(
-    workspace_path: Path,
-    inline_data: list[dict[str, Any]] | None,
-    file_path: str | None,
-    input_keys: list[str] | None = None,
-    required: bool = True,
-) -> list[Example] | None:
-    """Resolve a dataset from either inline data or a file path.
-
-    Args:
-        workspace_path: Root of the cloned repo.
-        inline_data: Dataset provided inline in the API request.
-        file_path: Path to a data file in the repo (relative).
-        input_keys: Fields to mark as inputs via with_inputs().
-        required: If True, raises when neither source is provided.
-
-    Returns:
-        List of dspy.Example objects, or None if not required and not provided.
-    """
-    if inline_data is not None:
-        raw = inline_data
-    elif file_path is not None:
-        raw = load_dataset_from_file(workspace_path / file_path)
-    elif required:
-        raise ValueError("No dataset: provide inline data or a file path")
-    else:
-        return None
-
-    examples = []
-    for item in raw:
-        ex = Example(**item)
-        if input_keys:
-            ex = ex.with_inputs(*input_keys)
-        examples.append(ex)
-    return examples
