@@ -4,6 +4,9 @@ Extracts initial instructions from all predictors in a DSPy module.
 """
 
 from . import build_program
+from ..utils import get_logger, make_success_result
+
+log = get_logger("build_seed")
 
 
 def handle(cmd: dict, workspace: str) -> dict:
@@ -21,10 +24,14 @@ def handle(cmd: dict, workspace: str) -> dict:
     program_path = cmd["program"]
     saved_json = cmd.get("saved_program_json_path")
 
+    log.info(f"Building program: {program_path}")
     program = build_program(workspace, program_path, saved_json)
+    log.info(f"Program type: {type(program).__name__}")
 
     candidate = {}
     for name, pred in program.named_predictors():
         candidate[name] = pred.signature.instructions
+        log.info(f"Predictor '{name}': {len(pred.signature.instructions)} chars")
 
-    return {"success": True, "candidate": candidate}
+    log.info(f"Extracted {len(candidate)} predictors")
+    return make_success_result({"candidate": candidate}, logs=log.get_logs())

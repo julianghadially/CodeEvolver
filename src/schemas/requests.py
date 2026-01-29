@@ -184,6 +184,10 @@ class OptimizeRequest(BaseModel):
     )
 
     # LM configuration
+    program_lm: str = Field(
+        default="openai/gpt-5-mini",
+        description="LM for running the DSPy program during evaluation",
+    )
     reflection_lm: str = Field(
         default="openai/gpt-5-mini",
         description="LM for GEPA reflection (instruction proposal)",

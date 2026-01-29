@@ -14,10 +14,11 @@ class CallbackJobUpdater:
     """Update job status via HTTP callbacks to the FastAPI internal API.
 
     Each method issues a synchronous PUT to /internal/job/{job_id}/status.
+    If callback_url is empty, all methods are no-ops.
     """
 
     def __init__(self, callback_url: str, jwt_token: str, job_id: str):
-        self.base_url = callback_url.rstrip("/")
+        self.base_url = callback_url.rstrip("/") if callback_url else ""
         self.job_id = job_id
         self.headers = {"Authorization": f"Bearer {jwt_token}"}
 
@@ -25,7 +26,7 @@ class CallbackJobUpdater:
         return f"{self.base_url}/internal/job/{self.job_id}/status"
 
     def set_running(self) -> None:
-        with httpx.Client(timeout=10) as client:
+        with httpx.Client(timeout=60) as client:
             client.put(
                 self._status_url(),
                 json={"status": "running"},
@@ -39,7 +40,7 @@ class CallbackJobUpdater:
         total_metric_calls: int,
         num_candidates: int,
     ) -> None:
-        with httpx.Client(timeout=10) as client:
+        with httpx.Client(timeout=60) as client:
             client.put(
                 self._status_url(),
                 json={
@@ -53,7 +54,7 @@ class CallbackJobUpdater:
             )
 
     def set_failed(self, error: str) -> None:
-        with httpx.Client(timeout=10) as client:
+        with httpx.Client(timeout=60) as client:
             client.put(
                 self._status_url(),
                 json={"status": "failed", "error": error},
@@ -92,7 +93,7 @@ class CallbackProgressTracker:
                 else {}
             )
 
-            with httpx.Client(timeout=10) as client:
+            with httpx.Client(timeout=60) as client:
                 # Report progress
                 client.put(
                     self._progress_url(),

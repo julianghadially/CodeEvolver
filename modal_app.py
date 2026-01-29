@@ -12,6 +12,7 @@ The architecture follows the modal-vibe pattern:
 """
 
 import modal
+from modal import FilePatternMatcher
 
 # Create or lookup the Modal app
 app = modal.App("codeevolver")
@@ -36,7 +37,7 @@ web_image = (
         "cryptography>=41.0.0",
         "certifi",
     )
-    .add_local_dir(".", remote_path="/app")
+    .add_local_dir(".", remote_path="/app", ignore=FilePatternMatcher.from_file(".modalignore"),)
 )
 
 # Base image for sandbox execution (Claude Agent SDK + DSPy)
@@ -60,7 +61,7 @@ sandbox_image = (
         "pyjwt[cryptography]>=2.8.0",
         "pydantic-settings>=2.6.0",
     )
-    .add_local_dir(".", remote_path="/app")
+    .add_local_dir(".", remote_path="/app", ignore=FilePatternMatcher.from_file(".modalignore"),)
 )
 
 
@@ -206,7 +207,7 @@ gepa_image = (
         "tqdm>=4.66.1",
         "gepa>=0.0.26",
     )
-    .add_local_dir(".", remote_path="/app")
+    .add_local_dir(".", remote_path="/app", ignore=FilePatternMatcher.from_file(".modalignore"),)
 )
 
 
@@ -228,6 +229,7 @@ def run_optimization(
     trainset_path: str | None = None,
     valset_json: list | None = None,
     valset_path: str | None = None,
+    program_lm: str = "openai/gpt-5-mini",
     reflection_lm: str = "openai/gpt-5-mini",
     max_metric_calls: int = 1000,
     installation_id: int | None = None,
@@ -303,6 +305,7 @@ def run_optimization(
             input_keys=input_keys,
             num_threads=num_threads,
             seed=seed,
+            program_lm=program_lm,
         )
         return result
     finally:

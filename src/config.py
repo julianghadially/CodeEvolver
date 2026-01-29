@@ -46,7 +46,7 @@ class Settings(BaseSettings):
 
     # JWT / callback settings (for GEPA sandbox → FastAPI communication)
     jwt_secret: Optional[str] = None       # CODEEVOLVER_JWT_SECRET (HS256 key)
-    callback_url: str = ""                 # CODEEVOLVER_CALLBACK_URL (Modal web endpoint)
+    callback_url: str = "https://julianghadially--codeevolver-fastapi-app-dev.modal.run"                 # CODEEVOLVER_CALLBACK_URL (Modal web endpoint)
 
     model_config = {"env_prefix": "CODEEVOLVER_"}
     

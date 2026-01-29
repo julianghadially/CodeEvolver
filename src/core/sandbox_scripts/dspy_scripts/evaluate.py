@@ -3,9 +3,14 @@
 Runs a DSPy program on a batch of examples, applying candidate instructions
 and scoring with the provided metric. Optionally captures execution traces
 for reflective dataset building.
+
+Requires DSPy >= 2.6.0.
 """
 
 from . import build_program, load_import_path, signature_key
+from ..utils import get_logger, make_error_result, make_success_result
+
+log = get_logger("evaluate")
 
 
 def handle(cmd: dict, workspace: str) -> dict:
@@ -22,6 +27,7 @@ def handle(cmd: dict, workspace: str) -> dict:
             - num_threads: Parallelism for evaluation
             - input_keys: Fields to mark as inputs on examples
             - failure_score: Score to use on failures
+            - program_lm: LM model string for DSPy (e.g., 'openai/gpt-4o-mini')
         workspace: Path to cloned client repository
 
     Returns:
@@ -35,16 +41,28 @@ def handle(cmd: dict, workspace: str) -> dict:
     saved_json = cmd.get("saved_program_json_path")
     candidate = cmd.get("candidate", {})
     batch = cmd.get("batch", [])
-    capture_traces = cmd.get("capture_traces", False)
+    capture_traces = cmd.get("capture_traces", True)
     num_threads = cmd.get("num_threads", 1)
     input_keys = cmd.get("input_keys", [])
     failure_score = cmd.get("failure_score", 0.0)
+    program_lm = cmd.get("program_lm", "openai/gpt-5-mini")
+
+    log.info(f"DSPy version: {dspy.__version__}")
+
+    # Configure DSPy with the specified LM
+    log.info(f"Configuring DSPy with LM: {program_lm}")
+    lm = dspy.LM(program_lm)
+    dspy.configure(lm=lm)
+    log.info(f"Program: {program_path}, Metric: {metric_path}")
+    log.info(f"Batch size: {len(batch)}, capture_traces: {capture_traces}, num_threads: {num_threads}")
 
     # Load metric function
     metric_fn = load_import_path(workspace, metric_path)
+    log.info(f"Loaded metric: {metric_fn}")
 
     # Build program with candidate instructions
     program = build_program(workspace, program_path, saved_json, candidate)
+    log.info(f"Built program: {type(program).__name__}")
 
     # Convert batch dicts to dspy.Example
     examples = []
@@ -53,39 +71,53 @@ def handle(cmd: dict, workspace: str) -> dict:
         if input_keys:
             ex = ex.with_inputs(*input_keys)
         examples.append(ex)
+    log.info(f"Converted {len(examples)} examples")
 
     if capture_traces:
+        log.info("Running evaluation with traces...")
         return _evaluate_with_traces(
             program, metric_fn, examples, failure_score, num_threads
         )
     else:
+        log.info("Running simple evaluation...")
         return _evaluate_simple(
             program, metric_fn, examples, failure_score, num_threads
         )
 
 
 def _evaluate_simple(program, metric_fn, examples, failure_score, num_threads) -> dict:
-    """Evaluate using dspy.Evaluate — returns outputs + scores, no traces."""
+    """Evaluate using dspy.Evaluate — returns outputs + scores, no traces.
+
+    Note: Requires DSPy >= 2.6.0 which changed dspy.Evaluate to return an
+    EvaluationResult object instead of (score, results_list) tuple.
+    The return_outputs parameter was removed in this version.
+    """
     import dspy
 
+    log.info("Creating dspy.Evaluate...")
     evaluator = dspy.Evaluate(
         devset=examples,
         metric=metric_fn,
         num_threads=num_threads,
         display_progress=False,
         return_all_scores=True,
-        return_outputs=True,
     )
 
+    log.info("Running evaluator...")
     result = evaluator(program)
+    log.info(f"Evaluator returned: type={type(result)}, has_results={hasattr(result, 'results')}")
 
-    # dspy.Evaluate returns (aggregate_score, results_list)
-    # results_list is [(example, prediction, score), ...]
-    aggregate_score, results_list = result
+    # DSPy >= 2.6.0: result is an EvaluationResult object with .results field
+    # Each item in results has .example, .prediction, .score attributes
+    results_list = result.results
+    log.info(f"results_list: len={len(results_list)}")
 
     outputs = []
     scores = []
-    for ex, pred, score in results_list:
+    for item in results_list:
+        pred = item.prediction
+        score = item.score
+
         if pred is not None:
             outputs.append(dict(pred))
         else:
@@ -95,32 +127,39 @@ def _evaluate_simple(program, metric_fn, examples, failure_score, num_threads) -
         except (TypeError, ValueError):
             scores.append(failure_score)
 
-    return {"success": True, "outputs": outputs, "scores": scores}
+    log.info(f"Simple evaluation complete: {len(outputs)} outputs")
+    return make_success_result(
+        {"outputs": outputs, "scores": scores},
+        logs=log.get_logs()
+    )
 
 
 def _evaluate_with_traces(program, metric_fn, examples, failure_score, num_threads) -> dict:
-    """Evaluate with trace capture for reflective dataset building."""
-    try:
-        from dspy.teleprompt.bootstrap_trace import bootstrap_trace_data
-    except ImportError:
-        # Fallback if bootstrap_trace_data not available in this dspy version
-        result = _evaluate_simple(program, metric_fn, examples, failure_score, num_threads)
-        result["trajectories"] = []
-        return result
+    """Evaluate with trace capture for reflective dataset building.
 
+    Note: Requires DSPy >= 2.6.0 with bootstrap_trace support.
+    Traces are essential for GEPA's reflective mutation - failures will propagate.
+    """
+    from dspy.teleprompt.bootstrap_trace import bootstrap_trace_data
+
+    log.info(f"Calling bootstrap_trace_data with {len(examples)} examples...")
     trace_data = bootstrap_trace_data(
         program=program,
         dataset=examples,
         metric=metric_fn,
         num_threads=num_threads,
     )
+    log.info(f"bootstrap_trace_data returned: type={type(trace_data)}, len={len(trace_data) if hasattr(trace_data, '__len__') else 'N/A'}")
 
     # Serialize trace data for cross-process transfer
     trajectories = []
     scores = []
     outputs = []
 
-    for data in trace_data:
+    for idx, data in enumerate(trace_data):
+        if idx == 0:
+            log.info(f"First trace_data item: type={type(data)}, keys={data.keys() if isinstance(data, dict) else 'N/A'}")
+
         if data is None:
             trajectories.append(None)
             scores.append(failure_score)
@@ -131,6 +170,9 @@ def _evaluate_with_traces(program, metric_fn, examples, failure_score, num_threa
         example = data.get("example")
         prediction = data.get("prediction")
         score = data.get("score")
+
+        if idx == 0:
+            log.info(f"First item: trace_len={len(trace)}, has_example={example is not None}, has_pred={prediction is not None}, score={score}")
 
         # Serialize score
         try:
@@ -146,20 +188,19 @@ def _evaluate_with_traces(program, metric_fn, examples, failure_score, num_threa
 
         # Serialize prediction
         if prediction is not None:
-            try:
-                from dspy.teleprompt.bootstrap_trace import FailedPrediction
-                if isinstance(prediction, FailedPrediction):
-                    outputs.append({"__failed__": True, "completion_text": getattr(prediction, "completion_text", "")})
-                else:
-                    outputs.append(dict(prediction))
-            except ImportError:
+            from dspy.teleprompt.bootstrap_trace import FailedPrediction
+            if isinstance(prediction, FailedPrediction):
+                outputs.append({"__failed__": True, "completion_text": getattr(prediction, "completion_text", "")})
+            else:
                 outputs.append(dict(prediction))
         else:
             outputs.append(None)
 
         # Serialize trace entries
         serialized_trace = []
-        for entry in trace:
+        for entry_idx, entry in enumerate(trace):
+            if idx == 0 and entry_idx == 0:
+                log.info(f"First trace entry: type={type(entry)}, len={len(entry) if hasattr(entry, '__len__') else 'N/A'}")
             # entry is (predictor, inputs, output) tuple
             pred_module, inputs, output = entry
 
@@ -169,13 +210,10 @@ def _evaluate_with_traces(program, metric_fn, examples, failure_score, num_threa
             ser_inputs = {k: str(v) for k, v in inputs.items()}
 
             # Serialize output
-            try:
-                from dspy.teleprompt.bootstrap_trace import FailedPrediction
-                if isinstance(output, FailedPrediction):
-                    ser_output = {"__failed__": True, "completion_text": getattr(output, "completion_text", "")}
-                else:
-                    ser_output = {k: str(v) for k, v in output.items()}
-            except ImportError:
+            from dspy.teleprompt.bootstrap_trace import FailedPrediction
+            if isinstance(output, FailedPrediction):
+                ser_output = {"__failed__": True, "completion_text": getattr(output, "completion_text", "")}
+            else:
                 ser_output = {k: str(v) for k, v in output.items()}
 
             serialized_trace.append({
@@ -194,9 +232,8 @@ def _evaluate_with_traces(program, metric_fn, examples, failure_score, num_threa
             "score": score_val,
         })
 
-    return {
-        "success": True,
-        "outputs": outputs,
-        "scores": scores,
-        "trajectories": trajectories,
-    }
+    log.info(f"Evaluation complete: {len(outputs)} outputs, {len(trajectories)} trajectories")
+    return make_success_result(
+        {"outputs": outputs, "scores": scores, "trajectories": trajectories},
+        logs=log.get_logs()
+    )

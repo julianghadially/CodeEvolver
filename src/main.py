@@ -307,6 +307,7 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
             trainset_path=request.trainset_path,
             valset_json=request.valset,
             valset_path=request.valset_path,
+            program_lm=request.program_lm,
             reflection_lm=request.reflection_lm,
             max_metric_calls=request.max_metric_calls,
             installation_id=request.installation_id,

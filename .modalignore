@@ -1,0 +1,18 @@
+env/*
+*__pycache__/*
+*.py[cod]
+*.egg-info/
+.vscode/
+.DS_Store
+.env
+venv/*
+mlartifacts/*
+*.xlsx
+results/old/*
+results/optimization/gepa_optimization*
+*.sqlite
+# Local images folder (contents ignored, but folder structure tracked)
+.images/*
+.images
+!.images/.gitkeep
+secrets/

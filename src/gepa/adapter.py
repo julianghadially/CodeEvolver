@@ -48,6 +48,7 @@ class CodeEvolverDSPyAdapter:
         num_threads: int = 1,
         input_keys: list[str] | None = None,
         initial_branch: str = "main",
+        program_lm: str = "openai/gpt-5-mini",
     ):
         self._sandbox = sandbox_manager
         self.program_path = program
@@ -57,6 +58,7 @@ class CodeEvolverDSPyAdapter:
         self.num_threads = num_threads
         self.input_keys = input_keys or []
         self.initial_branch = initial_branch
+        self.program_lm = program_lm
 
     # Use GEPA's default InstructionProposalSignature for reflection
     propose_new_texts = None
@@ -67,19 +69,25 @@ class CodeEvolverDSPyAdapter:
         Returns:
             Dict with 'git_branch' key and predictor instruction texts.
         """
+        print(f"[ADAPTER] build_seed_candidate() called: program={self.program_path}", flush=True)
         result = self._sandbox.exec_prebuilt({
             "command": "build_seed_candidate",
             "program": self.program_path,
             "saved_program_json_path": self.saved_program_json_path,
         })
 
+        print(f"[ADAPTER] build_seed_candidate result: success={result.get('success')}", flush=True)
         if not result.get("success", False):
+            print(f"[ADAPTER] build_seed_candidate failed: {result.get('error', 'unknown')}", flush=True)
+            if result.get("traceback"):
+                print(f"[ADAPTER] Traceback:\n{result.get('traceback')}", flush=True)
             raise RuntimeError(
                 f"build_seed_candidate failed: {result.get('error', 'unknown')}"
             )
 
         candidate = result["candidate"]
         candidate[GIT_BRANCH_KEY] = self.initial_branch
+        print(f"[ADAPTER] Seed candidate has {len(candidate)} keys", flush=True)
         return candidate
 
     def _get_prompt_texts(self, candidate: dict[str, str]) -> dict[str, str]:
@@ -90,7 +98,7 @@ class CodeEvolverDSPyAdapter:
         self,
         batch: list,
         candidate: dict[str, str],
-        capture_traces: bool = False,
+        capture_traces: bool = True,
     ) -> EvaluationBatch:
         """Run evaluation via sandbox.
 
@@ -102,6 +110,7 @@ class CodeEvolverDSPyAdapter:
         Returns:
             EvaluationBatch with outputs, scores, and optional trajectories.
         """
+        print(f"[ADAPTER] evaluate() called: batch_size={len(batch)}, capture_traces={capture_traces}", flush=True)
         prompt_texts = self._get_prompt_texts(candidate)
 
         # Convert batch items to plain dicts if they aren't already
@@ -123,10 +132,19 @@ class CodeEvolverDSPyAdapter:
             "num_threads": self.num_threads,
             "input_keys": self.input_keys,
             "failure_score": self.failure_score,
+            "program_lm": self.program_lm,
         })
 
+        print(f"[ADAPTER] evaluate result: success={result.get('success')}, error={result.get('error', 'none')[:200] if result.get('error') else 'none'}", flush=True)
+
+        # Print logs from sandbox
+        if result.get("logs"):
+            print(f"[ADAPTER] Sandbox logs:\n" + "\n".join(result["logs"]), flush=True)
+
         if not result.get("success", False):
-            logger.warning(f"Evaluation failed: {result.get('error', 'unknown')}")
+            print(f"[ADAPTER] Evaluation failed: {result.get('error', 'unknown')}", flush=True)
+            if result.get("traceback"):
+                print(f"[ADAPTER] Traceback:\n{result.get('traceback')}", flush=True)
             return EvaluationBatch(
                 outputs=[None] * len(batch),
                 scores=[self.failure_score] * len(batch),

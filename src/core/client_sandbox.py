@@ -86,17 +86,13 @@ class ClientSandbox(ABC):
                     self.repo_url, token
                 )
 
-        # Pass all environment variables to sandbox (temporary - will be replaced by secrets manager)
-        env_vars = dict(os.environ)
-
         # Create the Modal sandbox
         self._sandbox = modal.Sandbox.create(
             app=self.app,
-            image=self._image_builder(python_version = python_version),
+            image=self.__class__._image_builder(python_version=python_version),
             timeout=self.timeout,
             cpu=self.cpu,
             memory=self.memory,
-            encrypted_env_vars=env_vars,
         )
         logger.info(f"Sandbox created: {self._sandbox.object_id}")
 
@@ -109,6 +105,12 @@ class ClientSandbox(ABC):
         if p.returncode != 0:
             stderr = p.stderr.read()
             raise RuntimeError(f"git clone failed: {stderr}")
+
+        # Inject environment variables after clone
+        # (temporary - will be replaced by secrets manager)
+        env_vars = dict(os.environ)
+        if env_vars:
+            self._inject_env_vars(env_vars)
 
         # Install client's requirements.txt
         logger.info("Installing client dependencies...")
@@ -123,6 +125,31 @@ class ClientSandbox(ABC):
             raise RuntimeError(f"pip install failed: {stderr}")
 
         logger.info(f"{self.__class__.__name__} ready.")
+
+    def _inject_env_vars(self, env_vars: dict[str, str]) -> None:
+        """Inject environment variables into the sandbox.
+        
+        Writes environment variables to a file that can be sourced.
+        Note: This is temporary and will be replaced by secrets manager.
+        """
+        if not env_vars:
+            return
+        
+        # Filter out sensitive or unnecessary env vars
+        filtered_vars = {
+            k: v for k, v in env_vars.items()
+            if not k.startswith("_") and k not in ["PATH", "HOME", "USER"]
+        }
+        
+        if not filtered_vars:
+            return
+            
+        env_content = "\n".join(f"export {k}='{v}'" for k, v in filtered_vars.items())
+        self._sandbox.exec(
+            "bash",
+            "-c",
+            f"cat > {self._workspace}/.env << 'EOFENV'\n{env_content}\nEOFENV",
+        ).wait()
 
     def exec_bash(self, command: str) -> tuple[int, str, str]:
         """Execute a bash command in the sandbox.

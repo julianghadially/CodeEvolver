@@ -8,6 +8,9 @@ import random
 from typing import Any
 
 from . import build_program, signature_key
+from ..utils import get_logger, make_success_result
+
+log = get_logger("reflective")
 
 
 def handle(cmd: dict, workspace: str) -> dict:
@@ -38,8 +41,11 @@ def handle(cmd: dict, workspace: str) -> dict:
     components_to_update = cmd.get("components_to_update", [])
     failure_score = cmd.get("failure_score", 0.0)
 
+    log.info(f"Building reflective dataset: {len(trajectories)} trajectories, components={components_to_update}")
+
     # Build program with candidate instructions to get predictor signatures
     program = build_program(workspace, program_path, saved_json, candidate)
+    log.info(f"Built program: {type(program).__name__}")
 
     # Build signature_key -> predictor_name mapping
     pred_sig_keys: dict[str, list[str]] = {}
@@ -120,6 +126,8 @@ def handle(cmd: dict, workspace: str) -> dict:
             ret_d[pred_name] = items
 
     if not ret_d:
-        return {"success": False, "error": "No valid predictions found for any module."}
+        log.warning("No valid predictions found for any module")
+        return {"success": False, "error": "No valid predictions found for any module.", "logs": log.get_logs()}
 
-    return {"success": True, "reflective_dataset": ret_d}
+    log.info(f"Built reflective dataset with {len(ret_d)} components")
+    return make_success_result({"reflective_dataset": ret_d}, logs=log.get_logs())

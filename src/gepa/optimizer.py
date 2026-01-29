@@ -62,6 +62,7 @@ def run_gepa_optimization(
     input_keys: list[str] | None = None,
     num_threads: int = 1,
     seed: int = 0,
+    program_lm: str = "openai/gpt-5-mini",
 ) -> dict[str, Any]:
     """Run GEPA optimization. Called from the Modal function.
 
@@ -108,6 +109,7 @@ def run_gepa_optimization(
             saved_program_json_path=saved_program_json_path,
             num_threads=num_threads,
             input_keys=input_keys,
+            program_lm=program_lm,
         )
 
         # Build seed candidate from program.json (via sandbox)

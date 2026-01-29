@@ -57,19 +57,25 @@ class GEPASandbox(ClientSandbox):
         )
         write_p.wait()
 
-        # Execute master.py dispatcher
+        # Execute master.py dispatcher (source .env first to load environment variables)
         p = self._sandbox.exec(
-            "python", "/app/sandbox_scripts/master.py",
-            "--workspace", self._workspace,
-            "--command-file", "/tmp/prebuilt_command.json",
+            "bash", "-c",
+            f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
+            f"PYTHONPATH=/app:$PYTHONPATH python /app/sandbox_scripts/master.py "
+            f"--workspace {self._workspace} "
+            f"--command-file /tmp/prebuilt_command.json",
         )
         p.wait()
 
         stdout = p.stdout.read()
         stderr = p.stderr.read()
 
+        # Print stderr which contains our debug output (print shows in Modal logs)
+        if stderr:
+            print(f"[SANDBOX STDERR]\n{stderr}", flush=True)
+
         if p.returncode != 0:
-            logger.error(f"master.py failed (rc={p.returncode}): {stderr}")
+            print(f"[SANDBOX ERROR] master.py failed (rc={p.returncode}): {stderr}", flush=True)
             return {
                 "success": False,
                 "error": f"Prebuilt script exit code {p.returncode}: {stderr[:2000]}",
