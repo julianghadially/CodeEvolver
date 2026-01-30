@@ -38,16 +38,17 @@ class ConnectGitResponse(BaseModel):
     status: str = Field(..., description="Connection status")
 
 
-class ExecuteSandboxResponse(BaseModel):
-    """Response payload for /execute_sandbox endpoint."""
+class ChangeResponse(BaseModel):
+    """Response payload for POST /change_request endpoint."""
 
-    status: Literal["success", "failed"]
-    program_id: str | None = Field(default=None)
-    program_json: dict[str, Any] | None = Field(default=None)
-    pipeline_outputs: list[Any] | None = Field(default=None)
-    traces: list[Any] | None = Field(default=None)
+    success: bool
     branch_name: str | None = Field(default=None)
     error: str | None = Field(default=None)
+    output: str | None = Field(default=None, description="Agent execution output/logs")
+
+
+# Keep ExecuteSandboxResponse as deprecated alias for backwards compatibility
+ExecuteSandboxResponse = ChangeResponse
 
 class OptimizeResponse(BaseModel):
     """Response payload for POST /optimize."""

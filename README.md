@@ -1,18 +1,51 @@
 # CodeEvolver
-Remote service for executing evolutionary code changes with CodeEvolver
+CodeEvolver offers autonomous coding agents for high reliability AI systems. 
 
-This repo is **WORK IN PROGRESS!!!**
+AI engineering with LLMs is a messy cycle of writing 1,000 word prompts, manually inspecting them, and continously tweaking them every time you have a new customer, new AI model, or new use case.
 
-## Architecture Components
+CodeEvolver replaces 90% of that manual work. Given a dataset, CodeEvolver optimizes the codebase against a reward function. Code changes include the prompts, context pipeline, tools, and AI system architecture. 
 
-- **API Framework** - FastAPI (Python)
-- **Database** - MongoDB with Motor (async driver)
-- **Version Control** - GitPython (for repository cloning and git worktree management)
-- **Execution Environment** - Modal (serverless Python runtime, ~1-2s cold start)
-- **Auto-coder Agent** - Claude Agents SDK (Anthropic) for code mutations
-- **Optimizer (External)** - GEPA (evolutionary algorithm client, gepa-ai/gepa)
+This repo is opening for beta testing very soon. Contact us on Linkedin at /in/julianghadially.
 
-### Implementation Status
-- **Implemented**: FastAPI, MongoDB/Motor, GitPython, Pydantic
-- **Pending**: Modal, Claude Agents SDK, DSPy runtime integration
+## Pick a service
 
+Optimizing code requires making many mutations to your code base, tracking each with git branches, and evaluating (running) each one on an objective function. 
+
+To do this safely, you need a secure, sandboxed environment to run AI generated code. This environment also needs to run your code, which means it needs access to whatever secrets and databases are required for running your AI system.
+
+You can use our secure, sandboxed environments, or host on your own private cloud \- coming soon with our enterprise plans.  We do NOT recommend running 100s of AI-generated code mutations on your own machine without the security protections in this repo.
+
+## Fully-hosted optimization
+
+In our hosted solution, we orchestrate coding agents, git branching, optimization jobs, and most importantly…
+
+### We handle security for you: 
+
+1. **Sandboxed execution environments:**  AI-generated code executes in an isolated environment, protecting your files.  
+2. **Network protection:** No data can leave the sandbox, except to white-listed domains.  
+3. **Secrets management via infisical:** Secrets stored securely and accessed by the sandbox at runtime.  
+4. **Zero persistent storage:** program tracking is stored for three months with jwt token for access control. Code is cloned at runtime and dies after the worker is finished.
+5. **Transparent Third Parties:** Modal for cloud services and sandboxes, Anthropic for Claude Agents SDK, Mongodb Atlas service, and infisical for keys
+
+### How to get started
+
+**Step 1: Create account**
+
+1. Connect coding agent to your Github repository  
+2. Connect to a secrets manager (powered by infisical or link to your own)
+
+**Step 2: Prepare your project**   
+You will need the following (See guide):
+
+1. *Training dataset*, including inputs and any fields used by your objective metric (e.g.,  ground truth label)   
+2. *Objective metric*  
+3. *AI system* (Currently limited to DSPy). Looking for contributors\! 
+
+**Step 3: Create Job**
+
+1. Send job to /optimize  
+2. See results directly on your GitHub, on the branch, codeevolver-best-program (check status with /job\_id/check\_job
+
+## Private Cloud
+
+Please contact us on linkedin: /in/julianghadially

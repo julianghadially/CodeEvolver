@@ -17,8 +17,10 @@ from .schemas import (
     ClientRecord,
     ExecuteStepRequest,
     ExecuteStepResponse,
-    ExecuteSandboxRequest,
-    ExecuteSandboxResponse,
+    ChangeRequest,
+    ChangeResponse,
+    ExecuteSandboxRequest,  # Deprecated alias
+    ExecuteSandboxResponse,  # Deprecated alias
     PipelineOutput,
     ProgramRecord,
     ProgramStatus,
@@ -89,6 +91,8 @@ async def connect_git(request: ConnectGitRequest) -> ConnectGitResponse:
 @app.post("/execute_step", response_model=ExecuteStepResponse)
 async def execute_step(request: ExecuteStepRequest) -> ExecuteStepResponse:
     """
+    Deprecated. Use /optimize instead.
+
     Execute one optimization step.
 
     Applies a mutation (prompt or code), runs the program, and returns output
@@ -401,74 +405,53 @@ async def debug_secrets():
     }
 
 
-@app.post("/execute_sandbox", response_model=ExecuteSandboxResponse)
-async def execute_sandbox(request: ExecuteSandboxRequest) -> ExecuteSandboxResponse:
-    """
-    Execute a mutation in the Modal sandbox.
-    
-    This endpoint directly invokes the Modal sandbox function for code mutations.
-    It's useful for testing and for cases where you want to bypass the /execute_step
-    workflow.
-    
-    The sandbox will:
-    1. Clone the repository
-    2. Create a branch
-    3. Apply the code mutation (using Claude Agent)
-    4. Optionally push to remote
-    5. Return the result
+@app.post("/change_request", response_model=ChangeResponse)
+async def change_request(request: ChangeRequest) -> ChangeResponse:
+    """Execute a code change via the Claude coding agent.
+
+    Creates a sandbox, clones the repository, applies the code change
+    using Claude Agent SDK, and optionally pushes to remote.
     """
     try:
-        # Import the execute_in_sandbox function from modal_app
-        # This works because we're running inside the Modal context
         import sys
         if "/app" not in sys.path:
             sys.path.insert(0, "/app")
-        
-        from modal_app import execute_in_sandbox
-        
-        # Call the sandbox function remotely
-        result = await execute_in_sandbox.remote.aio(
-            client_id=request.client_id,
-            program_id=request.program_id,
+
+        from modal_app import execute_change_request
+
+        result = await execute_change_request.remote.aio(
             repo_url=request.repo_url,
-            mutation_type=request.mutation_type,
-            program_json_path=request.program_json_path,
-            entry_point=request.entry_point,
-            candidate=request.candidate,
             change_request=request.change_request,
             change_location=request.change_location,
-            test_examples=request.test_examples,
-            capture_traces=request.capture_traces,
-            installation_id=request.installation_id,
-            skip_program_run=request.skip_program_run,
             branch_name=request.branch_name,
             push_to_remote=request.push_to_remote,
+            installation_id=request.installation_id,
         )
-        
-        return ExecuteSandboxResponse(
-            status=result.get("status", "failed"),
-            program_id=result.get("program_id"),
-            program_json=result.get("program_json"),
-            pipeline_outputs=result.get("pipeline_outputs"),
-            traces=result.get("traces"),
+
+        return ChangeResponse(
+            success=result.get("success", False),
             branch_name=result.get("branch_name"),
             error=result.get("error"),
+            output=result.get("output"),
         )
-        
+
     except ImportError as e:
-        # Not running on Modal - provide helpful error
-        return ExecuteSandboxResponse(
-            status="failed",
-            error=(
-                f"Cannot import modal_app: {e}. "
-                "This endpoint only works when running on Modal (modal serve or modal deploy)."
-            ),
+        return ChangeResponse(
+            success=False,
+            error=f"Modal not available: {e}. Run with 'modal serve modal_app.py'.",
         )
     except Exception as e:
-        return ExecuteSandboxResponse(
-            status="failed",
-            error=f"Sandbox execution failed: {e}",
+        return ChangeResponse(
+            success=False,
+            error=f"Change request failed: {e}",
         )
+
+
+# Keep /execute_sandbox as deprecated alias (redirects to new implementation)
+@app.post("/execute_sandbox", response_model=ChangeResponse, deprecated=True)
+async def execute_sandbox_deprecated(request: ChangeRequest) -> ChangeResponse:
+    """DEPRECATED: Use /change_request instead."""
+    return await change_request(request)
 
 
 # ---------------------------------------------------------------------------

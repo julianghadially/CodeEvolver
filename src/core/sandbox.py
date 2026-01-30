@@ -100,6 +100,21 @@ def get_sandbox_image() -> modal.Image:
 
 class SandboxApp:
     """
+    DEPRECATED: Use GEPASandbox with exec_agent() instead.
+
+    This class is kept for backwards compatibility with the existing
+    /execute_step endpoint but should not be used for new code.
+
+    For new implementations, use:
+        from src.gepa.gepa_sandbox import GEPASandbox
+
+        sandbox = GEPASandbox(app, repo_url)
+        sandbox.start(use_venv=True)
+        result = sandbox.exec_agent("Add a docstring to main function")
+        sandbox.stop()
+
+    ---
+
     Manages a Modal sandbox for executing code mutations.
 
     Each SandboxApp instance handles:

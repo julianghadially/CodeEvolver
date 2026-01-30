@@ -12,7 +12,7 @@ To run this test:
 2. Set environment variable: GITHUB_TEST_INSTALLATION_ID=104592180
 3. In another terminal, run: pytest tests/test_coding_agent.py -v -s -m integration
 
-The test calls the Modal app's /execute_sandbox HTTP endpoint.
+The test calls the Modal app's /change_request HTTP endpoint.
 Watch the 'modal serve' terminal to see live logs.
 
 Modal note:
@@ -145,26 +145,20 @@ class TestCodingAgent:
             else:
                 print(f"Warning: Could not fetch debug_secrets: {debug_response.status_code}")
 
-            # Call the /execute_sandbox endpoint
-            print("\nCalling /execute_sandbox via HTTP...")
+            # Call the /change_request endpoint
+            print("\nCalling /change_request via HTTP...")
             print("(This may take several minutes - watch the modal serve terminal)\n")
 
             request_payload = {
-                "client_id": "test_client",
-                "program_id": "test_program",
                 "repo_url": TEST_REPO_URL,
-                "mutation_type": "code",
-                "program_json_path": "",  # Not used for code mutations
-                "entry_point": "",  # Not used when skip_program_run=True
                 "change_request": CHANGE_REQUEST,
                 "installation_id": installation_id,
-                "skip_program_run": True,
                 "branch_name": branch_name,
                 "push_to_remote": True,
             }
 
             response = await client.post(
-                f"{modal_url}/execute_sandbox",
+                f"{modal_url}/change_request",
                 json=request_payload,
             )
 
@@ -178,15 +172,17 @@ class TestCodingAgent:
             result = response.json()
 
         print(f"\n{'='*60}")
-        print(f"Result status: {result['status']}")
+        print(f"Result success: {result['success']}")
         if result.get("error"):
             print(f"Error: {result['error']}")
         if result.get("branch_name"):
             print(f"Branch: {result['branch_name']}")
+        if result.get("output"):
+            print(f"Output (truncated): {result['output'][:500]}...")
         print(f"{'='*60}\n")
 
         # Check that the mutation succeeded
-        assert result["status"] == "success", f"Mutation failed: {result.get('error')}"
+        assert result["success"], f"Mutation failed: {result.get('error')}"
         assert result["branch_name"] == branch_name
 
         # Fetch the file from the new branch and verify evidence_stance is removed

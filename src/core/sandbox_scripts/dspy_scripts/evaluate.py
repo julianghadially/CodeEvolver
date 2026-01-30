@@ -4,7 +4,7 @@ Runs a DSPy program on a batch of examples, applying candidate instructions
 and scoring with the provided metric. Optionally captures execution traces
 for reflective dataset building.
 
-Requires DSPy >= 2.6.0.
+Requires DSPy >= 3.0.0.
 """
 
 from . import build_program, load_import_path, signature_key
@@ -88,9 +88,7 @@ def handle(cmd: dict, workspace: str) -> dict:
 def _evaluate_simple(program, metric_fn, examples, failure_score, num_threads) -> dict:
     """Evaluate using dspy.Evaluate — returns outputs + scores, no traces.
 
-    Note: Requires DSPy >= 2.6.0 which changed dspy.Evaluate to return an
-    EvaluationResult object instead of (score, results_list) tuple.
-    The return_outputs parameter was removed in this version.
+    Requires DSPy >= 3.0.0.
     """
     import dspy
 
@@ -107,17 +105,13 @@ def _evaluate_simple(program, metric_fn, examples, failure_score, num_threads) -
     result = evaluator(program)
     log.info(f"Evaluator returned: type={type(result)}, has_results={hasattr(result, 'results')}")
 
-    # DSPy >= 2.6.0: result is an EvaluationResult object with .results field
-    # Each item in results has .example, .prediction, .score attributes
+    # DSPy 3.0+: result.results is a list of (example, prediction, score) tuples
     results_list = result.results
     log.info(f"results_list: len={len(results_list)}")
 
     outputs = []
     scores = []
-    for item in results_list:
-        pred = item.prediction
-        score = item.score
-
+    for _example, pred, score in results_list:
         if pred is not None:
             outputs.append(dict(pred))
         else:

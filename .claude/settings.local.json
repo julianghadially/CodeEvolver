@@ -6,7 +6,9 @@
       "Bash(python -m pytest:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebSearch",
+      "WebFetch(domain:modal.com)"
     ]
   }
 }

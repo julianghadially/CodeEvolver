@@ -35,6 +35,25 @@ def _get_base_sandbox_image(python_version: str = "3.11") -> modal.Image:
     )
 
 
+def _get_agent_capable_sandbox_image(python_version: str = "3.11") -> modal.Image:
+    """Build sandbox image with coding agent capabilities.
+
+    System Python: claude-agent-sdk, anyio (for agent execution)
+    System: Node.js, npm, Claude Code CLI
+    Client deps: installed at runtime into /workspace/.venv
+    """
+    return (
+        modal.Image.debian_slim(python_version=python_version)
+        .apt_install("git", "curl", "nodejs", "npm")
+        .run_commands("npm install -g @anthropic-ai/claude-code")
+        .pip_install("claude-agent-sdk>=0.1.21", "anyio>=4.0.0")
+        .add_local_dir(
+            "src/core/sandbox_scripts",
+            remote_path="/app/sandbox_scripts",
+        )
+    )
+
+
 class ClientSandbox(ABC):
     """Base class for client code sandboxes.
 
@@ -72,10 +91,18 @@ class ClientSandbox(ABC):
         self.memory = memory
         self._sandbox: modal.Sandbox | None = None
         self._workspace = "/workspace"
+        self._use_venv = True
 
-    def start(self, python_version: str = "3.11") -> None:
-        """Create sandbox, clone repo, pip install client requirements."""
+    def start(self, python_version: str = "3.11", use_venv: bool = True) -> None:
+        """Create sandbox, clone repo, pip install client requirements.
+
+        Args:
+            python_version: Python version for the sandbox image.
+            use_venv: If True, create a venv at /workspace/.venv for client deps.
+                      This isolates client deps from system Python (where agent SDK lives).
+        """
         logger.info(f"Starting {self.__class__.__name__}...")
+        self._use_venv = use_venv
 
         # Handle private repo authentication
         authenticated_url = self.repo_url
@@ -114,11 +141,30 @@ class ClientSandbox(ABC):
 
         # Install client's requirements.txt
         logger.info("Installing client dependencies...")
-        p = self._sandbox.exec(
-            "bash", "-c",
-            f"if [ -f {self._workspace}/requirements.txt ]; then "
-            f"pip install -r {self._workspace}/requirements.txt; fi",
-        )
+        if use_venv:
+            # Create venv for client deps (isolates from system Python)
+            logger.info("Creating venv at /workspace/.venv...")
+            p = self._sandbox.exec(
+                "python", "-m", "venv", f"{self._workspace}/.venv",
+            )
+            p.wait()
+            if p.returncode != 0:
+                stderr = p.stderr.read()
+                raise RuntimeError(f"venv creation failed: {stderr}")
+
+            # Install deps into venv
+            p = self._sandbox.exec(
+                "bash", "-c",
+                f"if [ -f {self._workspace}/requirements.txt ]; then "
+                f"{self._workspace}/.venv/bin/pip install -r {self._workspace}/requirements.txt; fi",
+            )
+        else:
+            # Install into system Python (original behavior)
+            p = self._sandbox.exec(
+                "bash", "-c",
+                f"if [ -f {self._workspace}/requirements.txt ]; then "
+                f"pip install -r {self._workspace}/requirements.txt; fi",
+            )
         p.wait()
         if p.returncode != 0:
             stderr = p.stderr.read()
@@ -166,6 +212,10 @@ class ClientSandbox(ABC):
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started. Call start() first.")
 
+        # Prepend venv to PATH when using venv isolation
+        if self._use_venv:
+            command = f'export PATH="{self._workspace}/.venv/bin:$PATH" && {command}'
+
         p = self._sandbox.exec("bash", "-c", command)
         p.wait()
 
@@ -189,9 +239,16 @@ class ClientSandbox(ABC):
         """Re-run pip install (for use if requirements.txt changes)."""
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started.")
-        p = self._sandbox.exec(
-            "pip", "install", "-r", f"{self._workspace}/requirements.txt",
-        )
+
+        if self._use_venv:
+            p = self._sandbox.exec(
+                f"{self._workspace}/.venv/bin/pip",
+                "install", "-r", f"{self._workspace}/requirements.txt",
+            )
+        else:
+            p = self._sandbox.exec(
+                "pip", "install", "-r", f"{self._workspace}/requirements.txt",
+            )
         p.wait()
 
     def stop(self) -> None:

@@ -206,3 +206,24 @@ class CodeEvolverDSPyAdapter:
             return float(score_obj)
         except (TypeError, ValueError):
             return self.failure_score
+
+    def apply_code_mutation(
+        self,
+        change_request: str,
+        change_location: str | None = None,
+    ) -> dict:
+        """Apply a code mutation via the coding agent.
+
+        Called by GEPA optimizer when code changes are needed.
+        The sandbox must have been started with use_venv=True for proper
+        isolation between agent SDK and client dependencies.
+
+        Args:
+            change_request: Natural language description of the code change.
+            change_location: Optional module path hint (e.g., "src/core/agent.py").
+
+        Returns:
+            Dict with 'success', 'error', 'output' keys.
+        """
+        print(f"[ADAPTER] apply_code_mutation() called: {change_request[:100]}...", flush=True)
+        return self._sandbox.exec_agent(change_request, change_location)

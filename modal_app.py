@@ -94,6 +94,84 @@ def fastapi_app():
 
 
 @app.function(
+    image=sandbox_image,  # Has claude-agent-sdk, git, httpx, pyjwt
+    timeout=600,
+    cpu=2,
+    memory=4096,
+    secrets=[modal.Secret.from_name("codeevolver-secrets")],
+)
+def execute_change_request(
+    repo_url: str,
+    change_request: str,
+    change_location: str | None = None,
+    branch_name: str | None = None,
+    push_to_remote: bool = False,
+    installation_id: int | None = None,
+) -> dict:
+    """Execute a code change using GEPASandbox and Claude coding agent.
+
+    Returns:
+        Dict with 'success', 'branch_name', 'error', 'output' keys.
+    """
+    import os
+    import sys
+    sys.path.insert(0, "/app")
+    os.chdir("/app")
+
+    from src.gepa.gepa_sandbox import GEPASandbox
+    from src.services.git_sandbox import SandboxGitService
+
+    # Create sandbox
+    sandbox = GEPASandbox(
+        app=app,
+        repo_url=repo_url,
+        installation_id=installation_id,
+        timeout=600,
+    )
+
+    try:
+        # Start with venv isolation
+        sandbox.start(use_venv=True)
+
+        # Create branch if specified
+        if branch_name:
+            git = SandboxGitService(sandbox._sandbox, sandbox._workspace)
+            git.configure_user()
+            git.checkout(branch_name, create=True)
+
+        # Execute agent
+        result = sandbox.exec_agent(
+            change_request=change_request,
+            change_location=change_location,
+            commit_changes=True,
+        )
+
+        # Push if requested
+        if result["success"] and push_to_remote and branch_name:
+            git = SandboxGitService(sandbox._sandbox, sandbox._workspace)
+            push_result = git.push(branch_name)
+            if not push_result.success:
+                return {
+                    "success": False,
+                    "branch_name": branch_name,
+                    "error": f"Push failed: {push_result.stderr}",
+                    "output": result.get("output"),
+                }
+
+        return {
+            "success": result["success"],
+            "branch_name": branch_name,
+            "error": result.get("error"),
+            "output": result.get("output"),
+        }
+
+    finally:
+        sandbox.stop()
+
+
+# DEPRECATED: Keep execute_in_sandbox for backwards compatibility
+# Will be removed in a future version - use execute_change_request instead
+@app.function(
     image=sandbox_image,
     timeout=600,
     cpu=2,
@@ -118,35 +196,11 @@ async def execute_in_sandbox(
     push_to_remote: bool = False,
 ) -> dict:
     """
+    DEPRECATED: Use execute_change_request instead.
+
     Execute a mutation inside an isolated Modal Sandbox.
-
-    This function is called remotely from the FastAPI endpoints.
-    It creates a SandboxApp instance and runs the mutation workflow.
-    Uses GitHubAppService for private repository authentication.
-
-    Args:
-        client_id: Client identifier
-        program_id: Program identifier
-        repo_url: Git repository URL to clone
-        mutation_type: "prompt" or "code"
-        program_json_path: Path to program.json
-        entry_point: DSPy module class
-        candidate: For prompt mutations
-        change_request: For code mutations
-        change_location: Optional hint for code mutations
-        test_examples: Examples to run
-        capture_traces: Whether to capture traces
-        installation_id: Optional GitHub App installation ID for private repos
-        skip_program_run: If True, skip running the DSPy program (code-only mode)
-        branch_name: Optional branch name to use (otherwise auto-generated)
-        push_to_remote: If True, push changes to remote after mutation
-
-    Returns:
-        Execution result dict
     """
     import os
-
-    # Import core module
     import sys
 
     sys.path.insert(0, "/app")
@@ -238,6 +292,7 @@ def run_optimization(
     seed: int = 0,
     callback_url: str = "",
     jwt_token: str = "",
+    python_version: str = "3.11",
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 
@@ -284,7 +339,7 @@ def run_optimization(
         installation_id=installation_id,
         timeout=3600,
     )
-    sandbox.start()
+    sandbox.start(python_version=python_version)
 
     try:
         result = run_gepa_optimization(

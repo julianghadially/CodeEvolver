@@ -69,74 +69,34 @@ class ConnectGitRequest(BaseModel):
     )
 
 
-class ExecuteSandboxRequest(BaseModel):
-    """Request payload for /execute_sandbox endpoint.
-    
-    This endpoint directly invokes the Modal sandbox for code mutations.
-    Use this for testing and direct sandbox execution.
+class ChangeRequest(BaseModel):
+    """Request payload for POST /change_request endpoint.
+
+    Execute a code change via the Claude coding agent.
     """
 
-    client_id: str = Field(
-        default="test_client",
-        description="Client identifier",
-    )
-    program_id: str = Field(
-        default="test_program",
-        description="Program identifier",
-    )
-    repo_url: str = Field(
-        ...,
-        description="Git repository URL to clone",
-        examples=["https://github.com/user/project"],
-    )
-    mutation_type: str = Field(
-        default="code",
-        description="Type of mutation: 'prompt' or 'code'",
-    )
-    program_json_path: str = Field(
-        default="",
-        description="Path to program.json (optional for code-only mutations)",
-    )
-    entry_point: str = Field(
-        default="",
-        description="DSPy module entry point (optional when skip_program_run=True)",
-    )
-    candidate: dict[str, str] | None = Field(
-        default=None,
-        description="For prompt mutations: component_name -> new instruction text",
-    )
-    change_request: str | None = Field(
-        default=None,
-        description="Natural language description of code change",
-    )
+    repo_url: str = Field(..., description="Git repository URL to clone")
+    change_request: str = Field(..., description="Natural language description of code change")
     change_location: str | None = Field(
         default=None,
-        description="Module path hint for code changes (optional)",
-    )
-    test_examples: list[dict[str, Any]] | None = Field(
-        default=None,
-        description="DSPy Examples to run after mutation",
-    )
-    capture_traces: bool = Field(
-        default=False,
-        description="Whether to return execution traces",
-    )
-    installation_id: int | None = Field(
-        default=None,
-        description="GitHub App installation ID for private repository access",
-    )
-    skip_program_run: bool = Field(
-        default=False,
-        description="If True, skip running the DSPy program (code-only mode)",
+        description="Module path hint for code changes (e.g., 'src/core/agent.py')",
     )
     branch_name: str | None = Field(
         default=None,
-        description="Optional branch name to use (otherwise auto-generated)",
+        description="Branch name to create (auto-generated if not provided)",
     )
     push_to_remote: bool = Field(
         default=False,
         description="If True, push changes to remote after mutation",
     )
+    installation_id: int | None = Field(
+        default=None,
+        description="GitHub App installation ID for private repository access",
+    )
+
+
+# Keep ExecuteSandboxRequest as deprecated alias for backwards compatibility
+ExecuteSandboxRequest = ChangeRequest
 
 class OptimizeRequest(BaseModel):
     """Request payload for POST /optimize.

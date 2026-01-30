@@ -28,7 +28,7 @@ DEFAULT_MODAL_URL = "https://julianghadially--codeevolver-fastapi-app-dev.modal.
 # FactChecker optimization configuration
 OPTIMIZE_CONFIG = {
     "repo_url": "https://github.com/julianghadially/FactChecker",
-    "program": "src.factchecker.modules.fact_checker_pipeline.FactCheckerPipeline",
+    "program": "src.factchecker.simple.modules.judge_module.JudgeModule", #src.factchecker.modules.fact_checker_pipeline.FactCheckerPipeline
     "metric": "src.codeevolver.metric.metric",
     "trainset_path": "data/FacTool_QA_train_normalized.jsonl",
     "input_keys": ["statement"],

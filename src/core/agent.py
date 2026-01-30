@@ -128,6 +128,12 @@ if os.path.exists(env_file):
                 value = value.strip().strip("'").strip('"')
                 os.environ[key] = value
 
+# Add venv to PATH if it exists (for client code execution via agent's Bash tool)
+venv_bin = "{workspace_path}/.venv/bin"
+if os.path.exists(venv_bin):
+    os.environ["PATH"] = venv_bin + ":" + os.environ.get("PATH", "")
+    print(f"[AGENT] Added venv to PATH: {{venv_bin}}")
+
 # Verify Claude Code CLI is installed
 try:
     result = subprocess.run(["claude", "--version"], capture_output=True, text=True)

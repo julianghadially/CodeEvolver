@@ -9,7 +9,8 @@ from .program_schemas import (
 from .requests import (
     ExecuteStepRequest,
     ConnectGitRequest,
-    ExecuteSandboxRequest,
+    ChangeRequest,
+    ExecuteSandboxRequest,  # Deprecated alias for backwards compatibility
     OptimizeRequest,
     JobStatusUpdateRequest,
     JobProgressUpdateRequest,
@@ -18,7 +19,8 @@ from .responses import (
     ExecuteStepResponse,
     ConnectGitResponse,
     GetProgramResponse,
-    ExecuteSandboxResponse,
+    ChangeResponse,
+    ExecuteSandboxResponse,  # Deprecated alias for backwards compatibility
     OptimizeResponse,
     JobStatusResponse,
     CancelCheckResponse,
@@ -40,8 +42,10 @@ __all__ = [
     "ProgramStatus",
     "ExecuteStepRequest",
     "ExecuteStepResponse",
-    "ExecuteSandboxRequest",
-    "ExecuteSandboxResponse",
+    "ChangeRequest",
+    "ChangeResponse",
+    "ExecuteSandboxRequest",  # Deprecated alias
+    "ExecuteSandboxResponse",  # Deprecated alias
     "PipelineOutput",
     "ProgramRecord",
     "GetProgramResponse",
