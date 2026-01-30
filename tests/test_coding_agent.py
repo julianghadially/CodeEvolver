@@ -23,6 +23,7 @@ Since your FastAPI app is running at https://julianghadially--codeevolver-fastap
 
 import os
 from datetime import datetime
+import time
 
 import httpx
 import pytest
@@ -110,6 +111,7 @@ class TestCodingAgent:
         print(f"\nWATCH THE 'modal serve' TERMINAL FOR LIVE LOGS\n")
         print(f"Change request: {CHANGE_REQUEST[:100]}...")
         print(f"{'='*60}\n")
+        start_time = time.time()
 
         # First, check that the Modal app is reachable
         # Note: follow_redirects=True is needed because Modal may return 303 redirects
@@ -171,6 +173,7 @@ class TestCodingAgent:
 
             result = response.json()
 
+        print(f"Test duration: {(time.time() - start_time)/60:.2f} minutes")
         print(f"\n{'='*60}")
         print(f"Result success: {result['success']}")
         if result.get("error"):
@@ -238,26 +241,41 @@ class TestFetchGitHubFile:
 
     def test_fetch_github_file_from_test_branch(self, installation_id: int):
         """
-        Test fetching a file from a codeevolver-tests branch.
+        Test fetching a file from the most recent codeevolver-test-* branch.
 
         This verifies the file on a branch where the change has already been made.
         Use this test to verify previous test runs worked correctly.
+        Finds the most recent branch by sorting alphanumerically (format: YYYYMMDDHHMM).
         """
+        # Find all codeevolver-test-* branches and pick the most recent
+        branches = GitService.list_branches(
+            repo_url=TEST_REPO_URL,
+            prefix="codeevolver-test-",
+            installation_id=installation_id,
+        )
+
+        if not branches:
+            pytest.skip("No codeevolver-test-* branches exist yet")
+
+        # Pick the most recent (last alphanumerically due to YYYYMMDDHHMM format)
+        latest_branch = branches[-1]
+        print(f"\nFound {len(branches)} test branches, using most recent: {latest_branch}")
+
         try:
             content = GitService.fetch_github_file(
                 repo_url=TEST_REPO_URL,
                 file_path=TEST_FILE_PATH,
-                branch="codeevolver-tests",
+                branch=latest_branch,
                 installation_id=installation_id,
             )
 
             # The test branch should NOT have evidence_stance
             assert "evidence_stance: str" not in content, (
-                "codeevolver-tests branch should NOT contain evidence_stance: str"
+                f"{latest_branch} branch should NOT contain evidence_stance: str"
             )
-            print(f"\nFetched file from codeevolver-tests branch ({len(content)} chars)")
+            print(f"Fetched file from {latest_branch} ({len(content)} chars)")
             print("Verified: evidence_stance has been removed")
         except ValueError as e:
             if "not found" in str(e).lower():
-                pytest.skip("codeevolver-tests branch does not exist yet")
+                pytest.skip(f"File not found on branch {latest_branch}")
             raise

@@ -261,3 +261,71 @@ class GitService:
                 )
 
             return response.text
+
+    @staticmethod
+    def list_branches(
+        repo_url: str,
+        prefix: str | None = None,
+        installation_id: int | None = None,
+    ) -> list[str]:
+        """
+        List branches from a GitHub repository.
+
+        Args:
+            repo_url: Repository URL (https://github.com/owner/repo)
+            prefix: Optional prefix to filter branches (e.g., "codeevolver-test-")
+            installation_id: Optional GitHub App installation ID for private repos
+
+        Returns:
+            List of branch names, sorted alphanumerically
+
+        Raises:
+            ValueError: If branches cannot be fetched
+        """
+        # Parse owner/repo from URL
+        if repo_url.startswith("https://github.com/"):
+            parts = repo_url.replace("https://github.com/", "").rstrip("/").split("/")
+        elif repo_url.startswith("git@github.com:"):
+            parts = repo_url.replace("git@github.com:", "").replace(".git", "").split("/")
+        else:
+            raise ValueError(f"Unsupported repository URL format: {repo_url}")
+
+        if len(parts) < 2:
+            raise ValueError(f"Could not parse owner/repo from URL: {repo_url}")
+
+        owner = parts[0]
+        repo = parts[1].replace(".git", "")
+
+        # Build headers
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        # Add auth token if we have installation ID
+        if installation_id:
+            token = GitHubAppService.get_installation_token(installation_id)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+        # Use GitHub API to list branches
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/branches?per_page=100"
+
+        with httpx.Client() as client:
+            response = client.get(api_url, headers=headers, timeout=30.0)
+
+            if response.status_code != 200:
+                raise ValueError(
+                    f"Failed to list branches: HTTP {response.status_code} - {response.text}"
+                )
+
+            branches = [branch["name"] for branch in response.json()]
+
+            # Filter by prefix if provided
+            if prefix:
+                branches = [b for b in branches if b.startswith(prefix)]
+
+            # Sort alphanumerically (works for YYYYMMDDHHMM format)
+            branches.sort()
+
+            return branches

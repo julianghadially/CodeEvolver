@@ -97,7 +97,7 @@ However, we have to control for the following factors:
 ```
 
 **For v1**:
-- Omit proxy deployment. Client brings Anthropic key
+- Omit proxy codeevolver secret deployment. Client brings Anthropic key
 
 
 

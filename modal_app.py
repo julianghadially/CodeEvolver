@@ -70,6 +70,7 @@ sandbox_image = (
     volumes={"/workspaces": workspaces_volume},
     secrets=[modal.Secret.from_name("codeevolver-secrets")],
     min_containers=1,
+    timeout=900,  # Allow enough time for change_request calls (600s) plus overhead
 )
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app()

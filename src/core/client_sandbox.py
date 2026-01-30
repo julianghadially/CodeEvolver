@@ -133,6 +133,9 @@ class ClientSandbox(ABC):
             stderr = p.stderr.read()
             raise RuntimeError(f"git clone failed: {stderr}")
 
+        # Ensure .venv and .env are in .gitignore (prevents pushing sandbox artifacts)
+        self._ensure_gitignore_entries([".venv", ".env"])
+
         # Inject environment variables after clone
         # (temporary - will be replaced by secrets manager)
         env_vars = dict(os.environ)
@@ -196,6 +199,44 @@ class ClientSandbox(ABC):
             "-c",
             f"cat > {self._workspace}/.env << 'EOFENV'\n{env_content}\nEOFENV",
         ).wait()
+
+    def _ensure_gitignore_entries(self, entries: list[str]) -> None:
+        """Ensure specified entries are in .gitignore.
+
+        Creates .gitignore if it doesn't exist, or appends missing entries.
+        This prevents sandbox artifacts (.venv, .env) from being committed.
+
+        Args:
+            entries: List of patterns to add to .gitignore (e.g., [".venv", ".env"])
+        """
+        if self._sandbox is None:
+            return
+
+        gitignore_path = f"{self._workspace}/.gitignore"
+
+        # Build a bash script that:
+        # 1. Creates .gitignore if it doesn't exist
+        # 2. Ensures file ends with newline before appending
+        # 3. Appends each entry if not already present
+        script_lines = [
+            f"touch {gitignore_path}",
+            # Add newline at end of file if not present (prevents concatenation with last line)
+            f"[ -s {gitignore_path} ] && [ -n \"$(tail -c1 {gitignore_path})\" ] && echo '' >> {gitignore_path}",
+        ]
+        for entry in entries:
+            # Use grep to check if entry exists, append if not
+            script_lines.append(
+                f"grep -qxF '{entry}' {gitignore_path} || echo '{entry}' >> {gitignore_path}"
+            )
+
+        script = " && ".join(script_lines)
+        p = self._sandbox.exec("bash", "-c", script)
+        p.wait()
+
+        if p.returncode == 0:
+            logger.info(f"Ensured .gitignore contains: {entries}")
+        else:
+            logger.warning(f"Failed to update .gitignore: {p.stderr.read()}")
 
     def exec_bash(self, command: str) -> tuple[int, str, str]:
         """Execute a bash command in the sandbox.
