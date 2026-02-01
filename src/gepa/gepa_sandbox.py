@@ -195,3 +195,235 @@ class GEPASandbox(ClientSandbox):
             "success": False,
             "error": f"Prebuilt script produced no EVAL_RESULT. stderr: {stderr[:2000]}",
         }
+
+    def exec_bash(self, command: str) -> dict:
+        """Execute a simple bash command in the sandbox.
+
+        Args:
+            command: Bash command to execute.
+
+        Returns:
+            Dict with 'stdout', 'stderr', 'returncode' keys.
+
+        Raises:
+            RuntimeError: If sandbox not started.
+        """
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not started. Call start() first.")
+
+        p = self._sandbox.exec(
+            "bash", "-c",
+            f"cd {self._workspace} && {command}",
+        )
+        p.wait()
+
+        return {
+            "stdout": p.stdout.read(),
+            "stderr": p.stderr.read(),
+            "returncode": p.returncode,
+        }
+
+    def exec_reflection_agent(
+        self,
+        prompt: str,
+        max_turns: int = 20,
+    ) -> dict:
+        """Execute reflection agent with read-only tools.
+
+        Uses Claude Agent SDK with only Read, Grep, Glob tools (no edits).
+        The agent analyzes the codebase and feedback to propose a change.
+
+        Args:
+            prompt: Reflection prompt asking for a proposed change.
+            max_turns: Maximum conversation turns.
+
+        Returns:
+            Dict with 'success', 'proposed_change', 'error' keys.
+
+        Raises:
+            RuntimeError: If sandbox not started.
+        """
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not started. Call start() first.")
+
+        logger.info(f"Executing reflection agent: {prompt[:100]}...")
+
+        # Generate reflection agent script
+        script = self._generate_reflection_agent_script(
+            workspace_path=self._workspace,
+            prompt=prompt,
+            max_turns=max_turns,
+        )
+
+        # Write script to sandbox
+        self._sandbox.exec(
+            "bash", "-c",
+            f"cat > /tmp/reflection_script.py << 'EOFREFLECT'\n{script}\nEOFREFLECT",
+        ).wait()
+
+        # Execute with system Python (has claude-agent-sdk)
+        p = self._sandbox.exec(
+            "bash", "-c",
+            f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
+            f"python /tmp/reflection_script.py",
+        )
+        p.wait()
+
+        stdout = p.stdout.read()
+        stderr = p.stderr.read()
+
+        # Log for debugging
+        if stderr:
+            logger.warning(f"Reflection agent stderr:\n{stderr[:1000]}")
+
+        # Parse the output
+        return self._parse_reflection_output(stdout, stderr, p.returncode)
+
+    def _generate_reflection_agent_script(
+        self,
+        workspace_path: str,
+        prompt: str,
+        max_turns: int = 20,
+    ) -> str:
+        """Generate Python script for reflection agent.
+
+        Similar to coding agent but with read-only tools (Read, Grep, Glob).
+
+        Args:
+            workspace_path: Path to the workspace in the sandbox.
+            prompt: Reflection prompt.
+            max_turns: Maximum conversation turns.
+
+        Returns:
+            Python script as a string.
+        """
+        escaped_prompt = prompt.replace('"""', '\\"\\"\\"').replace("\\", "\\\\")
+
+        return f'''#!/usr/bin/env python3
+"""Auto-generated reflection agent script.
+
+Analyzes codebase with read-only tools and proposes a change.
+"""
+
+import os
+import sys
+import subprocess
+
+# Load environment variables
+env_file = "{workspace_path}/.env"
+if os.path.exists(env_file):
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                key = key.replace("export ", "").strip()
+                value = value.strip().strip("'").strip('"')
+                os.environ[key] = value
+
+# Verify Claude Code CLI is installed
+try:
+    result = subprocess.run(["claude", "--version"], capture_output=True, text=True)
+except FileNotFoundError:
+    print("REFLECT_ERROR: Claude Code CLI not found")
+    sys.exit(1)
+
+try:
+    import anyio
+    from claude_agent_sdk import ClaudeAgentOptions, query, AssistantMessage, ResultMessage, TextBlock
+
+    prompt = """{escaped_prompt}"""
+    workspace = "{workspace_path}"
+
+    async def main():
+        proposed_change = None
+
+        async for message in query(
+            prompt=prompt,
+            options=ClaudeAgentOptions(
+                cwd=workspace,
+                # Read-only tools only - no edits
+                allowed_tools=["Read", "Grep", "Glob"],
+                permission_mode="acceptEdits",
+                max_turns={max_turns},
+            ),
+        ):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        # Capture the last text block as the proposed change
+                        proposed_change = block.text
+
+            elif isinstance(message, ResultMessage):
+                if message.is_error:
+                    print(f"REFLECT_ERROR: {{message.result}}")
+                    sys.exit(1)
+
+        if proposed_change:
+            print(f"REFLECT_PROPOSED_CHANGE: {{proposed_change}}")
+        else:
+            print("REFLECT_NO_CHANGE")
+
+    anyio.run(main)
+
+except ImportError as e:
+    print(f"REFLECT_ERROR: claude-agent-sdk not installed: {{e}}")
+    sys.exit(1)
+except Exception as e:
+    print(f"REFLECT_ERROR: {{e}}")
+    sys.exit(1)
+'''
+
+    def _parse_reflection_output(
+        self,
+        stdout: str,
+        stderr: str,
+        returncode: int,
+    ) -> dict:
+        """Parse reflection agent output.
+
+        Args:
+            stdout: Standard output from the script.
+            stderr: Standard error from the script.
+            returncode: Exit code from the script.
+
+        Returns:
+            Dict with 'success', 'proposed_change', 'error' keys.
+        """
+        if returncode != 0:
+            error_lines = [
+                line for line in stdout.split("\n")
+                if "REFLECT_ERROR" in line
+            ]
+            error_msg = (
+                error_lines[0].replace("REFLECT_ERROR: ", "")
+                if error_lines else stderr[:500]
+            )
+            return {
+                "success": False,
+                "proposed_change": "No change proposed",
+                "error": error_msg,
+            }
+
+        # Parse proposed change
+        for line in stdout.split("\n"):
+            if line.startswith("REFLECT_PROPOSED_CHANGE: "):
+                proposed = line[len("REFLECT_PROPOSED_CHANGE: "):]
+                return {
+                    "success": True,
+                    "proposed_change": proposed,
+                    "error": None,
+                }
+
+        if "REFLECT_NO_CHANGE" in stdout:
+            return {
+                "success": True,
+                "proposed_change": "No change proposed",
+                "error": None,
+            }
+
+        return {
+            "success": False,
+            "proposed_change": "No change proposed",
+            "error": "Failed to parse reflection output",
+        }

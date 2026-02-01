@@ -12,12 +12,66 @@ from ..utils import get_logger, make_success_result
 
 log = get_logger("reflective")
 
+# Reserved key for code component (must match adapter.py)
+CODE_COMPONENT_KEY = "_code"
+
+
+def build_code_reflective_dataset(
+    trajectories: list[dict],
+    scores: list[float],
+    failure_score: float,
+) -> list[dict[str, Any]]:
+    """Build feedback for code reflection.
+
+    Includes both:
+    - Low-scoring examples (accuracy issues)
+    - Failed examples (code exceptions)
+
+    The reflective LM has agency to decide what to prioritize.
+
+    Args:
+        trajectories: List of trajectory dicts with example, prediction, trace.
+        scores: List of scores for each trajectory.
+        failure_score: Score threshold for failures.
+
+    Returns:
+        List of feedback items with input, output, score, and optionally exception.
+    """
+    items = []
+
+    for i, data in enumerate(trajectories):
+        if data is None:
+            continue
+
+        score = scores[i] if i < len(scores) else failure_score
+        example = data.get("example", {})
+        prediction = data.get("prediction", {})
+
+        # Include examples that are: low-scoring OR had code failures
+        is_low_score = score < 1.0  # Include any imperfect score
+        has_exception = prediction and isinstance(prediction, dict) and prediction.get("__failed__")
+
+        if is_low_score or has_exception:
+            item = {
+                "input": example,
+                "output": prediction,
+                "score": score,
+            }
+            # Only include exception field if there was an actual code failure
+            if has_exception:
+                item["exception"] = prediction.get("__error__", "Unknown error")
+
+            items.append(item)
+
+    return items
+
 
 def handle(cmd: dict, workspace: str) -> dict:
     """Build reflective dataset from serialized traces.
 
     Matches trace entries to predictors using signature_key fingerprinting
     (sorted input+output field names) instead of live DSPy object comparison.
+    Special handling for _code component which gets overall system feedback.
 
     Args:
         cmd: Command dict with keys:
@@ -26,12 +80,12 @@ def handle(cmd: dict, workspace: str) -> dict:
             - candidate: Dict of predictor name -> instruction text
             - trajectories: List of serialized trace data
             - scores: List of scores for each trajectory
-            - components_to_update: List of predictor names to include
+            - components_to_update: List of predictor names to include (may include "_code")
             - failure_score: Score threshold for failures
         workspace: Path to cloned client repository
 
     Returns:
-        Dict with 'success' and 'reflective_dataset' (predictor name -> examples)
+        Dict with 'success' and 'reflective_dataset' (component name -> examples)
     """
     program_path = cmd["program"]
     saved_json = cmd.get("saved_program_json_path")
@@ -42,6 +96,27 @@ def handle(cmd: dict, workspace: str) -> dict:
     failure_score = cmd.get("failure_score", 0.0)
 
     log.info(f"Building reflective dataset: {len(trajectories)} trajectories, components={components_to_update}")
+
+    ret_d: dict[str, list[dict[str, Any]]] = {}
+
+    # Handle _code component specially - it gets overall system feedback
+    if CODE_COMPONENT_KEY in components_to_update:
+        code_feedback = build_code_reflective_dataset(trajectories, scores, failure_score)
+        if code_feedback:
+            ret_d[CODE_COMPONENT_KEY] = code_feedback
+        log.info(f"Built code reflective dataset with {len(code_feedback)} items")
+
+    # Filter out _code from components that need DSPy predictor handling
+    prompt_components = [c for c in components_to_update if c != CODE_COMPONENT_KEY]
+
+    if not prompt_components:
+        # Only _code was requested
+        if ret_d:
+            log.info(f"Built reflective dataset with {len(ret_d)} components")
+            return make_success_result({"reflective_dataset": ret_d}, logs=log.get_logs())
+        else:
+            log.warning("No valid feedback found for code component")
+            return {"success": False, "error": "No valid feedback found.", "logs": log.get_logs()}
 
     # Build program with candidate instructions to get predictor signatures
     program = build_program(workspace, program_path, saved_json, candidate)
@@ -55,8 +130,7 @@ def handle(cmd: dict, workspace: str) -> dict:
 
     rng = random.Random(0)
 
-    ret_d: dict[str, list[dict[str, Any]]] = {}
-    for pred_name in components_to_update:
+    for pred_name in prompt_components:
         # Find the predictor module for this component
         module = None
         for name, m in program.named_predictors():
