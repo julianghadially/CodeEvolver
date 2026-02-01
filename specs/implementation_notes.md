@@ -457,6 +457,7 @@ GEPA orchestrates the evolutionary optimization. Runs on this service via /optim
 
 ### Pending
 - [ ] Add code change request to GEPA optimization loop
+- [ ] GEPA Checklist
 - [ ] End-to-end testing of GEPA with code mutations + evaluate
 - [ ] Reflection LLM agent
 - [ ] CodeEvolver service

@@ -86,6 +86,58 @@ Read all the assistant responses and the corresponding feedback. Identify all ni
 
 Provide the new instructions within ``` blocks.
 
+### ReflectiveMutationProposer.propose_new_texts()
+It appears that ReflectiveMutationProposer.propose_new_texts is the function inside GEPA that cycles through all the components to update, and makes a proposed change. In the default mode module_selector="round_robin", only 1 component is mutated per iteration. Additionally, the component selection is purely algorithmic. The LLM is only invoked in propose_new_texts() after the components have been selected by the strategy. The components themselves are exactly the keys in the seed_candidate dictionary ("module_1.predict").
+
+*(Side note, mutating one component at a time makes it easier to attribute performance changes to specific modifications and provides cleaner evolutionary signals.)*
+
+See https://github.com/gepa-ai/gepa/blob/main/src/gepa/proposer/reflective_mutation/reflective_mutation.py
+
+
+
+
+```python
+from gepa.proposer.base import CandidateProposal, ProposeNewCandidate
+from gepa.proposer.reflective_mutation.base import (
+    CandidateSelector,
+    LanguageModel,
+    ReflectionComponentSelector,
+)
+from gepa.strategies.instruction_proposal import InstructionProposalSignature
+class ReflectiveMutationProposer(ProposeNewCandidate[DataId])
+def propose_new_texts(
+        self,
+        candidate: dict[str, str],
+        reflective_dataset: Mapping[str, Sequence[Mapping[str, Any]]],
+        components_to_update: list[str],
+    ) -> dict[str, str]:
+        if self.adapter.propose_new_texts is not None:
+            return self.adapter.propose_new_texts(candidate, reflective_dataset, components_to_update)
+
+        if self.reflection_lm is None:
+            raise ValueError("reflection_lm must be provided when adapter.propose_new_texts is None.")
+        new_texts: dict[str, str] = {}
+        for name in components_to_update:
+            # Gracefully handle cases where a selected component has no data in reflective_dataset
+            if name not in reflective_dataset or not reflective_dataset.get(name):
+                self.logger.log(
+                    f"Component '{name}' is not in reflective dataset. Skipping."
+                )
+                continue
+
+            base_instruction = candidate[name]
+            dataset_with_feedback = reflective_dataset[name]
+            new_texts[name] = InstructionProposalSignature.run(
+                lm=self.reflection_lm,
+                input_dict={
+                    "current_instruction_doc": base_instruction,
+                    "dataset_with_feedback": dataset_with_feedback,
+                    "prompt_template": self.reflection_prompt_template,
+                },
+            )["new_instruction"]
+        return new_texts
+```
+
 ## Proposed GEPA Plan for CodeEvolver
 
 ### Two Repositories
@@ -159,7 +211,7 @@ DSPy-native evaluation (no sandbox for prompt-only v1):
 4. Optionally capture DSPy traces for reflection
 5. Return EvaluationBatch(outputs, scores, trajectories if capture_traces)
 
-### Optimization Loop (runs in CodeEvolver)
+#### Optimization Loop (runs in CodeEvolver)
 Creates a CodeEvolver.GEPA optimize manager class with CodeEvolverAdapter -> _build_seed_candidate -> gepa.optimize.compile
 
 A dedicated long-running Modal function (1hr timeout) calls `gepa.optimize()` synchronously. State is persisted to MongoDB each iteration via a `StopperProtocol` callback.
@@ -181,6 +233,10 @@ The GEPA optimization interface
    - Call `gepa.optimize(seed_candidate, trainset, valset, adapter, ...)`
    - Return optimized program from `adapter.build_program(result.best_candidate)`
 
+#### Nitty-Gritty Checklist
+- When the coding changes occur, do we have a good process of updating the prompt JSON and creating a new prompt key in the candidate json.
+- Does the new branch get tracked? It should be a key in the candidates DICT and should be skipped by The components selector in proposed_new_texts
+
 
 ### Sandbox Coordination
 The GEPA optimizer process is managed by a long-running MODAL function that manages the code evolution / optimization. It creates a Client sandbox to run client code inside of. See specs/requirements.md for ClientSandbox architecture.
@@ -194,3 +250,5 @@ The GEPA optimizer process is managed by a long-running MODAL function that mana
 - `ClientSandbox.start()` — Clones repo, installs client requirements.txt
 - `ClientSandbox.exec_bash(command)` — Run arbitrary bash in sandbox
 - `ClientSandbox.stop()` — Terminate sandbox
+
+
