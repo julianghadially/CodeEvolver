@@ -53,7 +53,7 @@ adapter.make_reflective_dataset() creates a reflective_dataset that includes Pro
 The tracing is provided through the GEPA adapter. See below.
 
 ### GEPAAdapter
-This is the single integration point between external systems and the GPA optimization engine.
+This is the single integration point between external systems and the GEPA optimization engine.
 
 Three inputs:
 - DataInst: User-defined type of input data to the program under optimization.
@@ -61,7 +61,7 @@ Three inputs:
 - RolloutOutput: User-defined type of output data from the program candidate.
 
 Key functions:
-- **make_reflective_dataset:** uses EvaluationBatch (trajectory, outputs, scores), and produces a JSON data set. Only does so for the components you want to update for this round
+- **make_reflective_dataset:** uses EvaluationBatch (trajectory - aka traces, outputs, scores), and produces a JSON data set. Only does so for the components you want to update for this round. 
 - **Program and evaluation orchestration (evaluate):** For DSPY, ultimately imports DSPY Evaluate() to run the evaluation.
 - **propose_new_texts (Optional):** uses ProposalFn to modify instruction_proposal.py, Which can be used to modify how the reflective LM works. Could be a useful function to modify, except that it is limited to prompts / str. (Note adapter implements propose_new_texts if it wants to delegate to a custom implementation)
 
@@ -136,6 +136,28 @@ def propose_new_texts(
                 },
             )["new_instruction"]
         return new_texts
+```
+
+### Capturing Traces
+Traces, a.k.a. trajectories, are captured by the adapter. The DSPY adapter capture traces as shown below. If we're capturing traces, We use dspy...bootstrap_trace_data instead of dspy.evaluate
+
+```python
+from dspy.evaluate import Evaluate
+def evaluate(self, batch, candidate, capture_traces=False):
+    program = self.build_program(candidate)
+    outputs: list[Prediction] = []
+    scores: list[float] = []
+    subscores: list[dict[str, float]] = []
+    trajs: list[TraceData] | None = None
+    # If we're capturing traces, We use dspy...bootstrap_trace_data instead of dspy.evaluate
+    if capture_traces:
+            # bootstrap_trace_data-like flow with trace capture
+            from dspy.teleprompt.bootstrap_trace import bootstrap_trace_data
+
+            trajs = bootstrap_trace_data()
+            #traj Is a dictionary that Includes a key for predictions and scores
+    else:
+        evaluator = Evaluate()
 ```
 
 ## Proposed GEPA Plan for CodeEvolver
@@ -233,9 +255,13 @@ The GEPA optimization interface
    - Call `gepa.optimize(seed_candidate, trainset, valset, adapter, ...)`
    - Return optimized program from `adapter.build_program(result.best_candidate)`
 
+#### Traces
+In adapter.evaluate(), We sent to the sandbox via GEPASandbox.exec_prebuilt() With command "evaluate," Which then triggers _evaluate_with_traces if capture_traces = true.
+
 #### Nitty-Gritty Checklist
-- When the coding changes occur, do we have a good process of updating the prompt JSON and creating a new prompt key in the candidate json.
-- Does the new branch get tracked? It should be a key in the candidates DICT and should be skipped by The components selector in proposed_new_texts
+- [ ] GEPA + Code
+- [ ] End-to-end testing of GEPA with code mutations + evaluate
+- [ ] Reflection LLM agent
 
 
 ### Sandbox Coordination

@@ -10,6 +10,7 @@ Copyright (c) 2025 Lakshya A Agrawal and the GEPA contributors
 
 import json
 import logging
+import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -76,6 +77,7 @@ class CodeEvolverDSPyAdapter:
         """Propose new texts for specified components.
 
         Routes _code component to code mutation and others to prompt mutation.
+        When _code is mutated, also updates git_branch to the new branch.
 
         Args:
             candidate: Current candidate dict with git_branch, _code, and predictor texts.
@@ -84,14 +86,18 @@ class CodeEvolverDSPyAdapter:
 
         Returns:
             Dict mapping component names to new text values.
+            May include GIT_BRANCH_KEY if code was mutated.
         """
         new_texts = {}
 
         for component_name in components_to_update:
             if component_name == CODE_COMPONENT_KEY:
-                new_texts[component_name] = self._propose_code_mutation(
+                # Code mutation returns both _code and git_branch
+                code_result = self._propose_code_mutation(
                     candidate, reflective_dataset
                 )
+                new_texts[CODE_COMPONENT_KEY] = code_result[CODE_COMPONENT_KEY]
+                new_texts[GIT_BRANCH_KEY] = code_result[GIT_BRANCH_KEY]
             else:
                 new_texts[component_name] = self._propose_prompt_mutation(
                     component_name, candidate, reflective_dataset
@@ -131,13 +137,13 @@ class CodeEvolverDSPyAdapter:
         """Build initial _code component as JSON-encoded dict.
 
         Returns:
-            JSON string with architecture, pending_change_request, and last_change_summary.
+            JSON string with architecture, change_request, and last_change_summary.
         """
         architecture = self._load_architecture()
 
         return json.dumps({
             "architecture": architecture,
-            "pending_change_request": "",
+            "change_request": "",
             "last_change_summary": "Initial state"
         })
 
@@ -306,50 +312,95 @@ Metric: {self.metric_path}
         self,
         candidate: dict[str, str],
         reflective_dataset: Mapping[str, Sequence[Mapping[str, Any]]],
-    ) -> str:
+    ) -> dict[str, str]:
         """Propose and execute a code mutation based on evaluation feedback.
 
         Two-phase process:
         1. Reflection Phase: Reflective LM analyzes feedback and proposes a change
-        2. Execution Phase: Coding agent executes the proposed change
+        2. Execution Phase: Coding agent executes the proposed change on a new branch
 
         Args:
-            candidate: Current candidate with _code component.
+            candidate: Current candidate with _code component and git_branch.
             reflective_dataset: Feedback from evaluation.
 
         Returns:
-            JSON-encoded dict with updated architecture, pending_change_request,
-            and last_change_summary.
+            Dict with CODE_COMPONENT_KEY (JSON-encoded code data) and
+            GIT_BRANCH_KEY (new branch name).
 
         Raises:
             RuntimeError: If code mutation fails.
         """
         current_code_data = json.loads(candidate.get(CODE_COMPONENT_KEY, "{}"))
         code_feedback = list(reflective_dataset.get(CODE_COMPONENT_KEY, []))
+        parent_branch = candidate.get(GIT_BRANCH_KEY, "main")
 
         # Phase 1: Reflective LM proposes what to change
         proposed_change = self._reflect_on_code(current_code_data, code_feedback)
 
         if not proposed_change or proposed_change == "No change proposed":
             # Return unchanged if reflection couldn't propose anything
-            return json.dumps({
-                "architecture": current_code_data.get("architecture", ""),
-                "pending_change_request": "",
-                "last_change_summary": "No change proposed"
-            })
+            return {
+                CODE_COMPONENT_KEY: json.dumps({
+                    "architecture": current_code_data.get("architecture", ""),
+                    "change_request": "",
+                    "last_change_summary": "No change proposed"
+                }),
+                GIT_BRANCH_KEY: parent_branch,  # Stay on same branch
+            }
 
-        # Phase 2: Coding agent executes the proposed change
+        # Phase 2: Create new branch from parent and execute mutation
+        new_branch = self._create_mutation_branch(parent_branch)
+
+        # Execute coding agent (commits changes automatically)
         result = self._sandbox.exec_agent(proposed_change)
 
         if not result.get("success"):
             raise RuntimeError(f"Code mutation failed: {result.get('error')}")
 
-        # Update the structured _code data
-        return json.dumps({
-            "architecture": current_code_data.get("architecture", ""),
-            "pending_change_request": proposed_change,
-            "last_change_summary": result.get("output", "Change applied")[:500]
-        })
+        # Return updated code data and new branch
+        return {
+            CODE_COMPONENT_KEY: json.dumps({
+                "architecture": current_code_data.get("architecture", ""),
+                "change_request": proposed_change,
+                "last_change_summary": result.get("output", "Change applied")[:500]
+            }),
+            GIT_BRANCH_KEY: new_branch,
+        }
+
+    def _create_mutation_branch(self, parent_branch: str) -> str:
+        """Checkout parent branch and create a new branch for mutation.
+
+        Args:
+            parent_branch: Branch to create from.
+
+        Returns:
+            Name of the new branch.
+
+        Raises:
+            RuntimeError: If branch operations fail.
+        """
+        # Generate unique branch name
+        short_id = uuid.uuid4().hex[:6]
+        new_branch = f"codeevolver-{short_id}"
+
+        # Checkout parent branch first
+        checkout_result = self._sandbox.exec_bash(f"git checkout {parent_branch}")
+        if checkout_result.get("returncode") != 0:
+            raise RuntimeError(
+                f"Failed to checkout parent branch {parent_branch}: "
+                f"{checkout_result.get('stderr')}"
+            )
+
+        # Create and checkout new branch
+        create_result = self._sandbox.exec_bash(f"git checkout -b {new_branch}")
+        if create_result.get("returncode") != 0:
+            raise RuntimeError(
+                f"Failed to create branch {new_branch}: "
+                f"{create_result.get('stderr')}"
+            )
+
+        print(f"[ADAPTER] Created mutation branch {new_branch} from {parent_branch}", flush=True)
+        return new_branch
 
     def _reflect_on_code(
         self,
