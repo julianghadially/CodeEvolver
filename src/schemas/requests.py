@@ -173,6 +173,17 @@ class OptimizeRequest(BaseModel):
         description="GitHub App installation ID for private repos",
     )
 
+    # Additional guidance for GEPA optimization
+    additional_instructions: str | None = Field(
+        default=None,
+        description=(
+            "Client-provided guidance for GEPA optimization. "
+            "May include: constraints (changes that are off-limits), "
+            "services (external APIs available with keys in environment), "
+            "and ideas for optimization approaches."
+        ),
+    )
+
     @model_validator(mode="after")
     def check_trainset_provided(self) -> "OptimizeRequest":
         if self.trainset is None and self.trainset_path is None:
@@ -198,3 +209,10 @@ class JobProgressUpdateRequest(BaseModel):
     best_candidate: dict[str, str]
     total_metric_calls: int
     num_candidates: int
+
+
+class GitHubTokenResponse(BaseModel):
+    """GET /internal/job/{job_id}/github-token — refresh GitHub token."""
+
+    token: str | None = None
+    error: str | None = None

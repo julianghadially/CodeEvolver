@@ -208,22 +208,51 @@ Implements gepa.optimizer and runs in /optimize at API in CE.
     - **Modify proposer, ReflectiveMutationProposer, with tools?:** ToolSet and workspace_context that interacts with codebase. wraps the Claude Agents SDK with full codebase access
 3. **Modify candidate tracking?** No need to change the GPA package for candidates. See candidate structure below, which is compatible.
 4. Use GEPAState
+5. **additional_instructions**: A client-provided string that guides GEPA optimization. The string is included in all reflection LM prompts (both code and prompt mutations). Contents may include:
+   - **Constraints**: Changes that are completely off-limits (e.g., "Do not modify the authentication module")
+   - **Services**: External services available with API keys already in the environment (e.g., "Firecrawl API is available for web scraping")
+   - **Ideas**: Suggestions for optimization approaches
+
+#### Branch Naming Convention
+All branches created during a GEPA run share a common timestamp prefix for traceability:
+- **Run main branch**: `codeevolver-{YYYYMMDDHHmmss}-main` — Created at the start of each optimization run from the initial branch (usually "main")
+- **Mutation branches**: `codeevolver-{YYYYMMDDHHmmss}-{uuid}` — Created from parent branches during code mutations
+
+The run main branch contains:
+- `codeevolver.md` — LM-generated architecture summary of the program being optimized
 
 #### Candidate structure
-This candidate structure is compatible with GEPA. It references, the instruction text directly, and the adapter converts it to the dspy program format, using DspyAdapter.build_program()
+This candidate structure is compatible with GEPA. It references the instruction text directly, and the adapter converts it to the dspy program format, using DspyAdapter.build_program()
+```python
 candidate = {
-    "git_branch": "codeevolver-3x67c",  # ← still a string!
+    "_code": json.dumps({
+        "git_branch": "codeevolver-yyyymmddhhmm-main",  # or codeevolver-20260202163000-a1b2c3
+        "change_request": "The change that was just executed",
+        "last_change_summary": "Agent output summary"
+    }),
     "module_1.predict": "instruction text...",
     "module_2.predict": "instruction text...",
 }
+```
+Architecture is stored in `codeevolver.md` (not in `_code`) so it stays in sync with code changes. Both the reflection agent and coding agent read/update this file directly.
+
+The `_code` component participates in GEPA's round-robin selection. When selected, a two-phase mutation occurs: (1) reflection agent proposes a change, (2) coding agent executes it on a new branch.
 
 #### CodeEvolverAdapter
 - Adapter already delegates to propose_new_texts if it exists
-- Add a propose_new_texts function, which Build a prompt and execute the reflection agent:
-    - builds a reflection prompt using self._build_reflection_prompt(candidate, reflective_dataset, components_to_update)
-    - response = await claude_agent_sdk.query(prompt, ClaudeAgentOptions(cwd = self.workspace_path, allowed_tools = ["Read", "Grep", "Glob"], permission_mode="acceptEdits") 
-    - return self._parse_proposed_texts(response)
-- Instead of inheriting From GEPAAdapter, the adapter conforms via duck typing
+- **Initialization flow (build_seed_candidate):**
+    1. Create run main branch (`codeevolver-{timestamp}-main`) from initial branch
+    2. Use reflection LM to analyze program code and generate architecture summary
+    3. Save architecture summary to `codeevolver.md` and commit
+    4. Return seed candidate with the run main branch as git_branch
+- Add a propose_new_texts function that routes by component type:
+    - **Prompt components:** Use GEPA's InstructionProposalSignature with reflection_lm
+    - **`_code` component:** Two-phase mutation:
+        1. Reflection agent (Read/Grep/Glob tools) analyzes feedback and proposes a change
+        2. Coding agent (Read/Write/Edit/Bash tools) executes the change on a new branch
+    - When `_code` is mutated, also updates `git_branch` to the new branch name
+- Branch handling: checkout parent branch → create new branch (`codeevolver-{timestamp}-{uuid}`) → execute mutation
+- Instead of inheriting from GEPAAdapter, the adapter conforms via duck typing
 
 #### evaluate()
 DSPy-native evaluation (no sandbox for prompt-only v1):
@@ -248,6 +277,7 @@ The GEPA optimization interface
 2. **_build_seed_candidate(student_module)**:
    - Extract initial instructions from DSPy module predictors
    - Add `git_branch` key pointing to initial branch
+   - Add `_code` component with architecture from requirements.md
    - Return `dict[str, str]` seed candidate
 3. **compile(student, trainset, valset)**:
    - Create `CodeEvolverAdapter` (or `CodeEvolverDSPYAdapter`)
@@ -273,6 +303,8 @@ The GEPA optimizer process is managed by a long-running MODAL function that mana
 
 **Key Methods:**
 - `GEPASandbox.exec_prebuilt(command)` — Sends JSON command to `master.py`, returns JSON result
+- `GEPASandbox.exec_agent(change_request)` — Execute coding agent for code mutations
+- `GEPASandbox.exec_reflection_agent(prompt)` — Execute reflection agent with read-only tools (Read/Grep/Glob)
 - `ClientSandbox.start()` — Clones repo, installs client requirements.txt
 - `ClientSandbox.exec_bash(command)` — Run arbitrary bash in sandbox
 - `ClientSandbox.stop()` — Terminate sandbox

@@ -179,6 +179,7 @@ We previously created a sandbox app architecture for making code change requirem
 - **Secrets management (v2)**: use env file for v1
 - **Monitoring and detection:** omit for v1
 - Ensure that sandboxes have limited database access
+- Ensure client environments cannot access the github app private key. However, they can access the decoded installation token, which is scoped for one user/repository, according to Claude
 
 
 ```

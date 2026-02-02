@@ -28,13 +28,15 @@ def handle(cmd: dict, workspace: str) -> dict:
             - input_keys: Fields to mark as inputs on examples
             - failure_score: Score to use on failures
             - program_lm: LM model string for DSPy (e.g., 'openai/gpt-4o-mini')
+            - git_branch: Optional branch to checkout before evaluation
         workspace: Path to cloned client repository
 
     Returns:
         Dict with 'success', 'outputs', 'scores', and optionally 'trajectories'
     """
-    import dspy
-    from dspy.primitives import Example
+    import importlib
+    import subprocess
+    import sys
 
     program_path = cmd["program"]
     metric_path = cmd["metric"]
@@ -46,6 +48,39 @@ def handle(cmd: dict, workspace: str) -> dict:
     input_keys = cmd.get("input_keys", [])
     failure_score = cmd.get("failure_score", 0.0)
     program_lm = cmd.get("program_lm", "openai/gpt-5-mini")
+    git_branch = cmd.get("git_branch")
+
+    # Checkout the specified branch if provided (needed for code-mutated candidates)
+    if git_branch:
+        log.info(f"Checking out branch: {git_branch}")
+        result = subprocess.run(
+            ["git", "checkout", git_branch],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            log.warn(f"Failed to checkout branch {git_branch}: {result.stderr}")
+        else:
+            log.info(f"Successfully checked out branch: {git_branch}")
+
+        # CRITICAL: After git checkout, Python's module cache is stale.
+        # Clear workspace modules from sys.modules to force reimport.
+        # This prevents ImportError from loading code from wrong branch.
+        workspace_modules = [
+            name for name in list(sys.modules.keys())
+            if name.startswith("src.") or name == "src"
+        ]
+        for mod_name in workspace_modules:
+            del sys.modules[mod_name]
+            log.info(f"Cleared cached module: {mod_name}")
+
+        # Invalidate import caches so Python re-reads files from disk
+        importlib.invalidate_caches()
+
+    # Import dspy AFTER module cache clearing to ensure fresh state
+    import dspy
+    from dspy.primitives import Example
 
     log.info(f"DSPy version: {dspy.__version__}")
 

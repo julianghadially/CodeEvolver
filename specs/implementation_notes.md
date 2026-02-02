@@ -34,7 +34,7 @@ Below this line is an ongoing, workspace for Claude / AI coding agents. Do not e
 ```json
 {
   "status": "completed",
-  "best_candidate": {"git_branch": "...", "module_1.predict": "..."},
+  "best_candidate": {"_code": "{\"git_branch\": \"...\", ...}", "module_1.predict": "..."},
   "best_score": 0.92,
   "logs_url": "..."
 }
@@ -168,7 +168,7 @@ Retrieves job status, progress, and current best candidate.
   "status": "running | completed | failed | paused",
   "current_iteration": 42,
   "total_iterations": 100,
-  "best_candidate": {"git_branch": "...", "module_1.predict": "..."},
+  "best_candidate": {"_code": "{\"git_branch\": \"...\", ...}", "module_1.predict": "..."},
   "best_score": 0.87,
   "created_at": "2026-01-26T...",
   "updated_at": "2026-01-26T..."
@@ -522,6 +522,7 @@ modal_app.py               # Modal app entrypoint (includes run_optimization)
 - **Modal Architecture**: FastAPI runs as Modal web endpoint. Mutations execute via `execute_in_sandbox()` which calls `src.core.execute_mutation()`.
 - **SandboxApp Pattern**: Similar to modal-vibe's `SandboxApp`, manages sandbox lifecycle: create -> clone -> install -> mutate -> run -> terminate.
 - **Private Repo Authentication**: `SandboxApp.create()` accepts optional `installation_id` parameter. When provided, uses `GitHubAppService.get_installation_token()` and `get_authenticated_repo_url()` to clone private repositories.
+- **Automatic Token Refresh**: Sandbox calls refresh_github_token() GET /internal/job/{job_id}/github-token (with JWT). FastAPI generates fresh token → returns it
 - **Agent Scripts**: Code mutations generate Python scripts that run Claude Agent SDK inside the sandbox, where native tools work via subprocess.
 - **Git Worktrees**: Using GitPython's `git.worktree` commands. Each program gets its own worktree directory at `{workspace_root}/{client_id}/{program_id}/`
 - **Prompt Mutations**: Directly edit `signature.instructions` in program.json via `apply_prompt_mutation()`, then commit
@@ -562,11 +563,16 @@ For detailed GEPA architecture, see `specs/gepa_plan.md`.
 ### Implementation Notes (v0.3.1 - Unified Calling Pattern)
 
 **Unified Candidate Structure:**
-All candidates now include a `git_branch` key for consistent tracking across prompt-only and code mutations:
+All candidates include a `_code` component that stores `git_branch` and code mutation metadata. The `git_branch` is stored INSIDE `_code` (not as a top-level key) to prevent GEPA's round-robin component selector from treating it as a mutable component:
 
 ```python
 candidate = {
-    "git_branch": "main",  # or "codeevolver-abc123" for mutations
+    "_code": json.dumps({
+        "git_branch": "main",  # or "codeevolver-abc123" for mutations
+        "architecture": "...",
+        "change_request": "...",
+        "last_change_summary": "..."
+    }),
     "claim_extractor.predict": "Extract factual claims...",
     "fire_judge.predict": "Evaluate the claim...",
     "aggregator.predict": "Aggregate verdicts...",

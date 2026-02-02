@@ -1,10 +1,10 @@
-"""Claude agent execution for code mutations.
+"""Claude agent execution for code mutations and reflection.
 
 The agent runs inside the Modal sandbox where Claude's native tools
 (Bash, Read, Edit, Glob, Grep) work via subprocess.
 """
 
-import asyncio
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -278,3 +278,165 @@ def parse_agent_output(stdout: str, stderr: str, returncode: int) -> AgentResult
         error="Agent did not complete successfully",
         output=stdout,
     )
+
+
+@dataclass
+class ReflectionResult:
+    """Result from running the reflection agent."""
+
+    success: bool
+    output: str | None = None
+    error: str | None = None
+
+
+def generate_reflection_agent_script(
+    workspace_path: str,
+    prompt: str,
+    output_schema: dict[str, Any],
+    max_turns: int = 20,
+) -> str:
+    """Generate a Python script that runs the reflection agent with structured output.
+
+    The reflection agent uses read-only tools (Read, Grep, Glob) to analyze
+    the codebase and returns structured JSON output.
+
+    Args:
+        workspace_path: Path to the workspace in the sandbox.
+        prompt: Reflection prompt.
+        output_schema: JSON schema for structured output (from Pydantic model_json_schema()).
+        max_turns: Maximum conversation turns.
+
+    Returns:
+        Python script as a string.
+    """
+    escaped_prompt = prompt.replace('"""', '\\"\\"\\"').replace("\\", "\\\\")
+    schema_json = json.dumps(output_schema)
+
+    return f'''#!/usr/bin/env python3
+"""Auto-generated reflection agent script with structured output.
+
+Analyzes codebase with read-only tools and returns validated JSON.
+"""
+
+import os
+import sys
+import subprocess
+import json
+
+# Load environment variables
+env_file = "{workspace_path}/.env"
+if os.path.exists(env_file):
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                key = key.replace("export ", "").strip()
+                value = value.strip().strip("'").strip('"')
+                os.environ[key] = value
+
+# Verify Claude Code CLI is installed
+try:
+    result = subprocess.run(["claude", "--version"], capture_output=True, text=True)
+except FileNotFoundError:
+    print("REFLECT_ERROR: Claude Code CLI not found")
+    sys.exit(1)
+
+try:
+    import anyio
+    from claude_agent_sdk import ClaudeAgentOptions, query, ResultMessage
+
+    prompt = """{escaped_prompt}"""
+    workspace = "{workspace_path}"
+    output_schema = {schema_json}
+
+    async def main():
+        structured_output = None
+
+        async for message in query(
+            prompt=prompt,
+            options=ClaudeAgentOptions(
+                cwd=workspace,
+                # Read-only tools only - no edits
+                allowed_tools=["Read", "Grep", "Glob"],
+                permission_mode="acceptEdits",
+                max_turns={max_turns},
+                output_format={{
+                    "type": "json_schema",
+                    "schema": output_schema,
+                }},
+            ),
+        ):
+            if isinstance(message, ResultMessage):
+                if message.is_error:
+                    print(f"REFLECT_ERROR: {{message.result}}")
+                    sys.exit(1)
+
+                # Get structured output from ResultMessage
+                if hasattr(message, "structured_output") and message.structured_output:
+                    structured_output = message.structured_output
+
+        if structured_output:
+            # Output as JSON for reliable parsing
+            print("REFLECT_STRUCTURED_OUTPUT:")
+            print(json.dumps(structured_output))
+        else:
+            print("REFLECT_NO_OUTPUT")
+
+    anyio.run(main)
+
+except ImportError as e:
+    print(f"REFLECT_ERROR: claude-agent-sdk not installed: {{e}}")
+    sys.exit(1)
+except Exception as e:
+    print(f"REFLECT_ERROR: {{e}}")
+    sys.exit(1)
+'''
+
+
+def parse_reflection_output(
+    stdout: str,
+    stderr: str,
+    returncode: int,
+    output_key: str,
+) -> ReflectionResult:
+    """Parse reflection agent output with structured JSON.
+
+    Args:
+        stdout: Standard output from the script.
+        stderr: Standard error from the script.
+        returncode: Exit code from the script.
+        output_key: Key to extract from structured output (e.g., "architecture", "change_request").
+
+    Returns:
+        ReflectionResult with parsed output.
+    """
+    if returncode != 0:
+        error_lines = [
+            line for line in stdout.split("\n")
+            if "REFLECT_ERROR" in line
+        ]
+        error_msg = (
+            error_lines[0].replace("REFLECT_ERROR: ", "")
+            if error_lines else stderr[:500]
+        )
+        return ReflectionResult(success=False, error=error_msg)
+
+    # Parse structured output
+    for line in stdout.split("\n"):
+        if line.startswith("REFLECT_STRUCTURED_OUTPUT:"):
+            # Next line contains the JSON
+            continue
+        if line.strip().startswith("{"):
+            try:
+                data = json.loads(line.strip())
+                output_value = data.get(output_key, "")
+                if output_value:
+                    return ReflectionResult(success=True, output=output_value)
+            except json.JSONDecodeError:
+                pass
+
+    if "REFLECT_NO_OUTPUT" in stdout:
+        return ReflectionResult(success=True, output=None, error="No output produced")
+
+    return ReflectionResult(success=False, error="Failed to parse reflection output")

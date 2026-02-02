@@ -107,7 +107,7 @@ def execute_change_request(
     change_location: str | None = None,
     branch_name: str | None = None,
     push_to_remote: bool = False,
-    installation_id: int | None = None,
+    github_token: str | None = None,
 ) -> dict:
     """Execute a code change using GEPASandbox and Claude coding agent.
 
@@ -122,11 +122,11 @@ def execute_change_request(
     from src.gepa.gepa_sandbox import GEPASandbox
     from src.services.git_sandbox import SandboxGitService
 
-    # Create sandbox
+    # Create sandbox with pre-generated token
     sandbox = GEPASandbox(
         app=app,
         repo_url=repo_url,
-        installation_id=installation_id,
+        github_token=github_token,
         timeout=600,
     )
 
@@ -147,15 +147,14 @@ def execute_change_request(
             commit_changes=True,
         )
 
-        # Push if requested
+        # Push if requested (use authenticated push for fresh token)
         if result["success"] and push_to_remote and branch_name:
-            git = SandboxGitService(sandbox._sandbox, sandbox._workspace)
-            push_result = git.push(branch_name)
-            if not push_result.success:
+            push_result = sandbox.push_authenticated(branch_name)
+            if not push_result.get("success"):
                 return {
                     "success": False,
                     "branch_name": branch_name,
-                    "error": f"Push failed: {push_result.stderr}",
+                    "error": f"Push failed: {push_result.get('stderr')}",
                     "output": result.get("output"),
                 }
 
@@ -287,13 +286,14 @@ def run_optimization(
     program_lm: str = "openai/gpt-5-mini",
     reflection_lm: str = "openai/gpt-5-mini",
     max_metric_calls: int = 1000,
-    installation_id: int | None = None,
+    github_token: str | None = None,
     input_keys: list[str] | None = None,
     num_threads: int = 1,
     seed: int = 0,
     callback_url: str = "",
     jwt_token: str = "",
     python_version: str = "3.11",
+    additional_instructions: str | None = None,
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 
@@ -318,14 +318,12 @@ def run_optimization(
     workspace_path = f"/workspaces/gepa_{job_id}/main"
     os.makedirs(f"/workspaces/gepa_{job_id}", exist_ok=True)
 
-    # Handle private repo authentication
+    # Handle private repo authentication using pre-generated token
     authenticated_url = repo_url
-    if installation_id:
-        token = GitHubAppService.get_installation_token(installation_id)
-        if token:
-            authenticated_url = GitHubAppService.get_authenticated_repo_url(
-                repo_url, token
-            )
+    if github_token:
+        authenticated_url = GitHubAppService.get_authenticated_repo_url(
+            repo_url, github_token
+        )
 
     # Clone (orchestrator needs local copy for dataset file reading)
     subprocess.run(
@@ -334,11 +332,15 @@ def run_optimization(
     )
 
     # Create and start the GEPA sandbox (client deps installed there, not here)
+    # Pass github_token and callback info for token refresh (tokens expire after 1 hour)
     sandbox = GEPASandbox(
         app=app,
         repo_url=repo_url,
-        installation_id=installation_id,
+        github_token=github_token,
         timeout=3600,
+        callback_url=callback_url,
+        jwt_token=jwt_token,
+        job_id=job_id,
     )
     sandbox.start(python_version=python_version)
 
@@ -362,6 +364,7 @@ def run_optimization(
             num_threads=num_threads,
             seed=seed,
             program_lm=program_lm,
+            additional_instructions=additional_instructions,
         )
         return result
     finally:

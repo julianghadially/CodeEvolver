@@ -73,15 +73,12 @@ class GitHubAppService:
                 # Raise a new exception without chaining to prevent key exposure
                 raise ValueError(
                     "Invalid private key format. The key could not be parsed. "
-                    "Ensure it's a valid RSA private key in PEM format. "
-                    "If your key is base64 encoded, ensure CODEEVOLVER_GITHUB_APP_PRIVATE_KEY "
-                    "contains the full base64-encoded PEM key."
+                    "Ensure it's a valid RSA private key in PEM format."
                 ) from None
             except Exception as e:
                 # Catch any other JWT-related exceptions
                 raise ValueError(
-                    "Failed to generate JWT token. Check that your GitHub App private key "
-                    "is correctly formatted and base64 decoded if needed."
+                    f"Failed to generate JWT token: {type(e).__name__}: {e}"
                 ) from None
 
             return token

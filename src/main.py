@@ -35,7 +35,7 @@ from .schemas import (
     JobRecord,
     JobStatus,
 )
-from .services import GitService
+from .services import GitService, GitHubAppService
 from .services.jwt_service import mint_job_token, validate_job_token
 from .core import (
     apply_prompt_mutation,
@@ -257,12 +257,31 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
     job_id = f"job_{uuid4().hex[:12]}"
     client_id = GitService.generate_client_id()
 
+    # Resolve installation_id: use request value or fall back to environment variable
+    installation_id = request.installation_id
+    if installation_id is None:
+        env_installation_id = os.getenv("GITHUB_TEST_INSTALLATION_ID")
+        if env_installation_id:
+            try:
+                installation_id = int(env_installation_id)
+            except ValueError:
+                pass  # Invalid env var, leave as None
+
+    # Pre-generate GitHub installation token for the worker/sandbox
+    # Security: The private key stays in FastAPI, only the short-lived token goes to sandbox
+    github_token = None
+    if installation_id:
+        try:
+            github_token = GitHubAppService.get_installation_token(installation_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"GitHub authentication failed: {e}")
+
     # Clone repository
     try:
         workspace_path = GitService.clone_repository(
             request.repo_url,
             client_id,
-            installation_id=request.installation_id,
+            installation_id=installation_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -299,7 +318,7 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
         import sys
         if "/app" not in sys.path:
             sys.path.insert(0, "/app")
-        
+
 
         run_optimization.spawn(
             job_id=job_id,
@@ -314,12 +333,13 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
             program_lm=request.program_lm,
             reflection_lm=request.reflection_lm,
             max_metric_calls=request.max_metric_calls,
-            installation_id=request.installation_id,
+            github_token=github_token,
             input_keys=request.input_keys,
             num_threads=request.num_threads,
             seed=request.seed,
             callback_url=callback_url,
             jwt_token=jwt_token,
+            additional_instructions=request.additional_instructions,
         )
     except ImportError:
         # Not running on Modal — update job status to failed
@@ -419,13 +439,32 @@ async def change_request(request: ChangeRequest) -> ChangeResponse:
 
         from modal_app import execute_change_request
 
+        # Resolve installation_id: use request value or fall back to environment variable
+        installation_id = request.installation_id
+        if installation_id is None:
+            env_installation_id = os.getenv("GITHUB_TEST_INSTALLATION_ID")
+            if env_installation_id:
+                try:
+                    installation_id = int(env_installation_id)
+                except ValueError:
+                    pass  # Invalid env var, leave as None
+
+        # Pre-generate GitHub installation token for the sandbox
+        # Security: The private key stays in FastAPI, only the short-lived token goes to sandbox
+        github_token = None
+        if installation_id:
+            try:
+                github_token = GitHubAppService.get_installation_token(installation_id)
+            except ValueError:
+                pass  # Will attempt unauthenticated if token generation fails
+
         result = await execute_change_request.remote.aio(
             repo_url=request.repo_url,
             change_request=request.change_request,
             change_location=request.change_location,
             branch_name=request.branch_name,
             push_to_remote=request.push_to_remote,
-            installation_id=request.installation_id,
+            github_token=github_token,
         )
 
         return ChangeResponse(
@@ -542,3 +581,48 @@ async def internal_check_cancelled(
     job = await db.jobs.find_one({"job_id": job_id}, {"status": 1})
     cancelled = bool(job and job.get("status") == "cancelled")
     return CancelCheckResponse(cancelled=cancelled)
+
+
+@app.get("/internal/job/{job_id}/github-token")
+async def internal_refresh_github_token(
+    job_id: str,
+    authorization: str | None = Header(default=None),
+):
+    """Get a fresh GitHub installation token for the job.
+
+    GitHub tokens expire after 1 hour. For long-running optimizations,
+    the sandbox calls this endpoint to get a fresh token before git push.
+
+    Returns:
+        GitHubTokenResponse with fresh token or error message.
+    """
+    from .schemas.requests import GitHubTokenResponse
+
+    _validate_internal_jwt(job_id, authorization)
+
+    # Look up job to get installation_id from config
+    db = get_database()
+    job = await db.jobs.find_one({"job_id": job_id}, {"config": 1})
+    if not job:
+        return GitHubTokenResponse(error=f"Job not found: {job_id}")
+
+    config = job.get("config", {})
+    installation_id = config.get("installation_id")
+
+    # Fall back to environment variable if not in job config
+    if installation_id is None:
+        env_installation_id = os.getenv("GITHUB_TEST_INSTALLATION_ID")
+        if env_installation_id:
+            try:
+                installation_id = int(env_installation_id)
+            except ValueError:
+                pass
+
+    if not installation_id:
+        return GitHubTokenResponse(error="No installation_id configured for this job")
+
+    try:
+        token = GitHubAppService.get_installation_token(installation_id)
+        return GitHubTokenResponse(token=token)
+    except ValueError as e:
+        return GitHubTokenResponse(error=f"Failed to generate token: {e}")

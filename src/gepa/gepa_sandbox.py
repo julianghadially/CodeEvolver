@@ -8,9 +8,16 @@ import base64
 import json
 import logging
 
-from ..core.agent import generate_agent_script, parse_agent_output
+from ..core.agent import (
+    generate_agent_script,
+    generate_reflection_agent_script,
+    parse_agent_output,
+    parse_reflection_output,
+)
 from ..core.client_sandbox import ClientSandbox, _get_agent_capable_sandbox_image
+from ..schemas.lm_output_schemas import ArchitectureOutput, ChangeRequestOutput
 from ..services.git_sandbox import SandboxGitService
+from ..services.github_app import GitHubAppService
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +47,17 @@ class GEPASandbox(ClientSandbox):
     # Use agent-capable image with Node.js, npm, Claude Code CLI, and claude-agent-sdk
     _image_builder = staticmethod(_get_agent_capable_sandbox_image)
 
+    # Commit message for code mutations (set by adapter before mutations begin)
+    # Format: "codeevolver mutation. Date: YYYYMMDDHHmmss"
+    commit_message: str | None = None
+
     def exec_agent(
         self,
         change_request: str,
         change_location: str | None = None,
         max_turns: int = 50,
         commit_changes: bool = True,
+        push_branch: str | None = None,
     ) -> dict:
         """Execute coding agent for code mutations.
 
@@ -57,6 +69,7 @@ class GEPASandbox(ClientSandbox):
             change_location: Optional module path hint (e.g., "src/core/agent.py").
             max_turns: Maximum conversation turns (prevents runaway agents).
             commit_changes: If True, commit changes after successful mutation.
+            push_branch: If provided, push to this branch after committing.
 
         Returns:
             Dict with 'success', 'error', 'output' keys.
@@ -103,19 +116,32 @@ class GEPASandbox(ClientSandbox):
 
         result = parse_agent_output(stdout, stderr, p.returncode)
 
-        # Commit changes if requested and successful
+        # Commit and optionally push changes if requested and successful
         if result.success and commit_changes:
             git = SandboxGitService(self._sandbox, self._workspace)
             git.configure_user()
-            commit_result = git.stage_and_commit(
-                f"Code mutation: {change_request[:50]}..."
-            )
+
+            # Use custom commit message or default
+            msg = self.commit_message or f"Code mutation: {change_request[:50]}..."
+            commit_result = git.stage_and_commit(msg)
+
             if not commit_result.success and "no changes" not in commit_result.operation:
                 return {
                     "success": False,
                     "error": f"Git commit failed: {commit_result.stderr}",
                     "output": result.output,
                 }
+
+            # Push if branch is specified (use authenticated push for fresh token)
+            if push_branch and commit_result.success:
+                push_result = self.push_authenticated(push_branch)
+                if not push_result.get("success"):
+                    return {
+                        "success": False,
+                        "error": f"Git push failed: {push_result.get('stderr')}",
+                        "output": result.output,
+                    }
+                logger.info(f"Pushed to origin/{push_branch}")
 
         return {
             "success": result.success,
@@ -154,9 +180,12 @@ class GEPASandbox(ClientSandbox):
         write_p.wait()
 
         # Execute master.py dispatcher (source .env first to load environment variables)
+        # Use venv Python (where client deps like dspy are installed)
+        venv_path_export = f'export PATH="{self._workspace}/.venv/bin:$PATH" && ' if self._use_venv else ""
         p = self._sandbox.exec(
             "bash", "-c",
             f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
+            f"{venv_path_export}"
             f"PYTHONPATH=/app:$PYTHONPATH python /app/sandbox_scripts/master.py "
             f"--workspace {self._workspace} "
             f"--command-file /tmp/prebuilt_command.json",
@@ -223,18 +252,115 @@ class GEPASandbox(ClientSandbox):
             "returncode": p.returncode,
         }
 
+    def push_authenticated(self, branch: str, set_upstream: bool = True) -> dict:
+        """Push to remote with GitHub token, refreshing if needed.
+
+        GitHub tokens expire after 1 hour. This method refreshes the token
+        via callback to FastAPI before pushing to ensure authentication works.
+
+        Args:
+            branch: Branch name to push.
+            set_upstream: If True, set upstream tracking (-u).
+
+        Returns:
+            Dict with 'success', 'stdout', 'stderr', 'returncode' keys.
+
+        Raises:
+            RuntimeError: If sandbox not started.
+        """
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not started. Call start() first.")
+
+        # Refresh token before push (tokens expire after 1 hour)
+        # This ensures we have a valid token for long-running optimizations
+        if self._callback_url and self._jwt_token and self._job_id:
+            refreshed = self.refresh_github_token()
+            if refreshed:
+                logger.info("Using refreshed GitHub token for push")
+
+        # If no github_token, fall back to unauthenticated push
+        if not self.github_token:
+            logger.warning("No github_token - attempting unauthenticated push")
+            return self._exec_push(branch, set_upstream)
+
+        try:
+            # Get authenticated URL using token (refreshed or original)
+            auth_url = GitHubAppService.get_authenticated_repo_url(self.repo_url, self.github_token)
+
+            # Update remote URL with token
+            update_result = self._sandbox.exec(
+                "bash", "-c",
+                f"cd {self._workspace} && git remote set-url origin '{auth_url}'",
+            )
+            update_result.wait()
+            if update_result.returncode != 0:
+                logger.warning(f"Failed to update remote URL: {update_result.stderr.read()}")
+                return self._exec_push(branch, set_upstream)
+
+            # Push with authenticated remote
+            result = self._exec_push(branch, set_upstream)
+
+            # Reset remote URL to non-authenticated version (security best practice)
+            # This prevents the token from being visible in git remote -v output
+            reset_result = self._sandbox.exec(
+                "bash", "-c",
+                f"cd {self._workspace} && git remote set-url origin '{self.repo_url}'",
+            )
+            reset_result.wait()
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error during authenticated push: {e}")
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": str(e),
+                "returncode": -1,
+            }
+
+    def _exec_push(self, branch: str, set_upstream: bool = True) -> dict:
+        """Execute git push command.
+
+        Args:
+            branch: Branch name to push.
+            set_upstream: If True, set upstream tracking (-u).
+
+        Returns:
+            Dict with 'success', 'stdout', 'stderr', 'returncode' keys.
+        """
+        if set_upstream:
+            cmd = f"cd {self._workspace} && git push -u origin {branch}"
+        else:
+            cmd = f"cd {self._workspace} && git push origin {branch}"
+
+        p = self._sandbox.exec("bash", "-c", cmd)
+        p.wait()
+
+        stdout = p.stdout.read()
+        stderr = p.stderr.read()
+
+        return {
+            "success": p.returncode == 0,
+            "stdout": stdout,
+            "stderr": stderr,
+            "returncode": p.returncode,
+        }
+
     def exec_reflection_agent(
         self,
         prompt: str,
+        output_type: str = "change_request",
         max_turns: int = 20,
     ) -> dict:
-        """Execute reflection agent with read-only tools.
+        """Execute reflection agent with read-only tools and structured output.
 
         Uses Claude Agent SDK with only Read, Grep, Glob tools (no edits).
-        The agent analyzes the codebase and feedback to propose a change.
+        Returns validated JSON via structured output.
 
         Args:
             prompt: Reflection prompt asking for a proposed change.
+            output_type: Type of output schema to use ("architecture" or "change_request").
             max_turns: Maximum conversation turns.
 
         Returns:
@@ -246,12 +372,21 @@ class GEPASandbox(ClientSandbox):
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started. Call start() first.")
 
-        logger.info(f"Executing reflection agent: {prompt[:100]}...")
+        logger.info(f"Executing reflection agent ({output_type}): {prompt[:100]}...")
 
-        # Generate reflection agent script
-        script = self._generate_reflection_agent_script(
+        # Select schema based on output type
+        if output_type == "architecture":
+            schema = ArchitectureOutput.model_json_schema()
+            output_key = "architecture"
+        else:
+            schema = ChangeRequestOutput.model_json_schema()
+            output_key = "change_request"
+
+        # Generate reflection agent script with structured output
+        script = generate_reflection_agent_script(
             workspace_path=self._workspace,
             prompt=prompt,
+            output_schema=schema,
             max_turns=max_turns,
         )
 
@@ -276,154 +411,11 @@ class GEPASandbox(ClientSandbox):
         if stderr:
             logger.warning(f"Reflection agent stderr:\n{stderr[:1000]}")
 
-        # Parse the output
-        return self._parse_reflection_output(stdout, stderr, p.returncode)
-
-    def _generate_reflection_agent_script(
-        self,
-        workspace_path: str,
-        prompt: str,
-        max_turns: int = 20,
-    ) -> str:
-        """Generate Python script for reflection agent.
-
-        Similar to coding agent but with read-only tools (Read, Grep, Glob).
-
-        Args:
-            workspace_path: Path to the workspace in the sandbox.
-            prompt: Reflection prompt.
-            max_turns: Maximum conversation turns.
-
-        Returns:
-            Python script as a string.
-        """
-        escaped_prompt = prompt.replace('"""', '\\"\\"\\"').replace("\\", "\\\\")
-
-        return f'''#!/usr/bin/env python3
-"""Auto-generated reflection agent script.
-
-Analyzes codebase with read-only tools and proposes a change.
-"""
-
-import os
-import sys
-import subprocess
-
-# Load environment variables
-env_file = "{workspace_path}/.env"
-if os.path.exists(env_file):
-    with open(env_file) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                key = key.replace("export ", "").strip()
-                value = value.strip().strip("'").strip('"')
-                os.environ[key] = value
-
-# Verify Claude Code CLI is installed
-try:
-    result = subprocess.run(["claude", "--version"], capture_output=True, text=True)
-except FileNotFoundError:
-    print("REFLECT_ERROR: Claude Code CLI not found")
-    sys.exit(1)
-
-try:
-    import anyio
-    from claude_agent_sdk import ClaudeAgentOptions, query, AssistantMessage, ResultMessage, TextBlock
-
-    prompt = """{escaped_prompt}"""
-    workspace = "{workspace_path}"
-
-    async def main():
-        proposed_change = None
-
-        async for message in query(
-            prompt=prompt,
-            options=ClaudeAgentOptions(
-                cwd=workspace,
-                # Read-only tools only - no edits
-                allowed_tools=["Read", "Grep", "Glob"],
-                permission_mode="acceptEdits",
-                max_turns={max_turns},
-            ),
-        ):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        # Capture the last text block as the proposed change
-                        proposed_change = block.text
-
-            elif isinstance(message, ResultMessage):
-                if message.is_error:
-                    print(f"REFLECT_ERROR: {{message.result}}")
-                    sys.exit(1)
-
-        if proposed_change:
-            print(f"REFLECT_PROPOSED_CHANGE: {{proposed_change}}")
-        else:
-            print("REFLECT_NO_CHANGE")
-
-    anyio.run(main)
-
-except ImportError as e:
-    print(f"REFLECT_ERROR: claude-agent-sdk not installed: {{e}}")
-    sys.exit(1)
-except Exception as e:
-    print(f"REFLECT_ERROR: {{e}}")
-    sys.exit(1)
-'''
-
-    def _parse_reflection_output(
-        self,
-        stdout: str,
-        stderr: str,
-        returncode: int,
-    ) -> dict:
-        """Parse reflection agent output.
-
-        Args:
-            stdout: Standard output from the script.
-            stderr: Standard error from the script.
-            returncode: Exit code from the script.
-
-        Returns:
-            Dict with 'success', 'proposed_change', 'error' keys.
-        """
-        if returncode != 0:
-            error_lines = [
-                line for line in stdout.split("\n")
-                if "REFLECT_ERROR" in line
-            ]
-            error_msg = (
-                error_lines[0].replace("REFLECT_ERROR: ", "")
-                if error_lines else stderr[:500]
-            )
-            return {
-                "success": False,
-                "proposed_change": "No change proposed",
-                "error": error_msg,
-            }
-
-        # Parse proposed change
-        for line in stdout.split("\n"):
-            if line.startswith("REFLECT_PROPOSED_CHANGE: "):
-                proposed = line[len("REFLECT_PROPOSED_CHANGE: "):]
-                return {
-                    "success": True,
-                    "proposed_change": proposed,
-                    "error": None,
-                }
-
-        if "REFLECT_NO_CHANGE" in stdout:
-            return {
-                "success": True,
-                "proposed_change": "No change proposed",
-                "error": None,
-            }
+        # Parse the structured output
+        result = parse_reflection_output(stdout, stderr, p.returncode, output_key)
 
         return {
-            "success": False,
-            "proposed_change": "No change proposed",
-            "error": "Failed to parse reflection output",
+            "success": result.success,
+            "proposed_change": result.output or "No change proposed",
+            "error": result.error,
         }

@@ -8,7 +8,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(ls:*)",
       "WebSearch",
-      "WebFetch(domain:modal.com)"
+      "WebFetch(domain:modal.com)",
+      "WebFetch(domain:docs.litellm.ai)"
     ]
   }
 }

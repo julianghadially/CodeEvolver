@@ -12,6 +12,7 @@ import logging
 import os
 from typing import Any
 
+import httpx
 import modal
 
 from ..services.github_app import GitHubAppService
@@ -78,20 +79,28 @@ class ClientSandbox(ABC):
         self,
         app: modal.App,
         repo_url: str,
-        installation_id: int | None = None,
+        github_token: str | None = None,
         timeout: int = 3600,
         cpu: int = 2,
         memory: int = 4096,
+        # Token refresh callback (for long-running jobs)
+        callback_url: str | None = None,
+        jwt_token: str | None = None,
+        job_id: str | None = None,
     ):
         self.app = app
         self.repo_url = repo_url
-        self.installation_id = installation_id
+        self.github_token = github_token  # Pre-generated token (no private key needed)
         self.timeout = timeout
         self.cpu = cpu
         self.memory = memory
         self._sandbox: modal.Sandbox | None = None
         self._workspace = "/workspace"
         self._use_venv = True
+        # For token refresh (GitHub tokens expire after 1 hour)
+        self._callback_url = callback_url
+        self._jwt_token = jwt_token
+        self._job_id = job_id
 
     def start(self, python_version: str = "3.11", use_venv: bool = True) -> None:
         """Create sandbox, clone repo, pip install client requirements.
@@ -104,14 +113,12 @@ class ClientSandbox(ABC):
         logger.info(f"Starting {self.__class__.__name__}...")
         self._use_venv = use_venv
 
-        # Handle private repo authentication
+        # Handle private repo authentication using pre-generated token
         authenticated_url = self.repo_url
-        if self.installation_id:
-            token = GitHubAppService.get_installation_token(self.installation_id)
-            if token:
-                authenticated_url = GitHubAppService.get_authenticated_repo_url(
-                    self.repo_url, token
-                )
+        if self.github_token:
+            authenticated_url = GitHubAppService.get_authenticated_repo_url(
+                self.repo_url, self.github_token
+            )
 
         # Create the Modal sandbox
         self._sandbox = modal.Sandbox.create(
@@ -144,6 +151,21 @@ class ClientSandbox(ABC):
 
         # Install client's requirements.txt
         logger.info("Installing client dependencies...")
+
+        # First check if requirements.txt exists
+        check_p = self._sandbox.exec(
+            "bash", "-c",
+            f"if [ -f {self._workspace}/requirements.txt ]; then "
+            f"echo 'REQUIREMENTS_FOUND'; cat {self._workspace}/requirements.txt; "
+            f"else echo 'REQUIREMENTS_NOT_FOUND'; fi",
+        )
+        check_p.wait()
+        check_output = check_p.stdout.read()
+        if "REQUIREMENTS_FOUND" in check_output:
+            logger.info(f"Found requirements.txt:\n{check_output}")
+        else:
+            logger.warning("No requirements.txt found in client repo")
+
         if use_venv:
             # Create venv for client deps (isolates from system Python)
             logger.info("Creating venv at /workspace/.venv...")
@@ -169,9 +191,11 @@ class ClientSandbox(ABC):
                 f"pip install -r {self._workspace}/requirements.txt; fi",
             )
         p.wait()
+        stdout = p.stdout.read()
+        stderr = p.stderr.read()
         if p.returncode != 0:
-            stderr = p.stderr.read()
             raise RuntimeError(f"pip install failed: {stderr}")
+        logger.info(f"pip install completed. stdout: {stdout[:500]}")
 
         logger.info(f"{self.__class__.__name__} ready.")
 
@@ -301,3 +325,46 @@ class ClientSandbox(ABC):
             except Exception as e:
                 logger.warning(f"Failed to terminate sandbox: {e}")
             self._sandbox = None
+
+    def refresh_github_token(self) -> str | None:
+        """Refresh the GitHub token by calling the FastAPI callback endpoint.
+
+        GitHub installation tokens expire after 1 hour. For long-running
+        optimizations, call this to get a fresh token before git operations.
+
+        Returns:
+            Fresh token string, or None if refresh failed.
+        """
+        if not all([self._callback_url, self._jwt_token, self._job_id]):
+            logger.warning("Cannot refresh token: missing callback_url, jwt_token, or job_id")
+            return None
+
+        url = f"{self._callback_url}/internal/job/{self._job_id}/github-token"
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.get(
+                    url,
+                    headers={"Authorization": f"Bearer {self._jwt_token}"},
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                if data.get("error"):
+                    logger.warning(f"Token refresh failed: {data['error']}")
+                    return None
+
+                new_token = data.get("token")
+                if new_token:
+                    self.github_token = new_token
+                    logger.info("GitHub token refreshed successfully")
+                    return new_token
+
+                return None
+
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Token refresh HTTP error: {e.response.status_code}")
+            return None
+        except Exception as e:
+            logger.warning(f"Token refresh failed: {e}")
+            return None

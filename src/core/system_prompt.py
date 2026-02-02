@@ -33,16 +33,18 @@ CHANGE REQUEST:
 {change_request}{location_hint}
 
 INSTRUCTIONS:
-1. First, explore the codebase to understand its structure
-2. Identify the files that need to be modified
-3. Make the requested changes carefully
-4. Ensure the changes maintain code quality and don't break existing functionality
-5. After making changes, verify they are syntactically correct
+1. First, read codeevolver.md to understand the system architecture
+2. Explore the codebase to understand its structure
+3. Identify the files that need to be modified
+4. Make the requested changes carefully
+5. Ensure the changes maintain code quality and don't break existing functionality
+6. After making changes, verify they are syntactically correct
+7. Update codeevolver.md if your changes affect the architecture (new modules, changed data flow, etc.)
 
 CONSTRAINTS:
-- Only modify files directly related to the change request and AI workflow.
-- Do not modify databases, data files, or any functionality not related to the AI workflow.
-- Make only one change at a time. 
+- Only modify files directly related to the change request and AI workflow
+- Do not modify databases, data files, or any functionality not related to the AI workflow
+- Make only one change at a time
 - Preserve existing code style and conventions
 - Do not modify configuration files unless explicitly requested
 
