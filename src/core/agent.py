@@ -146,6 +146,11 @@ if not os.environ.get("ANTHROPIC_API_KEY"):
 else:
     print(f"[AGENT] ANTHROPIC_API_KEY is set ({{len(os.environ['ANTHROPIC_API_KEY'])}} chars)")
 
+# Enable bypassPermissions mode for root user in sandbox environments
+# See: https://github.com/anthropics/claude-code/issues/9184
+os.environ["IS_SANDBOX"] = "1"
+print("[AGENT] Set IS_SANDBOX=1 for bypassPermissions mode")
+
 # Add venv to PATH if it exists (for client code execution via agent's Bash tool)
 venv_bin = "{workspace_path}/.venv/bin"
 if os.path.exists(venv_bin):
@@ -382,6 +387,11 @@ if not os.environ.get("ANTHROPIC_API_KEY"):
     sys.exit(1)
 else:
     print(f"[REFLECT] ANTHROPIC_API_KEY is set ({{len(os.environ['ANTHROPIC_API_KEY'])}} chars)")
+
+# Enable bypassPermissions mode for root user in sandbox environments
+# See: https://github.com/anthropics/claude-code/issues/9184
+os.environ["IS_SANDBOX"] = "1"
+print("[REFLECT] Set IS_SANDBOX=1 for bypassPermissions mode")
 
 # Verify Claude Code CLI is installed
 try:

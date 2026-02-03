@@ -10,10 +10,24 @@ from typing import Any
 
 
 def load_import_path(workspace_path: str, dotted_path: str) -> Any:
-    """Import an attribute from a dotted path relative to the workspace."""
+    """Import an attribute from a dotted path relative to the workspace.
+
+    Architecture note:
+    - This runs under the VENV Python (/workspace/.venv/bin/python)
+    - DSPy is installed in the venv's site-packages (from client's requirements.txt)
+    - Venv site-packages is already in sys.path when Python starts
+    - We APPEND workspace to sys.path (not insert at 0) to avoid shadowing venv packages
+
+    This ensures import priority is:
+    1. /app (sandbox_scripts via PYTHONPATH)
+    2. /workspace/.venv/lib/python3.11/site-packages (dspy, client deps)
+    3. /workspace (client source code)
+    """
     ws = str(workspace_path)
     if ws not in sys.path:
-        sys.path.insert(0, ws)
+        # APPEND workspace to preserve venv package priority
+        # Venv site-packages (where dspy lives) was added when Python started
+        sys.path.append(ws)
 
     module_path, attr_name = dotted_path.rsplit(".", 1)
     mod = importlib.import_module(module_path)

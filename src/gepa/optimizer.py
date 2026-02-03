@@ -15,6 +15,7 @@ from typing import Any
 
 from gepa import optimize as gepa_optimize
 from gepa.core.result import GEPAResult
+from gepa.strategies.batch_sampler import EpochShuffledBatchSampler
 
 from .adapter import CodeEvolverDSPyAdapter
 from .callback import CallbackJobUpdater, CallbackProgressTracker
@@ -155,6 +156,13 @@ def run_gepa_optimization(
             # Use GEPA's default round-robin selection
             effective_module_selector = "round_robin"
 
+        # Create batch sampler with specified minibatch size
+        import random
+        batch_sampler = EpochShuffledBatchSampler(
+            minibatch_size=subsample_size,
+            rng=random.Random(seed),
+        )
+
         # Run GEPA optimization (synchronous, blocking)
         result: GEPAResult = gepa_optimize(
             seed_candidate=seed_candidate,
@@ -168,7 +176,7 @@ def run_gepa_optimization(
             raise_on_exception=False,
             display_progress_bar=True,
             module_selector=effective_module_selector,
-            subsample_size=subsample_size,
+            batch_sampler=batch_sampler,
         )
 
         # Build result dict

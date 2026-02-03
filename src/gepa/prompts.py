@@ -114,7 +114,7 @@ The following changes have already been tried. Propose something different:
 {attempted_list}
 """
 
-    return f"""You are analyzing the performance of an AI system to propose a single targeted change to the AI system code (not the prompts).
+    return f"""You are analyzing the performance of an AI system to propose a single change to the AI system code (not the prompts).
 
 Unless otherwise specified in the additional instructions, the changes should be related to:
 - Context pipeline
@@ -136,7 +136,7 @@ Change should NOT be related to any of the following:
 ## Your Task
 1. First, read codeevolver.md to understand the system architecture
 2. Analyze the evaluation feedback below
-3. Propose ONE specific, targeted code change that would most improve performance
+3. Propose ONE specific code change that would most improve performance
 
 {additional_section}{attempted_section}
 
@@ -151,5 +151,6 @@ Items may also include exceptions if the code failed.
 - If scores are consistently low for certain input patterns, propose changes to handle those cases
 - Be specific: mention file paths and what to change
 - Do NOT propose changes that have already been attempted (see above)
+- Change can involve significant change to the AI system, as long as it is one concept or feature.
 
 Respond with a specific, actionable change request that a coding agent can execute."""

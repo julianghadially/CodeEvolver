@@ -7,6 +7,20 @@ for reflective dataset building.
 Requires DSPy >= 3.0.0.
 """
 
+# CRITICAL: Import dspy at module level BEFORE any git checkout or module clearing.
+#
+# Architecture:
+# - This script runs under VENV Python (/workspace/.venv/bin/python via PATH)
+# - DSPy is installed in the venv's site-packages (from client's requirements.txt)
+# - Importing here ensures dspy module references are stable before any
+#   workspace manipulation (git checkout, sys.modules clearing)
+#
+# Previous bug: Importing dspy AFTER importlib.invalidate_caches() caused
+# progressive module corruption ("cannot import name 'Example' from 'dspy.primitives'
+# (unknown location)") after 5-6 optimizer iterations.
+import dspy
+from dspy.primitives import Example as DspyExample
+
 from . import build_program, load_import_path, signature_key
 from ..utils import get_logger, make_error_result, make_success_result
 
@@ -64,9 +78,10 @@ def handle(cmd: dict, workspace: str) -> dict:
         else:
             log.info(f"Successfully checked out branch: {git_branch}")
 
-        # CRITICAL: After git checkout, Python's module cache is stale.
-        # Clear workspace modules from sys.modules to force reimport.
-        # This prevents ImportError from loading code from wrong branch.
+        # Clear workspace modules from sys.modules to force reimport from new branch.
+        # Only clear user code modules (src.*), NOT external packages like dspy.
+        # Note: We intentionally do NOT call importlib.invalidate_caches() as it
+        # corrupts dspy's module locators over repeated invocations.
         workspace_modules = [
             name for name in list(sys.modules.keys())
             if name.startswith("src.") or name == "src"
@@ -75,12 +90,8 @@ def handle(cmd: dict, workspace: str) -> dict:
             del sys.modules[mod_name]
             log.info(f"Cleared cached module: {mod_name}")
 
-        # Invalidate import caches so Python re-reads files from disk
-        importlib.invalidate_caches()
-
-    # Import dspy AFTER module cache clearing to ensure fresh state
-    import dspy
-    from dspy.primitives import Example
+    # Use module-level dspy imports (imported at top before any workspace manipulation)
+    Example = DspyExample
 
     log.info(f"DSPy version: {dspy.__version__}")
 
