@@ -305,12 +305,6 @@ The GEPA optimization interface
 #### Traces
 In adapter.evaluate(), We sent to the sandbox via GEPASandbox.exec_prebuilt() With command "evaluate," Which then triggers _evaluate_with_traces if capture_traces = true.
 
-#### Nitty-Gritty Checklist
-- [ ] GEPA + Code
-- [ ] End-to-end testing of GEPA with code mutations + evaluate
-- [ ] Reflection LLM agent
-
-
 ### Sandbox Coordination
 The GEPA optimizer process is managed by a long-running MODAL function that manages the code evolution / optimization. It creates a Client sandbox to run client code inside of. See specs/requirements.md for ClientSandbox architecture.
 
@@ -330,3 +324,9 @@ The GEPA optimizer process is managed by a long-running MODAL function that mana
 
 The coding agent runs via Claude Agent SDK with `permission_mode="bypassPermissions"`. The user proxy is not required, because we are explicitly instructing Claude, not to use plan mode tools, and to make decisions autonomously. However, It might make sense to follow the ["Ralph Wiggum" pattern](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum) And provide any questions back to the coding agent.
 
+#### Remaining
+- [x] Reflection LLM agent
+- [ ] End-to-end testing of GEPA with code mutations + evaluate
+- [ ] Performance results and tuning
+- [ ] Compatability with non-DSPy (clients organize prompt json?)
+- [ ] Speed: Consider multiple parallel workers, with workers expanding as code branches increase, and prompt optimization "depth" focused on each individual branch / worker.
