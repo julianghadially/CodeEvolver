@@ -18,8 +18,18 @@ Requires DSPy >= 3.0.0.
 # Previous bug: Importing dspy AFTER importlib.invalidate_caches() caused
 # progressive module corruption ("cannot import name 'Example' from 'dspy.primitives'
 # (unknown location)") after 5-6 optimizer iterations.
-import dspy
-from dspy.primitives import Example as DspyExample
+
+import sys
+
+from sandbox_scripts.debug_env import get_dspy_import_diagnostic
+
+try:
+    import dspy
+    from dspy.primitives import Example as DspyExample
+except ImportError as _import_err:
+    _diag = get_dspy_import_diagnostic(_import_err)
+    print(f"[evaluate.py IMPORT ERROR]\n{_diag}", file=sys.stderr)
+    raise ImportError(_diag) from _import_err
 
 from . import build_program, load_import_path, signature_key
 from ..utils import get_logger, make_error_result, make_success_result

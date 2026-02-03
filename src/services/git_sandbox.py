@@ -147,6 +147,9 @@ class SandboxGitService:
         """
         Stage all changes (git add -A).
 
+        Relies on .gitignore to exclude sandbox artifacts (.venv, .env).
+        The ClientSandbox.start() method ensures these entries exist in .gitignore.
+
         Returns:
             GitResult
         """

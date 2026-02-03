@@ -17,6 +17,7 @@ from ..core.agent import (
     parse_reflection_output,
 )
 from ..core.client_sandbox import ClientSandbox, _get_agent_capable_sandbox_image
+from ..core.sandbox_scripts.debug_env import get_debug_python_command
 from ..schemas.lm_output_schemas import ArchitectureOutput, ChangeRequestOutput
 from ..services.git_sandbox import SandboxGitService
 from ..services.github_app import GitHubAppService
@@ -193,24 +194,49 @@ class GEPASandbox(ClientSandbox):
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started. Call start() first.")
 
-        # Base64-encode the command JSON for safe file transfer
+        # Serialize command to JSON
         cmd_json = json.dumps(command)
-        cmd_b64 = base64.b64encode(cmd_json.encode()).decode()
 
-        # Write command file via bash (base64 decode for safety)
-        write_p = self._sandbox.exec(
-            "bash", "-c",
-            f"echo '{cmd_b64}' | base64 -d > /tmp/prebuilt_command.json",
-        )
-        write_p.wait()
+        # Write command file in chunks to avoid ARG_MAX limits (65KB)
+        # Large trajectory data can exceed this when passed as single command arg
+        # Use 30KB raw chunks (base64 expands ~33% to ~40KB, safely under 65KB)
+        chunk_size = 30000
+
+        if len(cmd_json) <= chunk_size:
+            # Small payload - single write (original approach)
+            cmd_b64 = base64.b64encode(cmd_json.encode()).decode()
+            write_p = self._sandbox.exec(
+                "bash", "-c",
+                f"echo '{cmd_b64}' | base64 -d > /tmp/prebuilt_command.json",
+            )
+            write_p.wait()
+        else:
+            # Large payload - chunked write
+            # Each chunk is base64-encoded independently, decoded, and appended
+            # Clear file first
+            self._sandbox.exec("bash", "-c", "> /tmp/prebuilt_command.json").wait()
+
+            # Write raw JSON chunks (base64 encode each separately)
+            for i in range(0, len(cmd_json), chunk_size):
+                chunk = cmd_json[i:i + chunk_size]
+                chunk_b64 = base64.b64encode(chunk.encode()).decode()
+                self._sandbox.exec(
+                    "bash", "-c",
+                    f"echo '{chunk_b64}' | base64 -d >> /tmp/prebuilt_command.json",
+                ).wait()
 
         # Execute master.py dispatcher (source .env first to load environment variables)
         # Use venv Python (where client deps like dspy are installed)
         venv_path_export = f'export PATH="{self._workspace}/.venv/bin:$PATH" && ' if self._use_venv else ""
+
+        # Debug: verify venv exists before running (helps diagnose iteration 7-8 failures)
+        debug_cmd = get_debug_python_command(self._workspace)
+
         p = self._sandbox.exec(
             "bash", "-c",
             f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
             f"{venv_path_export}"
+            f"{debug_cmd}"
             f"PYTHONPATH=/app:$PYTHONPATH python /app/sandbox_scripts/master.py "
             f"--workspace {self._workspace} "
             f"--command-file /tmp/prebuilt_command.json",

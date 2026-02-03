@@ -121,6 +121,28 @@ def get_git_branch_from_candidate(
     return code_data.get("git_branch", fallback_branch)
 
 
+def extract_run_timestamp_from_branch(branch_name: str) -> str | None:
+    """Extract the run timestamp from a CodeEvolver branch name.
+
+    Branch names follow the pattern: codeevolver-{YYYYMMDDHHmmss}-{suffix}
+    where suffix is either "main" or a uuid.
+
+    Args:
+        branch_name: Branch name (e.g., "codeevolver-20260203143000-main").
+
+    Returns:
+        The timestamp string (e.g., "20260203143000"), or None if not found.
+    """
+    if not branch_name.startswith("codeevolver-"):
+        return None
+
+    # Remove "codeevolver-" prefix and split on "-"
+    parts = branch_name[len("codeevolver-"):].split("-", 1)
+    if parts:
+        return parts[0]
+    return None
+
+
 def create_ce_main_branch(
     sandbox: Any,
     initial_branch: str,

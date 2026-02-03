@@ -10,7 +10,9 @@ This file is the entry point for all prebuilt scripts in the sandbox.
 
 import argparse
 import json
+import sys
 
+from sandbox_scripts.debug_env import _log_environment_debug
 from sandbox_scripts.utils import get_logger, make_error_result
 
 # Command handlers are imported dynamically based on command type
@@ -20,15 +22,29 @@ HANDLERS = {}
 log = get_logger("master")
 
 
+
 def _register_dspy_handlers():
     """Register DSPy command handlers."""
-    from sandbox_scripts.dspy_scripts import build_seed_candidate
-    from sandbox_scripts.dspy_scripts import evaluate
-    from sandbox_scripts.dspy_scripts import make_reflective_dataset
+    # Log environment before attempting imports (helps debug iteration 7-8 failures)
+    _log_environment_debug(log)
 
-    HANDLERS["build_seed_candidate"] = build_seed_candidate.handle
-    HANDLERS["evaluate"] = evaluate.handle
-    HANDLERS["make_reflective_dataset"] = make_reflective_dataset.handle
+    try:
+        from sandbox_scripts.dspy_scripts import build_seed_candidate
+        from sandbox_scripts.dspy_scripts import evaluate
+        from sandbox_scripts.dspy_scripts import make_reflective_dataset
+
+        HANDLERS["build_seed_candidate"] = build_seed_candidate.handle
+        HANDLERS["evaluate"] = evaluate.handle
+        HANDLERS["make_reflective_dataset"] = make_reflective_dataset.handle
+    except ImportError as e:
+        log.exception(f"Failed to import DSPy handlers: {e}")
+        # Re-raise with more context
+        raise ImportError(
+            f"DSPy handler import failed: {e}\n"
+            f"Python: {sys.executable}\n"
+            f"sys.path[0:3]: {sys.path[:3]}\n"
+            f"Check if venv is active and dspy is installed."
+        ) from e
 
 
 def main():
