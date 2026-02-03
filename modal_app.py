@@ -294,6 +294,8 @@ def run_optimization(
     jwt_token: str = "",
     python_version: str = "3.11",
     additional_instructions: str | None = None,
+    code_frequency: int | None = None,
+    code_cutoff_step: int | None = None,
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 
@@ -365,6 +367,8 @@ def run_optimization(
             seed=seed,
             program_lm=program_lm,
             additional_instructions=additional_instructions,
+            code_frequency=code_frequency,
+            code_cutoff_step=code_cutoff_step,
         )
         return result
     finally:

@@ -1,4 +1,5 @@
-"""Master script dispatcher for sandbox prebuilt commands.
+"""Copyright © 2026 440 Labs LLC
+Master script dispatcher for sandbox prebuilt commands.
 
 Standalone script that runs inside the Modal sandbox. Reads a JSON command
 file, dispatches to the appropriate handler module, and prints

@@ -8,7 +8,14 @@ import importlib
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+import litellm
+
+
+# Reserved key for code component (underscore prefix distinguishes from DSPy predictor names)
+# git_branch is stored INSIDE _code to prevent GEPA from treating it as a mutable component
+CODE_COMPONENT_KEY = "_code"
 
 
 def load_import_path(workspace_path: str, dotted_path: str) -> Any:
@@ -72,3 +79,136 @@ def load_dataset_from_file(file_path: Path) -> list[dict[str, Any]]:
         return items
 
     raise ValueError(f"Unsupported dataset format '{suffix}'. Use .json, .jsonl, or .csv")
+
+
+def get_reflection_lm_callable(model_name: str) -> Callable[[str], str]:
+    """Create a callable that invokes an LM via LiteLLM.
+
+    GEPA's InstructionProposalSignature.run() expects an LM callable,
+    not a model name string. This function wraps the model name into
+    a callable using LiteLLM.
+
+    Args:
+        model_name: LiteLLM model identifier (e.g., "openai/gpt-5-mini").
+
+    Returns:
+        A function that takes a prompt string and returns a response string.
+    """
+    def lm_fn(prompt: str) -> str:
+        response = litellm.completion(
+            model=model_name,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content
+
+    return lm_fn
+
+
+def get_git_branch_from_candidate(
+    candidate: dict[str, str],
+    fallback_branch: str = "main",
+) -> str:
+    """Extract git_branch from the _code component of a candidate.
+
+    Args:
+        candidate: Candidate dict with _code component.
+        fallback_branch: Branch to return if not found in _code.
+
+    Returns:
+        The git branch name, or fallback_branch if not found.
+    """
+    code_data = json.loads(candidate.get(CODE_COMPONENT_KEY, "{}"))
+    return code_data.get("git_branch", fallback_branch)
+
+
+def create_ce_main_branch(
+    sandbox: Any,
+    initial_branch: str,
+    ce_main_branch: str,
+) -> None:
+    """Create the run's main branch from the initial branch.
+
+    Args:
+        sandbox: GEPASandbox instance with exec_bash method.
+        initial_branch: Branch to create from (e.g., "main").
+        ce_main_branch: Name of the new branch to create.
+
+    Raises:
+        RuntimeError: If branch creation fails.
+    """
+    # Checkout initial branch (usually "main")
+    checkout_result = sandbox.exec_bash(f"git checkout {initial_branch}")
+    if checkout_result.get("returncode") != 0:
+        raise RuntimeError(
+            f"Failed to checkout initial branch {initial_branch}: "
+            f"{checkout_result.get('stderr')}"
+        )
+
+    # Create and checkout run's main branch
+    create_result = sandbox.exec_bash(f"git checkout -b {ce_main_branch}")
+    if create_result.get("returncode") != 0:
+        raise RuntimeError(
+            f"Failed to create run main branch {ce_main_branch}: "
+            f"{create_result.get('stderr')}"
+        )
+
+    print(f"[UTILS] Created run main branch {ce_main_branch} from {initial_branch}", flush=True)
+
+
+def save_file_to_sandbox(
+    sandbox: Any,
+    content: str,
+    path: str,
+    push: bool = True,
+    commit_message: str | None = None,
+    branch: str | None = None,
+) -> bool:
+    """Save a string to a file within the client sandbox.
+
+    Args:
+        sandbox: GEPASandbox instance with exec_bash and push_authenticated methods.
+        content: String content to write.
+        path: Relative path within workspace (e.g., "codeevolver.md").
+        push: If True (default), push to remote after committing.
+        commit_message: Commit message. If None, no commit is made.
+        branch: Branch to push to. Required if push=True.
+
+    Returns:
+        True if successful, False otherwise.
+
+    Raises:
+        RuntimeError: If push is requested but fails.
+    """
+    # Write content to file using heredoc
+    write_result = sandbox.exec_bash(
+        f"cat > {path} << 'CODEEVOLVER_EOF'\n{content}\nCODEEVOLVER_EOF"
+    )
+    if write_result.get("returncode") != 0:
+        print(f"[UTILS] Warning: Failed to write {path}: {write_result.get('stderr')}", flush=True)
+        return False
+
+    # Commit if message provided
+    if commit_message:
+        sandbox.exec_bash("git config user.email 'codeevolver@codeevolver.ai'")
+        sandbox.exec_bash("git config user.name 'CodeEvolver'")
+        sandbox.exec_bash(f"git add {path}")
+
+        commit_result = sandbox.exec_bash(f'git commit -m "{commit_message}"')
+        if commit_result.get("returncode") != 0:
+            print(f"[UTILS] Warning: Failed to commit {path}: {commit_result.get('stderr')}", flush=True)
+            return False
+
+        print(f"[UTILS] Committed {path}", flush=True)
+
+    # Push if requested
+    if push:
+        if not branch:
+            raise ValueError("branch is required when push=True")
+        push_result = sandbox.push_authenticated(branch)
+        if not push_result.get("success"):
+            raise RuntimeError(
+                f"Failed to push {branch}: {push_result.get('stderr')}"
+            )
+        print(f"[UTILS] Pushed {branch} to origin", flush=True)
+
+    return True

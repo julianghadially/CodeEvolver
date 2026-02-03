@@ -1,4 +1,5 @@
 # GEPA System Analysis and Plan
+Copyright © 2026 440 Labs LLC
 
 ## Overview
 CodeEvolver offers autonomous coding agents for high reliability AI systems. It uses GEPA optimization to evolve your AI system code until it performs optimally for a given dataset and outcome metric. See specs/CodeEvolver_analysis.md
@@ -86,15 +87,31 @@ Read all the assistant responses and the corresponding feedback. Identify all ni
 
 Provide the new instructions within ``` blocks.
 
+### CodeEvolver Component Selectors (src/gepa/component_selector.py)
+
+**CodeFrequencyComponentSelector** controls code vs prompt mutation frequency.
+
+- `code_frequency`: Number of code iterations per prompt iteration
+  - 0: prompt only (never code)
+  - 1: alternating code/prompt (50%)
+  - 2: code, code, prompt (67% code)
+  - 3: code, code, code, prompt (75% code)
+- `code_cutoff_step`: Stop code mutations after this iteration
+
+```python
+# 3 code per prompt, stop after iteration 100
+selector = CodeFrequencyComponentSelector(code_frequency=3, code_cutoff_step=100)
+
+# Or via API:
+{"code_frequency": 3, "code_cutoff_step": 100}
+```
+
 ### ReflectiveMutationProposer.propose_new_texts()
 It appears that ReflectiveMutationProposer.propose_new_texts is the function inside GEPA that cycles through all the components to update, and makes a proposed change. In the default mode module_selector="round_robin", only 1 component is mutated per iteration. Additionally, the component selection is purely algorithmic. The LLM is only invoked in propose_new_texts() after the components have been selected by the strategy. The components themselves are exactly the keys in the seed_candidate dictionary ("module_1.predict").
 
 *(Side note, mutating one component at a time makes it easier to attribute performance changes to specific modifications and provides cleaner evolutionary signals.)*
 
 See https://github.com/gepa-ai/gepa/blob/main/src/gepa/proposer/reflective_mutation/reflective_mutation.py
-
-
-
 
 ```python
 from gepa.proposer.base import CandidateProposal, ProposeNewCandidate
@@ -309,4 +326,7 @@ The GEPA optimizer process is managed by a long-running MODAL function that mana
 - `ClientSandbox.exec_bash(command)` — Run arbitrary bash in sandbox
 - `ClientSandbox.stop()` — Terminate sandbox
 
+#### Autonomous Execution Design
+
+The coding agent runs via Claude Agent SDK with `permission_mode="bypassPermissions"`. The user proxy is not required, because we are explicitly instructing Claude, not to use plan mode tools, and to make decisions autonomously. However, It might make sense to follow the ["Ralph Wiggum" pattern](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum) And provide any questions back to the coding agent.
 

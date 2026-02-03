@@ -184,6 +184,20 @@ class OptimizeRequest(BaseModel):
         ),
     )
 
+    # Code mutation frequency control
+    code_frequency: int | None = Field(
+        default=None,
+        description=(
+            "Number of code iterations per prompt iteration. "
+            "0=prompt only, 1=alternating (50%), 2=2 code per 1 prompt (67%), "
+            "3=3 code per 1 prompt (75%). Default is 1."
+        ),
+    )
+    code_cutoff_step: int | None = Field(
+        default=None,
+        description="Stop code mutations after this iteration (None=no cutoff)",
+    )
+
     @model_validator(mode="after")
     def check_trainset_provided(self) -> "OptimizeRequest":
         if self.trainset is None and self.trainset_path is None:

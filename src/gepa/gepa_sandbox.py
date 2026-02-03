@@ -1,4 +1,6 @@
-"""GEPA-specific client sandbox implementation.
+"""Copyright © 2026 440 Labs LLC
+
+GEPA-specific client sandbox implementation.
 
 Extends ClientSandbox with exec_prebuilt() for DSPy command execution
 and exec_agent() for coding agent code mutations.
@@ -81,6 +83,7 @@ class GEPASandbox(ClientSandbox):
             raise RuntimeError("Sandbox not started. Call start() first.")
 
         logger.info(f"Executing agent for: {change_request[:100]}...")
+        print(f"[AGENT] Change request (full): {change_request}", flush=True)
 
         # Generate agent script
         script = generate_agent_script(
@@ -96,19 +99,41 @@ class GEPASandbox(ClientSandbox):
             f"cat > /tmp/agent_script.py << 'EOFAGENT'\n{script}\nEOFAGENT",
         ).wait()
 
+        # Verify Claude Code CLI and API key before running
+        print("[AGENT] Verifying Claude Code CLI...", flush=True)
+        verify_p = self._sandbox.exec(
+            "bash", "-c",
+            f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
+            "claude --version && echo 'ANTHROPIC_API_KEY set:' && "
+            "[ -n \"$ANTHROPIC_API_KEY\" ] && echo 'yes' || echo 'NO - MISSING!'",
+        )
+        verify_p.wait()
+        verify_stdout = verify_p.stdout.read()
+        verify_stderr = verify_p.stderr.read()
+        print(f"[AGENT] CLI verification: {verify_stdout}", flush=True)
+        if verify_stderr:
+            print(f"[AGENT] CLI verification stderr: {verify_stderr}", flush=True)
+
         # Execute with system Python (has claude-agent-sdk)
         # Source .env first for API keys
+        print("[AGENT] Starting agent script execution...", flush=True)
         p = self._sandbox.exec(
             "bash", "-c",
             f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
-            f"python /tmp/agent_script.py",
+            f"python /tmp/agent_script.py 2>&1",
         )
         p.wait()
 
         stdout = p.stdout.read()
         stderr = p.stderr.read()
 
-        # Log agent output for debugging
+        # Log full agent output for debugging
+        print(f"[AGENT] Exit code: {p.returncode}", flush=True)
+        print(f"[AGENT] stdout:\n{stdout}", flush=True)
+        if stderr:
+            print(f"[AGENT] stderr:\n{stderr}", flush=True)
+
+        # Also log via logger
         if stdout:
             logger.info(f"Agent stdout:\n{stdout[:2000]}")
         if stderr:
@@ -373,6 +398,8 @@ class GEPASandbox(ClientSandbox):
             raise RuntimeError("Sandbox not started. Call start() first.")
 
         logger.info(f"Executing reflection agent ({output_type}): {prompt[:100]}...")
+        print(f"[REFLECT] Output type: {output_type}", flush=True)
+        print(f"[REFLECT] Prompt (first 500 chars): {prompt[:500]}...", flush=True)
 
         # Select schema based on output type
         if output_type == "architecture":
@@ -397,18 +424,22 @@ class GEPASandbox(ClientSandbox):
         ).wait()
 
         # Execute with system Python (has claude-agent-sdk)
+        print("[REFLECT] Starting reflection agent...", flush=True)
         p = self._sandbox.exec(
             "bash", "-c",
             f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
-            f"python /tmp/reflection_script.py",
+            f"python /tmp/reflection_script.py 2>&1",
         )
         p.wait()
 
         stdout = p.stdout.read()
         stderr = p.stderr.read()
 
-        # Log for debugging
+        # Log full output for debugging
+        print(f"[REFLECT] Exit code: {p.returncode}", flush=True)
+        print(f"[REFLECT] stdout:\n{stdout}", flush=True)
         if stderr:
+            print(f"[REFLECT] stderr:\n{stderr}", flush=True)
             logger.warning(f"Reflection agent stderr:\n{stderr[:1000]}")
 
         # Parse the structured output

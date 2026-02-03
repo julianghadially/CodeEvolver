@@ -340,6 +340,8 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
             callback_url=callback_url,
             jwt_token=jwt_token,
             additional_instructions=request.additional_instructions,
+            code_frequency=request.code_frequency,
+            code_cutoff_step=request.code_cutoff_step,
         )
     except ImportError:
         # Not running on Modal — update job status to failed

@@ -1,4 +1,5 @@
 # Requirements
+Copyright © 2026 440 Labs LLC
 See specs/implementation_notes.md for additional detail.
 
 ## Overview

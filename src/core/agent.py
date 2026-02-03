@@ -101,9 +101,10 @@ def generate_agent_script(
     Returns:
         Python script as a string
     """
-    # Escape any quotes in the change request
-    escaped_request = change_request.replace('"""', '\\"\\"\\"').replace("\\", "\\\\")
-    escaped_location = (change_location or "").replace('"""', '\\"\\"\\"')
+    # Escape for embedding in triple-quoted string
+    # Order matters: escape backslashes first, then triple quotes
+    escaped_request = change_request.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    escaped_location = (change_location or "").replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 
     return f'''#!/usr/bin/env python3
 """Auto-generated agent script for code mutation.
@@ -115,10 +116,16 @@ The SDK spawns Claude Code CLI as a subprocess.
 import os
 import sys
 import subprocess
+import warnings
+
+# Suppress asyncio warnings about unawaited tasks
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*was never awaited.*")
 
 # Load environment variables from .env if present
 env_file = "{workspace_path}/.env"
+print(f"[AGENT] Looking for .env at: {{env_file}}")
 if os.path.exists(env_file):
+    print("[AGENT] Found .env file, loading...")
     with open(env_file) as f:
         for line in f:
             line = line.strip()
@@ -127,6 +134,17 @@ if os.path.exists(env_file):
                 key = key.replace("export ", "").strip()
                 value = value.strip().strip("'").strip('"')
                 os.environ[key] = value
+                if key == "ANTHROPIC_API_KEY":
+                    print(f"[AGENT] Loaded ANTHROPIC_API_KEY ({{len(value)}} chars)")
+else:
+    print("[AGENT] WARNING: No .env file found!")
+
+# Check for API key
+if not os.environ.get("ANTHROPIC_API_KEY"):
+    print("AGENT_ERROR: ANTHROPIC_API_KEY not set in environment")
+    sys.exit(1)
+else:
+    print(f"[AGENT] ANTHROPIC_API_KEY is set ({{len(os.environ['ANTHROPIC_API_KEY'])}} chars)")
 
 # Add venv to PATH if it exists (for client code execution via agent's Bash tool)
 venv_bin = "{workspace_path}/.venv/bin"
@@ -138,6 +156,8 @@ if os.path.exists(venv_bin):
 try:
     result = subprocess.run(["claude", "--version"], capture_output=True, text=True)
     print(f"[AGENT] Claude Code CLI version: {{result.stdout.strip()}}")
+    if result.returncode != 0:
+        print(f"[AGENT] CLI stderr: {{result.stderr}}")
 except FileNotFoundError:
     print("AGENT_ERROR: Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code")
     sys.exit(1)
@@ -156,46 +176,55 @@ try:
 
     print(f"[AGENT] Starting code mutation...")
     print(f"[AGENT] Workspace: {{workspace}}")
-    print(f"[AGENT] Change request: {{change_request[:200]}}...")
+    print(f"[AGENT] Change request: {{change_request[:500]}}...")
+    sys.stdout.flush()
 
     async def main():
         tool_uses = []
         error_occurred = False
         error_message = None
 
-        async for message in query(
-            prompt=prompt,
-            options=ClaudeAgentOptions(
-                cwd=workspace,
-                # Full set of code editing tools
-                allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
-                permission_mode="acceptEdits",
-                max_turns={max_turns},
-            ),
-        ):
-            # Log what Claude is doing for observability
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, ToolUseBlock):
-                        tool_uses.append(block.name)
-                        print(f"[AGENT] Tool: {{block.name}}")
-                        if block.name in ["Write", "Edit"]:
-                            file_path = block.input.get("file_path", "unknown")
-                            print(f"[AGENT]   -> {{file_path}}")
-                    elif isinstance(block, TextBlock):
-                        # Log first 200 chars of Claude's thinking
-                        text_preview = block.text[:200].replace("\\n", " ")
-                        print(f"[AGENT] Claude: {{text_preview}}...")
+        try:
+            async for message in query(
+                prompt=prompt,
+                options=ClaudeAgentOptions(
+                    cwd=workspace,
+                    # Full set of code editing tools
+                    allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+                    # bypassPermissions: Runs without ANY prompts - for autonomous execution
+                    # This prevents the agent from getting stuck on plan mode approval
+                    permission_mode="bypassPermissions",
+                    max_turns={max_turns},
+                ),
+            ):
+                # Log what Claude is doing for observability
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, ToolUseBlock):
+                            tool_uses.append(block.name)
+                            print(f"[AGENT] Tool: {{block.name}}")
+                            if block.name in ["Write", "Edit"]:
+                                file_path = block.input.get("file_path", "unknown")
+                                print(f"[AGENT]   -> {{file_path}}")
+                        elif isinstance(block, TextBlock):
+                            # Log first 200 chars of Claude's thinking
+                            text_preview = block.text[:200].replace("\\n", " ")
+                            print(f"[AGENT] Claude: {{text_preview}}...")
+                    sys.stdout.flush()
 
-            elif isinstance(message, ResultMessage):
-                if message.is_error:
-                    error_occurred = True
-                    error_message = message.result
-                    print(f"[AGENT] ERROR: {{message.result}}")
-                else:
-                    print(f"[AGENT] Completed in {{message.num_turns}} turns")
-                    if message.total_cost_usd:
-                        print(f"[AGENT] Cost: ${{message.total_cost_usd:.4f}}")
+                elif isinstance(message, ResultMessage):
+                    if message.is_error:
+                        error_occurred = True
+                        error_message = message.result
+                        print(f"[AGENT] ERROR: {{message.result}}")
+                    else:
+                        print(f"[AGENT] Completed in {{message.num_turns}} turns")
+                        if message.total_cost_usd:
+                            print(f"[AGENT] Cost: ${{message.total_cost_usd:.4f}}")
+        except Exception as e:
+            print(f"[AGENT] Exception during query: {{type(e).__name__}}: {{e}}")
+            error_occurred = True
+            error_message = str(e)
 
         # Summary
         print(f"[AGENT] Tools used: {{tool_uses}}")
@@ -309,7 +338,9 @@ def generate_reflection_agent_script(
     Returns:
         Python script as a string.
     """
-    escaped_prompt = prompt.replace('"""', '\\"\\"\\"').replace("\\", "\\\\")
+    # Escape for embedding in triple-quoted string
+    # Order matters: escape backslashes first, then triple quotes
+    escaped_prompt = prompt.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
     schema_json = json.dumps(output_schema)
 
     return f'''#!/usr/bin/env python3
@@ -322,10 +353,16 @@ import os
 import sys
 import subprocess
 import json
+import warnings
+
+# Suppress asyncio warnings about unawaited tasks
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*was never awaited.*")
 
 # Load environment variables
 env_file = "{workspace_path}/.env"
+print(f"[REFLECT] Looking for .env at: {{env_file}}")
 if os.path.exists(env_file):
+    print("[REFLECT] Found .env file, loading...")
     with open(env_file) as f:
         for line in f:
             line = line.strip()
@@ -334,10 +371,22 @@ if os.path.exists(env_file):
                 key = key.replace("export ", "").strip()
                 value = value.strip().strip("'").strip('"')
                 os.environ[key] = value
+                if key == "ANTHROPIC_API_KEY":
+                    print(f"[REFLECT] Loaded ANTHROPIC_API_KEY ({{len(value)}} chars)")
+else:
+    print("[REFLECT] WARNING: No .env file found!")
+
+# Check for API key
+if not os.environ.get("ANTHROPIC_API_KEY"):
+    print("REFLECT_ERROR: ANTHROPIC_API_KEY not set in environment")
+    sys.exit(1)
+else:
+    print(f"[REFLECT] ANTHROPIC_API_KEY is set ({{len(os.environ['ANTHROPIC_API_KEY'])}} chars)")
 
 # Verify Claude Code CLI is installed
 try:
     result = subprocess.run(["claude", "--version"], capture_output=True, text=True)
+    print(f"[REFLECT] Claude Code CLI version: {{result.stdout.strip()}}")
 except FileNotFoundError:
     print("REFLECT_ERROR: Claude Code CLI not found")
     sys.exit(1)
@@ -350,31 +399,43 @@ try:
     workspace = "{workspace_path}"
     output_schema = {schema_json}
 
+    print(f"[REFLECT] Starting reflection...")
+    print(f"[REFLECT] Workspace: {{workspace}}")
+    print(f"[REFLECT] Prompt (first 300 chars): {{prompt[:300]}}...")
+    sys.stdout.flush()
+
     async def main():
         structured_output = None
 
-        async for message in query(
-            prompt=prompt,
-            options=ClaudeAgentOptions(
-                cwd=workspace,
-                # Read-only tools only - no edits
-                allowed_tools=["Read", "Grep", "Glob"],
-                permission_mode="acceptEdits",
-                max_turns={max_turns},
-                output_format={{
-                    "type": "json_schema",
-                    "schema": output_schema,
-                }},
-            ),
-        ):
-            if isinstance(message, ResultMessage):
-                if message.is_error:
-                    print(f"REFLECT_ERROR: {{message.result}}")
-                    sys.exit(1)
+        try:
+            async for message in query(
+                prompt=prompt,
+                options=ClaudeAgentOptions(
+                    cwd=workspace,
+                    # Read-only tools only - no edits
+                    allowed_tools=["Read", "Grep", "Glob"],
+                    # bypassPermissions: Runs without ANY prompts - for autonomous execution
+                    permission_mode="bypassPermissions",
+                    max_turns={max_turns},
+                    output_format={{
+                        "type": "json_schema",
+                        "schema": output_schema,
+                    }},
+                ),
+            ):
+                if isinstance(message, ResultMessage):
+                    if message.is_error:
+                        print(f"REFLECT_ERROR: {{message.result}}")
+                        return None
 
-                # Get structured output from ResultMessage
-                if hasattr(message, "structured_output") and message.structured_output:
-                    structured_output = message.structured_output
+                    # Get structured output from ResultMessage
+                    if hasattr(message, "structured_output") and message.structured_output:
+                        structured_output = message.structured_output
+                        print(f"[REFLECT] Got structured output")
+        except Exception as e:
+            print(f"[REFLECT] Exception during query: {{type(e).__name__}}: {{e}}")
+            # Don't exit - try to return any partial output
+            pass
 
         if structured_output:
             # Output as JSON for reliable parsing
@@ -383,13 +444,17 @@ try:
         else:
             print("REFLECT_NO_OUTPUT")
 
+        return structured_output
+
     anyio.run(main)
 
 except ImportError as e:
     print(f"REFLECT_ERROR: claude-agent-sdk not installed: {{e}}")
     sys.exit(1)
 except Exception as e:
+    import traceback
     print(f"REFLECT_ERROR: {{e}}")
+    print(f"[REFLECT] Traceback: {{traceback.format_exc()}}")
     sys.exit(1)
 '''
 

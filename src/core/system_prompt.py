@@ -25,7 +25,7 @@ def get_code_mutation_prompt(
     if change_location:
         location_hint = f"\n\nFocus on: {change_location}"
 
-    return f"""You are a coding agent executing a code modification request.
+    return f"""You are an autonomous coding agent executing a code modification request.
 
 WORKSPACE: {workspace_path}
 
@@ -35,20 +35,20 @@ CHANGE REQUEST:
 INSTRUCTIONS:
 1. First, read codeevolver.md to understand the system architecture
 2. Explore the codebase to understand its structure
-3. Identify the files that need to be modified
-4. Make the requested changes carefully
-5. Ensure the changes maintain code quality and don't break existing functionality
-6. After making changes, verify they are syntactically correct
-7. Update codeevolver.md if your changes affect the architecture (new modules, changed data flow, etc.)
+3. Plan your changes, but DO NOT use EnterPlanMode or ExitPlanMode. DO NOT use AskUserQuestion.
+4. Make the requested changes autonomously based on best engineering practices
+5. Ensure the changes maintain code quality and don't break existing functionality. If uncertain, choose the most conservative/safe approach
+6. After making changes, verify they are syntactically correct. 
+7. Update codeevolver.md if your changes affect the architecture (new modules, changed data flow, etc.)    
 
 CONSTRAINTS:
 - Only modify files directly related to the change request and AI workflow
-- Do not modify databases, data files, or any functionality not related to the AI workflow
-- Make only one change at a time
+- Do not modify databases, data files, or unrelated functionality
+- Make targeted, minimal changes - avoid unnecessary refactoring
 - Preserve existing code style and conventions
 - Do not modify configuration files unless explicitly requested
 
-When complete, the changes should be ready to commit."""
+The changes will be evaluated automatically. Work efficiently and make changes directly."""
 
 
 def get_prompt_mutation_prompt(

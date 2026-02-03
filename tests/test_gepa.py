@@ -65,13 +65,15 @@ OPTIMIZE_CONFIG = {
     "repo_url": "https://github.com/julianghadially/FactChecker",
     "program": "src.factchecker.simple.modules.judge_module.JudgeModule",
     "metric": "src.codeevolver.metric.metric",
-    "trainset_path": "data/FacTool_QA_train_normalized.jsonl",
+    "trainset_path": "data/FactChecker_news_claims_normalized.csv", # data/FacTool_QA_train_normalized.jsonl
     "input_keys": ["statement"],
     "reflection_lm": "openai/gpt-5-mini",
     "max_metric_calls": 1000,
     "num_threads": 5,
     "seed": 42,
     "additional_instructions": additional_instructions,
+    # Using default round_robin selector (no code_frequency specified)
+    # This lets GEPA's ReflectionComponentSelector handle component selection
 }
 
 # Polling configuration

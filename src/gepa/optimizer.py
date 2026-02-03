@@ -1,4 +1,7 @@
-"""GEPA optimization orchestrator for CodeEvolver.
+"""
+Copyright © 2026 440 Labs LLC
+
+GEPA optimization orchestrator for CodeEvolver.
 
 This module is called from the Modal function to set up and run the
 GEPA optimization loop. It creates the adapter (which proxies to the
@@ -15,6 +18,7 @@ from gepa.core.result import GEPAResult
 
 from .adapter import CodeEvolverDSPyAdapter
 from .callback import CallbackJobUpdater, CallbackProgressTracker
+from .component_selector import CodeFrequencyComponentSelector
 from .utils import load_dataset_from_file
 
 
@@ -64,6 +68,10 @@ def run_gepa_optimization(
     seed: int = 0,
     program_lm: str = "openai/gpt-5-mini",
     additional_instructions: str | None = None,
+    code_frequency: int | None = None,
+    code_cutoff_step: int | None = None,
+    code_lm: str = "anthropic/claude-sonnet-4-5-20250929",
+    subsample_size: int = 5,
 ) -> dict[str, Any]:
     """Run GEPA optimization. Called from the Modal function.
 
@@ -90,6 +98,15 @@ def run_gepa_optimization(
         additional_instructions: Client-provided guidance for GEPA optimization.
             May include constraints (off-limits changes), services (available APIs
             with keys in environment), and ideas for optimization.
+        code_frequency: Number of code iterations per prompt iteration.
+            If None (default), uses GEPA's default "round_robin" selector.
+            If provided, uses CodeFrequencyComponentSelector:
+            0=prompt only, 1=alternating (50%), 2=2 code per prompt (67%),
+            3=3 code per prompt (75%).
+        code_cutoff_step: Stop code mutations after this iteration. Only used
+            when code_frequency is provided. Default is None (no cutoff).
+        code_lm: Language model for code mutations. Default is Claude Sonnet 4.5.
+        subsample_size: Number of examples per evaluation batch. Default is 5.
 
     Returns:
         Dict with optimization results.
@@ -116,6 +133,7 @@ def run_gepa_optimization(
             program_lm=program_lm,
             reflection_lm=reflection_lm,
             additional_instructions=additional_instructions,
+            code_lm=code_lm,
         )
 
         # Build seed candidate from program.json (via sandbox)
@@ -123,6 +141,19 @@ def run_gepa_optimization(
 
         # Create callback progress tracker (also handles cancellation)
         tracker = CallbackProgressTracker(callback_url, jwt_token, job_id)
+
+        # Determine module selector based on code_frequency
+        # If code_frequency is provided, use CodeFrequencyComponentSelector
+        # Otherwise use GEPA's default "round_robin"
+        effective_module_selector: CodeFrequencyComponentSelector | str
+        if code_frequency is not None:
+            effective_module_selector = CodeFrequencyComponentSelector(
+                code_frequency=code_frequency,
+                code_cutoff_step=code_cutoff_step,
+            )
+        else:
+            # Use GEPA's default round-robin selection
+            effective_module_selector = "round_robin"
 
         # Run GEPA optimization (synchronous, blocking)
         result: GEPAResult = gepa_optimize(
@@ -136,6 +167,8 @@ def run_gepa_optimization(
             seed=seed,
             raise_on_exception=False,
             display_progress_bar=True,
+            module_selector=effective_module_selector,
+            subsample_size=subsample_size,
         )
 
         # Build result dict

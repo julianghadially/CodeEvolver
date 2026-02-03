@@ -1,4 +1,7 @@
-"""CodeEvolver DSPy adapter for GEPA optimization.
+"""
+Copyright © 2026 440 Labs LLC
+
+CodeEvolver DSPy adapter for GEPA optimization.
 
 Implements the GEPAAdapter protocol via structural typing (no inheritance).
 All DSPy operations are delegated to a GEPASandbox via JSON IPC,
@@ -15,15 +18,22 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Callable
 
-import litellm
-
 from gepa.core.adapter import EvaluationBatch
 
-logger = logging.getLogger(__name__)
+from .prompts import (
+    build_architecture_fallback,
+    build_architecture_prompt,
+    build_code_reflection_prompt,
+)
+from .utils import (
+    CODE_COMPONENT_KEY,
+    create_ce_main_branch,
+    get_git_branch_from_candidate,
+    get_reflection_lm_callable,
+    save_file_to_sandbox,
+)
 
-# Reserved key for code component (underscore prefix distinguishes from DSPy predictor names)
-# git_branch is stored INSIDE _code to prevent GEPA from treating it as a mutable component
-CODE_COMPONENT_KEY = "_code"
+logger = logging.getLogger(__name__)
 
 
 class CodeEvolverDSPyAdapter:
@@ -42,6 +52,7 @@ class CodeEvolverDSPyAdapter:
         num_threads: Number of threads for parallel evaluation.
         input_keys: Field names to mark as inputs on dspy.Example.
         initial_branch: Initial git branch name for seed candidate.
+        code_lm: Language model for code mutations. Default is Claude Sonnet 4.5.
     """
 
     def __init__(
@@ -58,6 +69,7 @@ class CodeEvolverDSPyAdapter:
         reflection_lm: str = "openai/gpt-5-mini",
         reflection_prompt_template: str | None = None,
         additional_instructions: str | None = None,
+        code_lm: str = "anthropic/claude-sonnet-4-5-20250514",
     ):
         self._sandbox = sandbox_manager
         self.program_path = program
@@ -71,6 +83,7 @@ class CodeEvolverDSPyAdapter:
         self.reflection_lm = reflection_lm
         self.reflection_prompt_template = reflection_prompt_template
         self.additional_instructions = additional_instructions
+        self.code_lm = code_lm
         # Track attempted changes per parent branch to avoid repeating the same ideas.
         # Key: parent branch name, Value: list of changes attempted FROM that branch.
         # This allows parallel branches to independently discover the same mutation.
@@ -83,11 +96,7 @@ class CodeEvolverDSPyAdapter:
         self._reflection_lm_callable: Callable[[str], str] | None = None
 
     def _get_reflection_lm_callable(self) -> Callable[[str], str]:
-        """Get a callable function that invokes the reflection LM.
-
-        GEPA's InstructionProposalSignature.run() expects an LM callable,
-        not a model name string. This method wraps the model name into
-        a callable using LiteLLM.
+        """Get a cached callable function that invokes the reflection LM.
 
         Returns:
             A function that takes a prompt string and returns a response string.
@@ -95,17 +104,8 @@ class CodeEvolverDSPyAdapter:
         if self._reflection_lm_callable is not None:
             return self._reflection_lm_callable
 
-        model_name = self.reflection_lm
-
-        def lm_fn(prompt: str) -> str:
-            response = litellm.completion(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.choices[0].message.content
-
-        self._reflection_lm_callable = lm_fn
-        return lm_fn
+        self._reflection_lm_callable = get_reflection_lm_callable(self.reflection_lm)
+        return self._reflection_lm_callable
 
     def _get_git_branch_from_candidate(self, candidate: dict[str, str]) -> str:
         """Extract git_branch from the _code component.
@@ -116,8 +116,9 @@ class CodeEvolverDSPyAdapter:
         Returns:
             The git branch name, or the run main branch as fallback.
         """
-        code_data = json.loads(candidate.get(CODE_COMPONENT_KEY, "{}"))
-        return code_data.get("git_branch", self._ce_main_branch or "main")
+        return get_git_branch_from_candidate(
+            candidate, fallback_branch=self._ce_main_branch or "main"
+        )
 
     def propose_new_texts(
         self,
@@ -205,23 +206,11 @@ class CodeEvolverDSPyAdapter:
         Raises:
             RuntimeError: If branch creation fails.
         """
-        # Checkout initial branch (usually "main")
-        checkout_result = self._sandbox.exec_bash(f"git checkout {self.initial_branch}")
-        if checkout_result.get("returncode") != 0:
-            raise RuntimeError(
-                f"Failed to checkout initial branch {self.initial_branch}: "
-                f"{checkout_result.get('stderr')}"
-            )
-
-        # Create and checkout run's main branch
-        create_result = self._sandbox.exec_bash(f"git checkout -b {self._ce_main_branch}")
-        if create_result.get("returncode") != 0:
-            raise RuntimeError(
-                f"Failed to create run main branch {self._ce_main_branch}: "
-                f"{create_result.get('stderr')}"
-            )
-
-        print(f"[ADAPTER] Created run main branch {self._ce_main_branch} from {self.initial_branch}", flush=True)
+        create_ce_main_branch(
+            sandbox=self._sandbox,
+            initial_branch=self.initial_branch,
+            ce_main_branch=self._ce_main_branch,
+        )
 
     def _generate_architecture_summary(self) -> str:
         """Generate architecture summary using the reflection agent.
@@ -232,43 +221,14 @@ class CodeEvolverDSPyAdapter:
         Returns:
             Architecture summary string.
         """
-        # Build the prompt for architecture summarization
-        prompt = f"""You are analyzing a codebase to generate an architecture summary.
-
-## Program Being Optimized
-- **Entry Point**: `{self.program_path}`
-- **Metric**: `{self.metric_path}`
-
-## Your Task
-1. Use the Read tool to examine the program entry point file: `{self.program_path.replace(".", "/")}.py`
-2. Use Glob to find related Python files in the same directory
-3. If there's a README.md, read it for additional context
-
-Then generate an architecture summary (500-2500 characters) that includes:
-1. What this program does (high-level purpose)
-2. Key modules and their responsibilities
-3. Data flow through the system
-4. The metric being optimized
-
-Provide the summary as a single markdown-style output."""
+        prompt = build_architecture_prompt(self.program_path, self.metric_path)
 
         # Call reflection agent with structured output
         result = self._sandbox.exec_reflection_agent(prompt, output_type="architecture")
 
         summary = result.get("proposed_change", "")
         if not summary or summary == "No change proposed":
-            # Fallback to a basic summary
-            summary = f"""# Architecture Summary
-
-## Program
-- **Entry Point**: `{self.program_path}`
-- **Metric**: `{self.metric_path}`
-
-## Overview
-This is a DSPy program being optimized by CodeEvolver.
-
-*Generated automatically by CodeEvolver at {datetime.now().isoformat()}*
-"""
+            summary = build_architecture_fallback(self.program_path, self.metric_path)
 
         return summary
 
@@ -281,35 +241,14 @@ This is a DSPy program being optimized by CodeEvolver.
         Raises:
             RuntimeError: If file operations fail.
         """
-        # Write the architecture summary to codeevolver.md
-        # Use heredoc to safely write multi-line content
-        write_result = self._sandbox.exec_bash(
-            f"cat > codeevolver.md << 'CODEEVOLVER_EOF'\n{architecture}\nCODEEVOLVER_EOF"
+        save_file_to_sandbox(
+            sandbox=self._sandbox,
+            content=architecture,
+            path="codeevolver.md",
+            push=True,
+            commit_message=f"codeevolver mutation. Date: {self._run_timestamp}",
+            branch=self._ce_main_branch,
         )
-        if write_result.get("returncode") != 0:
-            print(f"[ADAPTER] Warning: Failed to write codeevolver.md: {write_result.get('stderr')}", flush=True)
-            return
-
-        # Configure git and commit the file
-        self._sandbox.exec_bash("git config user.email 'codeevolver@codeevolver.ai'")
-        self._sandbox.exec_bash("git config user.name 'CodeEvolver'")
-        self._sandbox.exec_bash("git add codeevolver.md")
-
-        commit_msg = f"codeevolver mutation. Date: {self._run_timestamp}"
-        commit_result = self._sandbox.exec_bash(f'git commit -m "{commit_msg}"')
-        if commit_result.get("returncode") != 0:
-            print(f"[ADAPTER] Warning: Failed to commit codeevolver.md: {commit_result.get('stderr')}", flush=True)
-            return
-
-        print(f"[ADAPTER] Committed codeevolver.md to {self._ce_main_branch}", flush=True)
-
-        # Push the branch to remote (with fresh authentication)
-        push_result = self._sandbox.push_authenticated(self._ce_main_branch)
-        if not push_result.get("success"):
-            raise RuntimeError(
-                f"Failed to push {self._ce_main_branch}: {push_result.get('stderr')}"
-            )
-        print(f"[ADAPTER] Pushed {self._ce_main_branch} to origin", flush=True)
 
     def _build_initial_code_component(self, git_branch: str) -> str:
         """Build initial _code component as JSON-encoded dict.
@@ -495,10 +434,13 @@ This is a DSPy program being optimized by CodeEvolver.
         parent_branch = current_code_data.get("git_branch", self._ce_main_branch or "main")
 
         # Phase 1: Reflective LM proposes what to change (reads codeevolver.md for architecture)
+        print(f"[ADAPTER] Phase 1: Calling reflection agent for code mutation...", flush=True)
         proposed_change = self._reflect_on_code(code_feedback, parent_branch)
+        print(f"[ADAPTER] Reflection proposed: {proposed_change[:500] if proposed_change else 'None'}...", flush=True)
 
         if not proposed_change or proposed_change == "No change proposed":
             # Return unchanged if reflection couldn't propose anything
+            print("[ADAPTER] No change proposed by reflection, returning unchanged", flush=True)
             return json.dumps({
                 "git_branch": parent_branch,  # Stay on same branch
                 "change_request": "",
@@ -506,17 +448,28 @@ This is a DSPy program being optimized by CodeEvolver.
             })
 
         # Phase 2: Create new branch from parent and execute mutation
+        print(f"[ADAPTER] Phase 2: Creating mutation branch...", flush=True)
         new_branch = self._create_mutation_branch(parent_branch)
 
         # Execute coding agent (commits and pushes changes automatically)
         # Agent also updates codeevolver.md if architectural changes are made
+        print(f"[ADAPTER] Phase 3: Executing coding agent on branch {new_branch}...", flush=True)
         result = self._sandbox.exec_agent(
             proposed_change,
             push_branch=new_branch,
         )
+        print(f"[ADAPTER] Agent result: success={result.get('success')}, error={result.get('error')}", flush=True)
+        if result.get("output"):
+            print(f"[ADAPTER] Agent output: {result.get('output')[:1000]}", flush=True)
 
         if not result.get("success"):
-            raise RuntimeError(f"Code mutation failed: {result.get('error')}")
+            error_msg = result.get("error", "Unknown error")
+            output_msg = result.get("output", "")
+            # Include more context in error for debugging
+            raise RuntimeError(
+                f"Code mutation failed: {error_msg}\n"
+                f"Agent output (if any): {output_msg[:500] if output_msg else 'None'}"
+            )
 
         # Track this change AFTER successful execution to avoid re-attempting from same parent
         if parent_branch not in self._attempted_changes_by_branch:
@@ -614,68 +567,13 @@ This is a DSPy program being optimized by CodeEvolver.
         Returns:
             Formatted prompt string.
         """
-        # Limit to 10 examples to avoid token limits
-        feedback_str = json.dumps(feedback[:10], indent=2)
-
-        # Build additional instructions section if provided
-        additional_section = ""
-        if self.additional_instructions:
-            additional_section = f"""
-## Additional Instructions from Client
-{self.additional_instructions}
-"""
-
-        # Build attempted changes section - only show changes attempted FROM this branch
-        # This allows parallel branches to independently discover the same mutation
-        attempted_section = ""
         branch_attempts = self._attempted_changes_by_branch.get(parent_branch, [])
-        if branch_attempts:
-            attempted_list = "\n".join(f"- {change}" for change in branch_attempts[-10:])
-            attempted_section = f"""
-## Previously Attempted Changes (DO NOT REPEAT)
-The following changes have already been tried. Propose something different:
-{attempted_list}
-"""
-
-        return f"""You are analyzing the performance of an AI system to propose a single targeted change to the AI system code (not the prompts).
-        
-Unless otherwise specified in the additional instructions, the changes should be related to:
-- Context pipeline
-- Memory
-- Language model modules
-- Module inputs and outputs
-- AI workflow architecture (e.g., How each module connects to each other)
-    - sub-modules
-    - dynamic prompts
-
-Change should NOT be related to any of the following:
-- Prompts
-- DSPy docstrings
-- Logging
-- Client database structure
-- Code that does not pertain to the AI workflow
-- Any Constraints provided by the client in the additional instructions section
-
-## Your Task
-1. First, read codeevolver.md to understand the system architecture
-2. Analyze the evaluation feedback below
-3. Propose ONE specific, targeted code change that would most improve performance
-
-{additional_section}{attempted_section}
-
-## Evaluation Feedback
-Each item shows an example input, the system output, and the score (1.0 = perfect).
-Items may also include exceptions if the code failed.
-
-{feedback_str}
-
-## General Guidelines
-- If there are code failures (exceptions), prioritize fixing those
-- If scores are consistently low for certain input patterns, propose changes to handle those cases
-- Be specific: mention file paths and what to change
-- Do NOT propose changes that have already been attempted (see above)
-
-Respond with a specific, actionable change request that a coding agent can execute."""
+        return build_code_reflection_prompt(
+            feedback=feedback,
+            parent_branch=parent_branch,
+            additional_instructions=self.additional_instructions,
+            attempted_changes=branch_attempts if branch_attempts else None,
+        )
 
     def _propose_prompt_mutation(
         self,
