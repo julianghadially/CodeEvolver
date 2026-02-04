@@ -16,58 +16,83 @@ CODE_COMPONENT_KEY = "_code"
 
 
 class CodeFrequencyComponentSelector(ReflectionComponentSelector):
-    """Component selector that controls code mutation frequency.
+    """Component selector that controls code mutation frequency with exponential decay.
+
+    The ratio is expressed as **prompts per code change**:
+        - 0 = only code changes (no prompts)
+        - 1 = 1 prompt per code (alternating: code, prompt, code, prompt, ...)
+        - 2 = 2 prompts per code (code, prompt, prompt, code, prompt, prompt, ...)
+        - 4 = 4 prompts per code (code, prompt, prompt, prompt, prompt, code, ...)
+
+    The ratio increases over time via exponential decay:
+        prompts_per_code = initial * (decay_factor ** (iteration // decay_rate))
+
+    With defaults (initial=1, decay_rate=25, decay_factor=2):
+        - Iterations 0-24: prompts_per_code = 1 (1:1 ratio)
+        - Iterations 25-49: prompts_per_code = 2 (1:2 ratio)
+        - Iterations 50-74: prompts_per_code = 4 (1:4 ratio)
+        - Iterations 75-99: prompts_per_code = 8 (1:8 ratio)
 
     Args:
-        code_frequency: Number of code iterations per prompt iteration.
-            - 0: Prompt only (never do code mutations)
-            - 1: Alternating code/prompt (50% each)
-            - 2: 2 code per 1 prompt (67% code)
-            - 3: 3 code per 1 prompt (75% code)
-            Default is 1 (alternating).
-
-        code_cutoff_step: After this iteration, no more code mutations.
-            Set to None for no cutoff (default).
-
-    Pattern examples:
-        code_frequency=0: prompt, prompt, prompt, ...
-        code_frequency=1: code, prompt, code, prompt, ...
-        code_frequency=2: code, code, prompt, code, code, prompt, ...
-        code_frequency=3: code, code, code, prompt, ...
+        initial: Starting prompts per code (default: 1).
+        decay_rate: Iterations between each multiplier step (default: 25).
+        decay_factor: Multiplier applied at each decay step (default: 2).
+        code_cutoff_step: Stop code mutations after this iteration (default: None).
 
     Example usage:
-        # 3 code per prompt, stop code after iteration 100
-        selector = CodeFrequencyComponentSelector(code_frequency=3, code_cutoff_step=100)
+        # Default: start 1:1, decay every 25 iterations
+        selector = CodeFrequencyComponentSelector()
 
-        # Prompt only
-        selector = CodeFrequencyComponentSelector(code_frequency=0)
+        # Code only (no prompts)
+        selector = CodeFrequencyComponentSelector(initial=0)
+
+        # Start with 2:1 prompt:code, double every 50 iterations
+        selector = CodeFrequencyComponentSelector(initial=2, decay_rate=50)
     """
 
     def __init__(
         self,
-        code_frequency: int = 1,
+        initial: int = 1,
+        decay_rate: int = 25,
+        decay_factor: int = 2,
         code_cutoff_step: int | None = None,
     ):
-        if code_frequency < 0:
-            raise ValueError("code_frequency must be >= 0")
+        if initial < 0:
+            raise ValueError("initial must be >= 0")
+        if decay_rate < 0:
+            raise ValueError("decay_rate must be >= 0")
+        if decay_factor < 1:
+            raise ValueError("decay_factor must be >= 1")
         if code_cutoff_step is not None and code_cutoff_step < 0:
             raise ValueError("code_cutoff_step must be >= 0 or None")
 
-        self.code_frequency = code_frequency
+        self.initial = initial
+        self.decay_rate = decay_rate
+        self.decay_factor = decay_factor
         self.code_cutoff_step = code_cutoff_step
+
+    def _get_prompts_per_code(self, iteration: int) -> int:
+        """Calculate prompts per code at this iteration using decay function."""
+        if self.decay_rate <= 0:
+            return self.initial
+        decay_steps = iteration // self.decay_rate
+        return self.initial * (self.decay_factor ** decay_steps)
 
     def _is_code_iteration(self, iteration: int) -> bool:
         """Determine if this iteration should be a code mutation."""
-        if self.code_frequency == 0:
-            return False
+        prompts_per_code = self._get_prompts_per_code(iteration)
+
+        if prompts_per_code == 0:
+            # Only code changes, no prompts
+            return True
 
         if self.code_cutoff_step is not None and iteration > self.code_cutoff_step:
             return False
 
-        # Cycle: N code iterations then 1 prompt
-        cycle_length = self.code_frequency + 1
+        # Cycle: 1 code then N prompts
+        cycle_length = 1 + prompts_per_code
         position_in_cycle = iteration % cycle_length
-        return position_in_cycle < self.code_frequency
+        return position_in_cycle == 0
 
     def _get_prompt_components(self, candidate: dict[str, str]) -> list[str]:
         """Get list of prompt components (excluding code component)."""

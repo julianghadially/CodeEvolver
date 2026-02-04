@@ -184,14 +184,22 @@ class OptimizeRequest(BaseModel):
         ),
     )
 
-    # Code mutation frequency control
-    code_frequency: int | None = Field(
+    # Code mutation frequency control with exponential decay
+    initial: int | None = Field(
         default=None,
         description=(
-            "Number of code iterations per prompt iteration. "
-            "0=prompt only, 1=alternating (50%), 2=2 code per 1 prompt (67%), "
-            "3=3 code per 1 prompt (75%). Default is 1."
+            "Starting prompts per code change. "
+            "0=code only, 1=alternating (1:1), 2=2 prompts per code, etc. "
+            "If None, uses GEPA's default round-robin selector."
         ),
+    )
+    decay_rate: int = Field(
+        default=25,
+        description="Iterations between each multiplier step for prompts-per-code ratio",
+    )
+    decay_factor: int = Field(
+        default=2,
+        description="Multiplier applied at each decay step (e.g., 2 means ratio doubles)",
     )
     code_cutoff_step: int | None = Field(
         default=None,

@@ -28,6 +28,7 @@ from .prompts import (
 from .utils import (
     CODE_COMPONENT_KEY,
     create_ce_main_branch,
+    ensure_gitignore_committed,
     get_git_branch_from_candidate,
     get_reflection_lm_callable,
     save_file_to_sandbox,
@@ -183,6 +184,11 @@ class CodeEvolverDSPyAdapter:
         # Create the run's main branch from initial_branch (usually "main")
         self._ce_main_branch = f"codeevolver-{self._run_timestamp}-main"
         self._create_ce_main_branch()
+
+        # Ensure .gitignore has .venv and .env BEFORE any mutations
+        # This prevents the venv from being committed to mutation branches
+        # All mutation branches stem from ce_main_branch, so they inherit this .gitignore
+        ensure_gitignore_committed(self._sandbox, self._ce_main_branch)
 
         # Set commit message on sandbox for all future mutations
         self._sandbox.commit_message = f"codeevolver mutation. Date: {self._run_timestamp}"

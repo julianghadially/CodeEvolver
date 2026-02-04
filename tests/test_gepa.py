@@ -72,7 +72,7 @@ OPTIMIZE_CONFIG = {
     "num_threads": 5,
     "seed": 42,
     "additional_instructions": additional_instructions,
-    # Using default round_robin selector (no code_frequency specified)
+    # Using default round_robin selector (no initial specified)
     # This lets GEPA's ReflectionComponentSelector handle component selection
 }
 

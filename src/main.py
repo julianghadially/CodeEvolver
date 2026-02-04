@@ -305,12 +305,13 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
     await db.jobs.insert_one(job_record.model_dump())
 
     # Mint a job-scoped JWT for sandbox→API callbacks
+    # JWT TTL matches the job timeout (12 hours) + 5 min buffer
     jwt_token = ""
     callback_url = settings.callback_url
     if settings.jwt_secret:
         jwt_token = mint_job_token(
             job_id,
-            ttl_seconds=settings.gepa_optimization_timeout + 300,
+            ttl_seconds=settings.gepa_job_timeout + 300,
         )
 
     # Spawn Modal function for optimization (fire-and-forget)
@@ -340,7 +341,9 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
             callback_url=callback_url,
             jwt_token=jwt_token,
             additional_instructions=request.additional_instructions,
-            code_frequency=request.code_frequency,
+            initial=request.initial,
+            decay_rate=request.decay_rate,
+            decay_factor=request.decay_factor,
             code_cutoff_step=request.code_cutoff_step,
         )
     except ImportError:

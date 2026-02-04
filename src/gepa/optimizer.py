@@ -131,7 +131,9 @@ def run_gepa_optimization(
     seed: int = 0,
     program_lm: str = "openai/gpt-5-mini",
     additional_instructions: str | None = None,
-    code_frequency: int | None = None,
+    initial: int | None = None,
+    decay_rate: int = 25,
+    decay_factor: int = 2,
     code_cutoff_step: int | None = None,
     code_lm: str = "anthropic/claude-sonnet-4-5-20250929",
     subsample_size: int = 5,
@@ -161,13 +163,12 @@ def run_gepa_optimization(
         additional_instructions: Client-provided guidance for GEPA optimization.
             May include constraints (off-limits changes), services (available APIs
             with keys in environment), and ideas for optimization.
-        code_frequency: Number of code iterations per prompt iteration.
-            If None (default), uses GEPA's default "round_robin" selector.
-            If provided, uses CodeFrequencyComponentSelector:
-            0=prompt only, 1=alternating (50%), 2=2 code per prompt (67%),
-            3=3 code per prompt (75%).
+        initial: Starting prompts per code (default: 1). The ratio represents
+            prompts per code change. If None, uses GEPA's default "round_robin".
+        decay_rate: Iterations between each multiplier step (default: 25).
+        decay_factor: Multiplier applied at each decay step (default: 2).
         code_cutoff_step: Stop code mutations after this iteration. Only used
-            when code_frequency is provided. Default is None (no cutoff).
+            when initial is provided. Default is None (no cutoff).
         code_lm: Language model for code mutations. Default is Claude Sonnet 4.5.
         subsample_size: Number of examples per evaluation batch. Default is 5.
 
@@ -205,13 +206,15 @@ def run_gepa_optimization(
         # Create callback progress tracker (also handles cancellation)
         tracker = CallbackProgressTracker(callback_url, jwt_token, job_id)
 
-        # Determine module selector based on code_frequency
-        # If code_frequency is provided, use CodeFrequencyComponentSelector
+        # Determine module selector based on initial (prompts per code)
+        # If initial is provided, use CodeFrequencyComponentSelector with decay
         # Otherwise use GEPA's default "round_robin"
         effective_module_selector: CodeFrequencyComponentSelector | str
-        if code_frequency is not None:
+        if initial is not None:
             effective_module_selector = CodeFrequencyComponentSelector(
-                code_frequency=code_frequency,
+                initial=initial,
+                decay_rate=decay_rate,
+                decay_factor=decay_factor,
                 code_cutoff_step=code_cutoff_step,
             )
         else:

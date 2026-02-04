@@ -265,13 +265,16 @@ gepa_image = (
 )
 
 
+# NOTE: timeout must match settings.gepa_job_timeout in src/config.py
+# Decorator values are evaluated at import time, so we can't use settings here
 @app.function(
     image=gepa_image,
     volumes={"/workspaces": workspaces_volume},
     secrets=[modal.Secret.from_name("codeevolver-worker-secrets")],
-    timeout=3600,
+    timeout=43200,  # 12 hours - KEEP IN SYNC with src/config.py gepa_job_timeout
     cpu=4,
     memory=8192,
+    nonpreemptible=True,  # Prevent mid-optimization restarts (3x CPU/memory cost)
 )
 def run_optimization(
     job_id: str,
@@ -294,7 +297,9 @@ def run_optimization(
     jwt_token: str = "",
     python_version: str = "3.11",
     additional_instructions: str | None = None,
-    code_frequency: int | None = None,
+    initial: int | None = None,
+    decay_rate: int = 25,
+    decay_factor: int = 2,
     code_cutoff_step: int | None = None,
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
@@ -335,11 +340,13 @@ def run_optimization(
 
     # Create and start the GEPA sandbox (client deps installed there, not here)
     # Pass github_token and callback info for token refresh (tokens expire after 1 hour)
+    # Import settings here (runtime) since decorator can't use imports
+    from src.config import settings
     sandbox = GEPASandbox(
         app=app,
         repo_url=repo_url,
         github_token=github_token,
-        timeout=3600,
+        timeout=settings.gepa_job_timeout,  # Must match function timeout
         callback_url=callback_url,
         jwt_token=jwt_token,
         job_id=job_id,
@@ -367,7 +374,9 @@ def run_optimization(
             seed=seed,
             program_lm=program_lm,
             additional_instructions=additional_instructions,
-            code_frequency=code_frequency,
+            initial=initial,
+            decay_rate=decay_rate,
+            decay_factor=decay_factor,
             code_cutoff_step=code_cutoff_step,
         )
         return result

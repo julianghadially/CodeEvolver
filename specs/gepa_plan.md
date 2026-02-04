@@ -89,21 +89,37 @@ Provide the new instructions within ``` blocks.
 
 ### CodeEvolver Component Selectors (src/gepa/component_selector.py)
 
-**CodeFrequencyComponentSelector** controls code vs prompt mutation frequency.
+**CodeFrequencyComponentSelector** controls code vs prompt mutation frequency with exponential decay.
 
-- `code_frequency`: Number of code iterations per prompt iteration
-  - 0: prompt only (never code)
-  - 1: alternating code/prompt (50%)
-  - 2: code, code, prompt (67% code)
-  - 3: code, code, code, prompt (75% code)
+The ratio is expressed as **prompts per code change**:
+- 0 = only code changes (no prompts)
+- 1 = 1 prompt per code (alternating: code, prompt, code, prompt, ...)
+- 2 = 2 prompts per code (code, prompt, prompt, code, prompt, prompt, ...)
+- 4 = 4 prompts per code (code, prompt, prompt, prompt, prompt, code, ...)
+
+Parameters:
+- `initial`: Starting prompts per code (default: 1)
+- `decay_rate`: Iterations between each multiplier step (default: 25)
+- `decay_factor`: Multiplier applied at each decay step (default: 2)
 - `code_cutoff_step`: Stop code mutations after this iteration
 
+Decay formula: `prompts_per_code = initial * (decay_factor ** (iteration // decay_rate))`
+
+With defaults (initial=1, decay_rate=25, decay_factor=2):
+- Iterations 0-24: prompts_per_code = 1 (1:1 ratio)
+- Iterations 25-49: prompts_per_code = 2 (1:2 ratio)
+- Iterations 50-74: prompts_per_code = 4 (1:4 ratio)
+- Iterations 75-99: prompts_per_code = 8 (1:8 ratio)
+
 ```python
-# 3 code per prompt, stop after iteration 100
-selector = CodeFrequencyComponentSelector(code_frequency=3, code_cutoff_step=100)
+# Default: start 1:1, decay every 25 iterations
+selector = CodeFrequencyComponentSelector()
+
+# Code only (no prompts)
+selector = CodeFrequencyComponentSelector(initial=0)
 
 # Or via API:
-{"code_frequency": 3, "code_cutoff_step": 100}
+{"initial": 1, "decay_rate": 25, "decay_factor": 2, "code_cutoff_step": 100}
 ```
 
 ### ReflectiveMutationProposer.propose_new_texts()
@@ -330,3 +346,4 @@ The coding agent runs via Claude Agent SDK with `permission_mode="bypassPermissi
 - [ ] Performance results and tuning
 - [ ] Compatability with non-DSPy (clients organize prompt json?)
 - [ ] Speed: Consider multiple parallel workers, with workers expanding as code branches increase, and prompt optimization "depth" focused on each individual branch / worker.
+- [ ] change user to @codeevolver.dev (not .ai)

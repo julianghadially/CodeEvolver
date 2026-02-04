@@ -234,3 +234,72 @@ def save_file_to_sandbox(
         print(f"[UTILS] Pushed {branch} to origin", flush=True)
 
     return True
+
+
+def ensure_gitignore_committed(
+    sandbox: Any,
+    branch: str,
+    entries: list[str] | None = None,
+) -> bool:
+    """Ensure .gitignore has sandbox entries and commit/push to branch.
+
+    This should be called early in the optimization workflow (after creating
+    the codeevolver main branch) so all mutation branches inherit the proper
+    .gitignore. Prevents .venv from being committed during code mutations.
+
+    Args:
+        sandbox: GEPASandbox instance with exec_bash and push_authenticated methods.
+        branch: Branch to commit and push to (e.g., codeevolver-{timestamp}-main).
+        entries: Entries to add to .gitignore. Defaults to [".venv", ".env"].
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    if entries is None:
+        entries = [".venv", ".env"]
+
+    print(f"[UTILS] Ensuring .gitignore has entries: {entries}", flush=True)
+
+    # Build script to add entries to .gitignore if not present
+    gitignore_path = ".gitignore"
+    script_lines = [
+        f"touch {gitignore_path}",
+        # Ensure file ends with newline before appending
+        f"[ -s {gitignore_path} ] && [ -n \"$(tail -c1 {gitignore_path})\" ] && echo '' >> {gitignore_path}",
+    ]
+    for entry in entries:
+        # Add entry if not already present (exact line match)
+        script_lines.append(
+            f"grep -qxF '{entry}' {gitignore_path} || echo '{entry}' >> {gitignore_path}"
+        )
+
+    script = " && ".join(script_lines)
+    result = sandbox.exec_bash(script)
+    if result.get("returncode") != 0:
+        print(f"[UTILS] Warning: Failed to update .gitignore: {result.get('stderr')}", flush=True)
+        return False
+
+    # Configure git user and commit
+    sandbox.exec_bash("git config user.email 'codeevolver@codeevolver.ai'")
+    sandbox.exec_bash("git config user.name 'CodeEvolver'")
+    sandbox.exec_bash(f"git add {gitignore_path}")
+
+    # Check if there are changes to commit
+    status_result = sandbox.exec_bash("git diff --cached --quiet")
+    if status_result.get("returncode") == 0:
+        print(f"[UTILS] .gitignore already up to date, no commit needed", flush=True)
+    else:
+        commit_result = sandbox.exec_bash('git commit -m "Add sandbox artifacts to .gitignore"')
+        if commit_result.get("returncode") != 0:
+            print(f"[UTILS] Warning: Failed to commit .gitignore: {commit_result.get('stderr')}", flush=True)
+            return False
+        print(f"[UTILS] Committed .gitignore", flush=True)
+
+    # Push to remote
+    push_result = sandbox.push_authenticated(branch)
+    if not push_result.get("success"):
+        print(f"[UTILS] Warning: Failed to push .gitignore: {push_result.get('stderr')}", flush=True)
+        return False
+
+    print(f"[UTILS] Pushed .gitignore to {branch}", flush=True)
+    return True

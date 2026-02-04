@@ -40,7 +40,8 @@ class Settings(BaseSettings):
     github_app_private_key: Optional[str] = None  # PEM format, can be base64 encoded or raw
 
     # GEPA optimization settings
-    gepa_optimization_timeout: int = 3600  # 1 hour default
+    # This timeout is used for: Modal function, sandbox, and JWT TTL
+    gepa_job_timeout: int = 43200  # 12 hours (in seconds)
     gepa_optimization_cpu: int = 4
     gepa_optimization_memory: int = 8192  # MB
 
