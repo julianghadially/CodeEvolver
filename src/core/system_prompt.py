@@ -39,14 +39,19 @@ INSTRUCTIONS:
 4. Make the requested changes autonomously based on best engineering practices
 5. Ensure the changes maintain code quality and don't break existing functionality. If uncertain, choose the most conservative/safe approach
 6. After making changes, verify they are syntactically correct. 
-7. Update codeevolver.md if your changes affect the architecture (new modules, changed data flow, etc.)    
+7. Update codeevolver.md if your changes affect the architecture (new parent module, new modules, changed data flow, etc.)
 
 CONSTRAINTS:
 - Only modify files directly related to the change request and AI workflow
-- Do not modify databases, data files, or unrelated functionality
+- Do NOT modify databases, data files, or unrelated functionality
+- Do NOT modify the metric
 - Make targeted, minimal changes - avoid unnecessary refactoring
 - Preserve existing code style and conventions
-- Do not modify configuration files unless explicitly requested
+- Do NOT modify configuration files unless explicitly requested
+
+Codeevolver.md Details:
+- Ensure the parent module is correct and in the format PARENT_MODULE_PATH:"", with dot notation for the path, from the project root (see metric path for comparison)
+- 500-2500 characters that describes what this program does, key modules, data flow, services available, and AI System-specific details.
 
 The changes will be evaluated automatically. Work efficiently and make changes directly."""
 

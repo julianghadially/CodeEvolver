@@ -21,6 +21,7 @@ from typing import Any, Callable
 from gepa.core.adapter import EvaluationBatch
 
 from .prompts import (
+    append_dspy_guidelines,
     build_architecture_fallback,
     build_architecture_prompt,
     build_code_reflection_prompt,
@@ -31,6 +32,8 @@ from .utils import (
     ensure_gitignore_committed,
     get_git_branch_from_candidate,
     get_reflection_lm_callable,
+    parse_codeevolver_md,
+    read_codeevolver_md_from_sandbox,
     save_file_to_sandbox,
 )
 
@@ -121,6 +124,34 @@ class CodeEvolverDSPyAdapter:
             candidate, fallback_branch=self._ce_main_branch or "main"
         )
 
+    def _get_parent_module_path_from_candidate(self, candidate: dict[str, str]) -> str:
+        """Extract parent_module_path from the _code component.
+
+        Args:
+            candidate: Candidate dict with _code component.
+
+        Returns:
+            The parent module path, or self.program_path as fallback.
+        """
+        code_data = json.loads(candidate.get(CODE_COMPONENT_KEY, "{}"))
+        return code_data.get("parent_module_path", self.program_path)
+
+    def _get_parent_module_path_from_codeevolver_md(self) -> str:
+        """Read codeevolver.md and extract the PARENT_MODULE_PATH.
+
+        This is called after the coding agent runs to check if it updated
+        the parent module (e.g., created a new pipeline wrapper).
+
+        Returns:
+            The parent module path from codeevolver.md, or self.program_path as fallback.
+        """
+        content = read_codeevolver_md_from_sandbox(self._sandbox)
+        if content:
+            parsed = parse_codeevolver_md(content)
+            if parsed.get("parent_module_path"):
+                return parsed["parent_module_path"]
+        return self.program_path
+
     def propose_new_texts(
         self,
         candidate: dict[str, str],
@@ -198,9 +229,17 @@ class CodeEvolverDSPyAdapter:
         architecture = self._generate_architecture_summary()
         self._save_architecture_to_file(architecture)
 
+        # Parse the architecture to get initial parent_module_path
+        # The reflection agent may have identified a different entry point
+        parsed = parse_codeevolver_md(architecture)
+        initial_parent_module = parsed.get("parent_module_path") or self.program_path
+        print(f"[ADAPTER] Initial parent_module_path: {initial_parent_module}", flush=True)
+
         candidate = result["candidate"]
-        # git_branch is stored INSIDE _code to prevent GEPA from treating it as a mutable component
-        candidate[CODE_COMPONENT_KEY] = self._build_initial_code_component(self._ce_main_branch)
+        # git_branch and parent_module_path stored INSIDE _code to prevent GEPA from treating them as mutable components
+        candidate[CODE_COMPONENT_KEY] = self._build_initial_code_component(
+            self._ce_main_branch, parent_module_path=initial_parent_module
+        )
         print(f"[ADAPTER] Seed candidate has {len(candidate)} keys", flush=True)
         return candidate
 
@@ -223,9 +262,10 @@ class CodeEvolverDSPyAdapter:
 
         Uses the reflection agent (read-only: Read, Grep, Glob tools) to
         analyze the program's code and produce a comprehensive architecture summary.
+        DSPy guidelines are appended to help the coding agent follow DSPy patterns.
 
         Returns:
-            Architecture summary string.
+            Architecture summary string with DSPy guidelines appended.
         """
         prompt = build_architecture_prompt(self.program_path, self.metric_path)
 
@@ -234,7 +274,11 @@ class CodeEvolverDSPyAdapter:
 
         summary = result.get("proposed_change", "")
         if not summary or summary == "No change proposed":
+            # Fallback already includes DSPy guidelines
             summary = build_architecture_fallback(self.program_path, self.metric_path)
+        else:
+            # Append DSPy guidelines to the reflection agent's output
+            summary = append_dspy_guidelines(summary)
 
         return summary
 
@@ -256,7 +300,7 @@ class CodeEvolverDSPyAdapter:
             branch=self._ce_main_branch,
         )
 
-    def _build_initial_code_component(self, git_branch: str) -> str:
+    def _build_initial_code_component(self, git_branch: str, parent_module_path: str | None = None) -> str:
         """Build initial _code component as JSON-encoded dict.
 
         Architecture is stored in codeevolver.md (not in _code) so it stays
@@ -264,12 +308,15 @@ class CodeEvolverDSPyAdapter:
 
         Args:
             git_branch: The git branch for this candidate.
+            parent_module_path: The top-most parent module to evaluate. If None,
+                uses self.program_path as default.
 
         Returns:
-            JSON string with git_branch, change_request, and last_change_summary.
+            JSON string with git_branch, parent_module_path, change_request, and last_change_summary.
         """
         return json.dumps({
             "git_branch": git_branch,
+            "parent_module_path": parent_module_path or self.program_path,
             "change_request": "",
             "last_change_summary": "Initial state"
         })
@@ -288,7 +335,7 @@ class CodeEvolverDSPyAdapter:
 
         Args:
             batch: List of dicts (raw examples from GEPA).
-            candidate: Dict with _code (containing git_branch) and predictor instructions.
+            candidate: Dict with _code (containing git_branch, parent_module_path) and predictor instructions.
             capture_traces: Whether to capture DSPy execution traces.
 
         Returns:
@@ -297,6 +344,9 @@ class CodeEvolverDSPyAdapter:
         print(f"[ADAPTER] evaluate() called: batch_size={len(batch)}, capture_traces={capture_traces}", flush=True)
         prompt_texts = self._get_prompt_texts(candidate)
         git_branch = self._get_git_branch_from_candidate(candidate)
+        # Use parent_module_path from _code if available (allows coding agent to change the entry point)
+        program_path = self._get_parent_module_path_from_candidate(candidate)
+        print(f"[ADAPTER] Using program_path={program_path} (from _code or default)", flush=True)
 
         # Convert batch items to plain dicts if they aren't already
         batch_json = []
@@ -308,7 +358,7 @@ class CodeEvolverDSPyAdapter:
 
         result = self._sandbox.exec_prebuilt({
             "command": "evaluate",
-            "program": self.program_path,
+            "program": program_path,
             "metric": self.metric_path,
             "saved_program_json_path": self.saved_program_json_path,
             "candidate": prompt_texts,
@@ -482,9 +532,15 @@ class CodeEvolverDSPyAdapter:
             self._attempted_changes_by_branch[parent_branch] = []
         self._attempted_changes_by_branch[parent_branch].append(proposed_change[:200])
 
-        # Return updated _code with new git_branch inside
+        # Parse codeevolver.md to get potentially updated parent_module_path
+        # The coding agent may have created a new pipeline wrapper and updated the file
+        parent_module_path = self._get_parent_module_path_from_codeevolver_md()
+        print(f"[ADAPTER] parent_module_path from codeevolver.md: {parent_module_path}", flush=True)
+
+        # Return updated _code with new git_branch and parent_module_path inside
         return json.dumps({
             "git_branch": new_branch,
+            "parent_module_path": parent_module_path,
             "change_request": proposed_change,
             "last_change_summary": result.get("output", "Change applied")[:500]
         })

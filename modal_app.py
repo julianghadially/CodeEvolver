@@ -301,6 +301,7 @@ def run_optimization(
     decay_rate: int = 25,
     decay_factor: int = 2,
     code_cutoff_step: int | None = None,
+    initial_branch: str = "main",
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 
@@ -351,7 +352,7 @@ def run_optimization(
         jwt_token=jwt_token,
         job_id=job_id,
     )
-    sandbox.start(python_version=python_version)
+    sandbox.start(python_version=python_version, branch=initial_branch)
 
     try:
         result = run_gepa_optimization(
@@ -378,6 +379,7 @@ def run_optimization(
             decay_rate=decay_rate,
             decay_factor=decay_factor,
             code_cutoff_step=code_cutoff_step,
+            initial_branch=initial_branch,
         )
         return result
     finally:

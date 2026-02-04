@@ -63,7 +63,7 @@ The following external services are available with API keys already configured i
 # Optimization configuration
 OPTIMIZE_CONFIG = {
     "repo_url": "https://github.com/julianghadially/FactChecker",
-    "program": "src.factchecker.simple.modules.judge_module.JudgeModule",
+    "program": "src.factchecker.modules.judge_module.JudgeModule",
     "metric": "src.codeevolver.metric.metric",
     "trainset_path": "data/FactChecker_news_claims_normalized.csv", # data/FacTool_QA_train_normalized.jsonl
     "input_keys": ["statement"],
@@ -72,6 +72,7 @@ OPTIMIZE_CONFIG = {
     "num_threads": 5,
     "seed": 42,
     "additional_instructions": additional_instructions,
+    "initial_branch": "simple",  # Start from the 'simple' branch
     # Using default round_robin selector (no initial specified)
     # This lets GEPA's ReflectionComponentSelector handle component selection
 }
@@ -384,8 +385,9 @@ class TestGEPAOptimization:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Clone the repo
+            initial_branch = OPTIMIZE_CONFIG.get("initial_branch", "main")
             clone_result = subprocess.run(
-                ["git", "clone", "--depth", "100", repo_url, tmpdir],
+                ["git", "clone", "--depth", "100", "--branch", initial_branch, repo_url, tmpdir],
                 capture_output=True,
                 text=True,
             )
@@ -404,9 +406,9 @@ class TestGEPAOptimization:
                 f"Failed to fetch branch {mutated_branch}: {fetch_result.stderr}"
             )
 
-            # Get the diff between main and the mutated branch
+            # Get the diff between initial branch and the mutated branch
             diff_result = subprocess.run(
-                ["git", "diff", "origin/main", f"origin/{mutated_branch}", "--stat"],
+                ["git", "diff", f"origin/{initial_branch}", f"origin/{mutated_branch}", "--stat"],
                 cwd=tmpdir,
                 capture_output=True,
                 text=True,
@@ -420,7 +422,7 @@ class TestGEPAOptimization:
 
             # Get the actual diff for line count
             full_diff_result = subprocess.run(
-                ["git", "diff", "origin/main", f"origin/{mutated_branch}"],
+                ["git", "diff", f"origin/{initial_branch}", f"origin/{mutated_branch}"],
                 cwd=tmpdir,
                 capture_output=True,
                 text=True,

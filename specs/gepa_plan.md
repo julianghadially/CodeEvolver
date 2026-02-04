@@ -248,8 +248,16 @@ Implements gepa.optimizer and runs in /optimize at API in CE.
 
 #### Branch Naming Convention
 All branches created during a GEPA run share a common timestamp prefix for traceability:
-- **Run main branch**: `codeevolver-{YYYYMMDDHHmmss}-main` — Created at the start of each optimization run from the initial branch (usually "main")
+- **Run main branch**: `codeevolver-{YYYYMMDDHHmmss}-main` — Created at the start of each optimization run from the initial branch
 - **Mutation branches**: `codeevolver-{YYYYMMDDHHmmss}-{uuid}` — Created from parent branches during code mutations
+
+#### Initial Branch Selection
+Users can specify which branch to use as the starting point for optimization via the `initial_branch` parameter (defaults to "main"). This allows:
+- Starting optimization from a feature branch
+- Continuing optimization from a previous codeevolver branch
+- Working with repos that use different default branches (e.g., "master", "develop")
+
+The initial branch is cloned directly using `git clone --branch {initial_branch}`, and the CodeEvolver main branch (`codeevolver-{timestamp}-main`) is created from it.
 
 The run main branch contains:
 - `codeevolver.md` — LM-generated architecture summary of the program being optimized
@@ -260,6 +268,7 @@ This candidate structure is compatible with GEPA. It references the instruction 
 candidate = {
     "_code": json.dumps({
         "git_branch": "codeevolver-yyyymmddhhmm-main",  # or codeevolver-20260202163000-a1b2c3
+        "parent_module_path": "src.factchecker.FactCheckerPipeline",  # top-most module to evaluate
         "change_request": "The change that was just executed",
         "last_change_summary": "Agent output summary"
     }),
@@ -268,6 +277,16 @@ candidate = {
 }
 ```
 Architecture is stored in `codeevolver.md` (not in `_code`) so it stays in sync with code changes. Both the reflection agent and coding agent read/update this file directly.
+
+**codeevolver.md format:**
+```
+PARENT_MODULE_PATH: src.factchecker.FactCheckerPipeline
+METRIC_MODULE_PATH: eval.evaluate.metric
+
+# Architecture Summary
+...
+```
+The `parent_module_path` in `_code` is parsed from `codeevolver.md` after each code mutation, allowing the coding agent to change the entry point (e.g., creating a pipeline wrapper).
 
 The `_code` component participates in GEPA's round-robin selection. When selected, a two-phase mutation occurs: (1) reflection agent proposes a change, (2) coding agent executes it on a new branch.
 
@@ -347,3 +366,4 @@ The coding agent runs via Claude Agent SDK with `permission_mode="bypassPermissi
 - [ ] Compatability with non-DSPy (clients organize prompt json?)
 - [ ] Speed: Consider multiple parallel workers, with workers expanding as code branches increase, and prompt optimization "depth" focused on each individual branch / worker.
 - [ ] change user to @codeevolver.dev (not .ai)
+- [ ] How should we provide the current prompts to the coding agent? Should this be a separate tool call?

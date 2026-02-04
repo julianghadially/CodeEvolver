@@ -17,6 +17,10 @@ import litellm
 # git_branch is stored INSIDE _code to prevent GEPA from treating it as a mutable component
 CODE_COMPONENT_KEY = "_code"
 
+# Keys for codeevolver.md header fields
+PARENT_MODULE_PATH_KEY = "PARENT_MODULE_PATH"
+METRIC_MODULE_PATH_KEY = "METRIC_MODULE_PATH"
+
 
 def load_import_path(workspace_path: str, dotted_path: str) -> Any:
     """Import an attribute from a dotted path relative to the workspace.
@@ -303,3 +307,61 @@ def ensure_gitignore_committed(
 
     print(f"[UTILS] Pushed .gitignore to {branch}", flush=True)
     return True
+
+
+def parse_codeevolver_md(content: str) -> dict[str, str | None]:
+    """Parse PARENT_MODULE_PATH and METRIC_MODULE_PATH from codeevolver.md content.
+
+    The file is expected to have these fields at the top in the format:
+        PARENT_MODULE_PATH: src.module.ClassName
+        METRIC_MODULE_PATH: eval.metric
+
+    Args:
+        content: The full content of codeevolver.md.
+
+    Returns:
+        Dict with 'parent_module_path' and 'metric_module_path' keys.
+        Values are None if not found.
+    """
+    result = {
+        "parent_module_path": None,
+        "metric_module_path": None,
+    }
+
+    for line in content.split("\n"):
+        line = line.strip()
+        if line.startswith(f"{PARENT_MODULE_PATH_KEY}:"):
+            value = line[len(f"{PARENT_MODULE_PATH_KEY}:"):].strip()
+            # Remove any surrounding quotes
+            value = value.strip('"').strip("'")
+            if value:
+                result["parent_module_path"] = value
+        elif line.startswith(f"{METRIC_MODULE_PATH_KEY}:"):
+            value = line[len(f"{METRIC_MODULE_PATH_KEY}:"):].strip()
+            value = value.strip('"').strip("'")
+            if value:
+                result["metric_module_path"] = value
+
+        # Stop parsing after we find both or hit the architecture content
+        if result["parent_module_path"] and result["metric_module_path"]:
+            break
+        # Stop if we hit a markdown header (architecture section started)
+        if line.startswith("#") and result["parent_module_path"]:
+            break
+
+    return result
+
+
+def read_codeevolver_md_from_sandbox(sandbox: Any) -> str | None:
+    """Read codeevolver.md content from the sandbox workspace.
+
+    Args:
+        sandbox: GEPASandbox instance with exec_bash method.
+
+    Returns:
+        Content of codeevolver.md, or None if file doesn't exist.
+    """
+    result = sandbox.exec_bash("cat codeevolver.md 2>/dev/null")
+    if result.get("returncode") == 0:
+        return result.get("stdout", "")
+    return None

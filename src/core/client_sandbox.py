@@ -102,13 +102,19 @@ class ClientSandbox(ABC):
         self._jwt_token = jwt_token
         self._job_id = job_id
 
-    def start(self, python_version: str = "3.11", use_venv: bool = True) -> None:
+    def start(
+        self,
+        python_version: str = "3.11",
+        use_venv: bool = True,
+        branch: str | None = None,
+    ) -> None:
         """Create sandbox, clone repo, pip install client requirements.
 
         Args:
             python_version: Python version for the sandbox image.
             use_venv: If True, create a venv at /workspace/.venv for client deps.
                       This isolates client deps from system Python (where agent SDK lives).
+            branch: Git branch to clone. If None, clones the repository's default branch.
         """
         logger.info(f"Starting {self.__class__.__name__}...")
         self._use_venv = use_venv
@@ -130,11 +136,13 @@ class ClientSandbox(ABC):
         )
         logger.info(f"Sandbox created: {self._sandbox.object_id}")
 
-        # Clone repository
-        logger.info("Cloning repository into sandbox...")
-        p = self._sandbox.exec(
-            "git", "clone", authenticated_url, self._workspace,
-        )
+        # Clone repository (optionally with specific branch)
+        logger.info(f"Cloning repository into sandbox...{f' (branch: {branch})' if branch else ''}")
+        clone_args = ["git", "clone"]
+        if branch:
+            clone_args.extend(["--branch", branch])
+        clone_args.extend([authenticated_url, self._workspace])
+        p = self._sandbox.exec(*clone_args)
         p.wait()
         if p.returncode != 0:
             stderr = p.stderr.read()

@@ -206,6 +206,12 @@ class OptimizeRequest(BaseModel):
         description="Stop code mutations after this iteration (None=no cutoff)",
     )
 
+    # Git branch configuration
+    initial_branch: str = Field(
+        default="main",
+        description="Git branch to use as the starting point for optimization",
+    )
+
     @model_validator(mode="after")
     def check_trainset_provided(self) -> "OptimizeRequest":
         if self.trainset is None and self.trainset_path is None:

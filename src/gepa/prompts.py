@@ -7,6 +7,53 @@ import json
 from datetime import datetime
 
 
+# DSPy guidelines appended to codeevolver.md for coding agent reference
+DSPY_GUIDELINES = """
+## DSPy Patterns and Guidelines
+
+DSPy is an AI framework for defining a compound AI system across multiple modules. Instead of writing prompts, we define signatures. Signatures define the inputs and outputs to a module in an AI system, along with the purpose of the module in the docstring. DSPy leverages a prompt optimizer to convert the signature into an optimized prompt, which is stored as a JSON, and is loaded when compiling the program.
+
+**DSPy docs**: https://dspy.ai/api/
+
+Stick to DSPy for any AI modules you create, unless the client codebase does otherwise.
+
+Defining signatures as classes is recommended. For example:
+
+```python
+class WebQueryGenerator(dspy.Signature):
+    \"\"\"Generate a query for searching the web.\"\"\"
+    question: str = dspy.InputField()
+    query: str = dspy.OutputField(desc="a query for searching the web")
+```
+
+Next, modules are used as nodes in the project, either as a single line:
+
+```python
+predict = dspy.Predict(WebQueryGenerator)
+```
+
+Or as a class:
+
+```python
+class WebQueryModule(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.query_generator = dspy.Predict(WebQueryGenerator)
+
+    def forward(self, question: str):
+        return self.query_generator(question=question)
+```
+
+A module can represent a single module, or the module can act as a pipeline that calls a sequence of sub-modules inside `def forward`.
+
+Common prebuilt modules include:
+- `dspy.Predict`: for simple language model calls
+- `dspy.ChainOfThought`: for reasoning first, followed by a response
+- `dspy.ReAct`: for tool calling
+- `dspy.ProgramOfThought`: for getting the LM to output code, whose execution results will dictate the response
+"""
+
+
 def build_architecture_prompt(
     program_path: str,
     metric_path: str,
@@ -37,11 +84,19 @@ def build_architecture_prompt(
 2. Use Glob to find related Python files in the same directory
 3. If there's a README.md, read it for additional context
 
-Then generate an architecture summary (500-2500 characters) that includes:
+Then generate an architecture summary of the program that starts with these exact lines:
+```
+PARENT_MODULE_PATH: {program_path}
+METRIC_MODULE_PATH: {metric_path}
+```
+
+Followed by 500-2500 characters that includes:
 1. What this program does (high-level purpose)
 2. Key modules and their responsibilities
 3. Data flow through the system
 4. The metric being optimized
+
+The PARENT_MODULE_PATH is the top-most module that will be evaluated. If the program has a pipeline wrapper, use that path instead.
 
 Provide the summary as a single markdown-style output."""
 
@@ -57,9 +112,12 @@ def build_architecture_fallback(
         metric_path: Dotted import path to metric function.
 
     Returns:
-        Basic architecture summary string.
+        Basic architecture summary string with DSPy guidelines appended.
     """
-    return f"""# Architecture Summary
+    return f"""PARENT_MODULE_PATH: {program_path}
+METRIC_MODULE_PATH: {metric_path}
+
+# Architecture Summary
 
 ## Program
 - **Entry Point**: `{program_path}`
@@ -69,7 +127,21 @@ def build_architecture_fallback(
 This is a DSPy program being optimized by CodeEvolver.
 
 *Generated automatically by CodeEvolver at {datetime.now().isoformat()}*
-"""
+{DSPY_GUIDELINES}"""
+
+
+def append_dspy_guidelines(architecture: str) -> str:
+    """Append DSPy guidelines to an architecture summary.
+
+    Used after the reflection agent generates the architecture content.
+
+    Args:
+        architecture: The architecture summary from reflection agent.
+
+    Returns:
+        Architecture with DSPy guidelines appended.
+    """
+    return architecture.rstrip() + "\n" + DSPY_GUIDELINES
 
 
 def build_code_reflection_prompt(
@@ -152,5 +224,14 @@ Items may also include exceptions if the code failed.
 - Be specific: mention file paths and what to change
 - Do NOT propose changes that have already been attempted (see above)
 - Change can involve significant change to the AI system, as long as it is one concept or feature.
+- Follow DSPy patterns and guidelines, below.
 
-Respond with a specific, actionable change request that a coding agent can execute."""
+Respond with a specific, actionable change request that a coding agent can execute.
+
+## Additional Guidelines
+
+### DSPy Guidelines
+- DSPy assumes a "compound AI system"
+- A compound AI system can involve one single module, or multiple modules that are wrapped by a parent module for the whole workflow
+- The top-most parent module is the "entry point" to the AI system and dictates the flow all the way to the final output
+"""

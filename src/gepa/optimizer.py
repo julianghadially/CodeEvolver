@@ -137,6 +137,7 @@ def run_gepa_optimization(
     code_cutoff_step: int | None = None,
     code_lm: str = "anthropic/claude-sonnet-4-5-20250929",
     subsample_size: int = 5,
+    initial_branch: str = "main",
 ) -> dict[str, Any]:
     """Run GEPA optimization. Called from the Modal function.
 
@@ -171,6 +172,7 @@ def run_gepa_optimization(
             when initial is provided. Default is None (no cutoff).
         code_lm: Language model for code mutations. Default is Claude Sonnet 4.5.
         subsample_size: Number of examples per evaluation batch. Default is 5.
+        initial_branch: Git branch to use as starting point for optimization. Default is "main".
 
     Returns:
         Dict with optimization results.
@@ -198,6 +200,7 @@ def run_gepa_optimization(
             reflection_lm=reflection_lm,
             additional_instructions=additional_instructions,
             code_lm=code_lm,
+            initial_branch=initial_branch,
         )
 
         # Build seed candidate from program.json (via sandbox)

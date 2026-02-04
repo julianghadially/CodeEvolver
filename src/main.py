@@ -345,6 +345,7 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
             decay_rate=request.decay_rate,
             decay_factor=request.decay_factor,
             code_cutoff_step=request.code_cutoff_step,
+            initial_branch=request.initial_branch,
         )
     except ImportError:
         # Not running on Modal — update job status to failed
