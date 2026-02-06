@@ -357,7 +357,31 @@ The GEPA optimizer process is managed by a long-running MODAL function that mana
 
 #### Autonomous Execution Design
 
-The coding agent runs via Claude Agent SDK with `permission_mode="bypassPermissions"`. The user proxy is not required, because we are explicitly instructing Claude, not to use plan mode tools, and to make decisions autonomously. However, It might make sense to follow the ["Ralph Wiggum" pattern](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum) And provide any questions back to the coding agent.
+The coding agent runs via Claude Agent SDK with `permission_mode="bypassPermissions"` plus a **user proxy callback** (`can_use_tool`) that auto-approves plan mode and auto-answers questions.
+
+**The Problem:** Even with `bypassPermissions`, Claude Code can enter "plan mode" via `EnterPlanMode` tool. Once in plan mode, `ExitPlanMode` requires explicit user approval that never comes in an autonomous context.
+
+**The Solution:** Use the `can_use_tool` callback as a user proxy:
+```python
+from claude_agent_sdk.types import PermissionResultAllow, ToolPermissionContext
+
+async def user_proxy(tool_name: str, input_data: dict, context: ToolPermissionContext):
+    if tool_name == "ExitPlanMode":
+        # Auto-approve plan mode exit
+        return PermissionResultAllow(updated_input=input_data)
+    if tool_name == "AskUserQuestion":
+        # Auto-respond with first option for each question
+        questions = input_data.get("questions", [])
+        answers = {q["question"]: q["options"][0]["label"] for q in questions}
+        return PermissionResultAllow(updated_input={"questions": questions, "answers": answers})
+    return PermissionResultAllow(updated_input=input_data)
+
+# Usage:
+ClaudeAgentOptions(permission_mode="bypassPermissions", can_use_tool=user_proxy)
+```
+
+This allows Claude to use plan mode for complex multi-file changes while running autonomously.
+See `specs/ralph_claude_code.md` for analysis of alternative CLI-based approaches.
 
 #### Remaining
 - [x] Reflection LLM agent

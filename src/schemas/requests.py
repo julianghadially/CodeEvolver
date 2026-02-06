@@ -93,6 +93,10 @@ class ChangeRequest(BaseModel):
         default=None,
         description="GitHub App installation ID for private repository access",
     )
+    initial_branch: str = Field(
+        default="main",
+        description="Git branch to clone from before creating the new branch",
+    )
 
 
 # Keep ExecuteSandboxRequest as deprecated alias for backwards compatibility

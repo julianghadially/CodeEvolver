@@ -137,8 +137,9 @@ class ClientSandbox(ABC):
         logger.info(f"Sandbox created: {self._sandbox.object_id}")
 
         # Clone repository (optionally with specific branch)
+        # Use --single-branch to avoid downloading all 96+ branches for large repos
         logger.info(f"Cloning repository into sandbox...{f' (branch: {branch})' if branch else ''}")
-        clone_args = ["git", "clone"]
+        clone_args = ["git", "clone", "--single-branch"]
         if branch:
             clone_args.extend(["--branch", branch])
         clone_args.extend([authenticated_url, self._workspace])

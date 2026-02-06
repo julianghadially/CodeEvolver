@@ -70,7 +70,7 @@ sandbox_image = (
     volumes={"/workspaces": workspaces_volume},
     secrets=[modal.Secret.from_name("codeevolver-secrets")],
     min_containers=1,
-    timeout=900,  # Allow enough time for change_request calls (600s) plus overhead
+    timeout=1500,  # Allow enough time for change_request calls (1200s) plus overhead
 )
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app()
@@ -96,7 +96,7 @@ def fastapi_app():
 
 @app.function(
     image=sandbox_image,  # Has claude-agent-sdk, git, httpx, pyjwt
-    timeout=600,
+    timeout=1200,  # 20 min — plan mode + coding needs more than 10 min
     cpu=2,
     memory=4096,
     secrets=[modal.Secret.from_name("codeevolver-secrets")],
@@ -108,6 +108,7 @@ def execute_change_request(
     branch_name: str | None = None,
     push_to_remote: bool = False,
     github_token: str | None = None,
+    initial_branch: str = "main",
 ) -> dict:
     """Execute a code change using GEPASandbox and Claude coding agent.
 
@@ -127,12 +128,12 @@ def execute_change_request(
         app=app,
         repo_url=repo_url,
         github_token=github_token,
-        timeout=600,
+        timeout=1200,
     )
 
     try:
-        # Start with venv isolation
-        sandbox.start(use_venv=True)
+        # Start with venv isolation, cloning from the specified initial branch
+        sandbox.start(use_venv=True, branch=initial_branch)
 
         # Create branch if specified
         if branch_name:

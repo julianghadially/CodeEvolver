@@ -76,7 +76,8 @@ class GitService:
                 raise ValueError(f"GitHub App authentication failed: {e}") from e
 
         try:
-            Repo.clone_from(authenticated_url, main_path)
+            # Use --single-branch to avoid fetching all remote branches (speeds up for large repos)
+            Repo.clone_from(authenticated_url, main_path, multi_options=["--single-branch"])
         except GitCommandError as e:
             shutil.rmtree(workspace_path, ignore_errors=True)
             raise ValueError(f"Failed to clone repository: {e}") from e
@@ -329,3 +330,64 @@ class GitService:
             branches.sort()
 
             return branches
+
+    @staticmethod
+    def list_directory_files(
+        repo_url: str,
+        directory_path: str,
+        branch: str = "main",
+        installation_id: int | None = None,
+    ) -> list[str]:
+        """List files in a directory on a GitHub branch.
+
+        Args:
+            repo_url: Repository URL (https://github.com/owner/repo)
+            directory_path: Path to directory within the repository
+            branch: Branch name to list from
+            installation_id: Optional GitHub App installation ID for private repos
+
+        Returns:
+            List of file names in the directory
+        """
+        if repo_url.startswith("https://github.com/"):
+            parts = repo_url.replace("https://github.com/", "").rstrip("/").split("/")
+        elif repo_url.startswith("git@github.com:"):
+            parts = repo_url.replace("git@github.com:", "").replace(".git", "").split("/")
+        else:
+            raise ValueError(f"Unsupported repository URL format: {repo_url}")
+
+        if len(parts) < 2:
+            raise ValueError(f"Could not parse owner/repo from URL: {repo_url}")
+
+        owner = parts[0]
+        repo = parts[1].replace(".git", "")
+
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        if installation_id:
+            token = GitHubAppService.get_installation_token(installation_id)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{directory_path}?ref={branch}"
+
+        with httpx.Client() as client:
+            response = client.get(api_url, headers=headers, timeout=30.0)
+
+            if response.status_code == 404:
+                raise ValueError(
+                    f"Directory not found: {directory_path} on branch {branch} in {owner}/{repo}"
+                )
+            elif response.status_code != 200:
+                raise ValueError(
+                    f"Failed to list directory: HTTP {response.status_code} - {response.text}"
+                )
+
+            items = response.json()
+            if not isinstance(items, list):
+                raise ValueError(f"Path is a file, not a directory: {directory_path}")
+
+            return [item["name"] for item in items if item["type"] == "file"]

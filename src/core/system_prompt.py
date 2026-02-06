@@ -32,14 +32,22 @@ WORKSPACE: {workspace_path}
 CHANGE REQUEST:
 {change_request}{location_hint}
 
+AUTONOMOUS EXECUTION CONTEXT:
+You are running in an automated pipeline with a user proxy that auto-approves your plans and answers questions. This means:
+- If you use plan mode (EnterPlanMode), your plan will be automatically approved
+- If you ask questions (AskUserQuestion), the first option will be automatically selected
+- You can use plan mode for complex multi-file changes - it will proceed without delay
+- Work as if you have full autonomy - approvals are instant
+
 INSTRUCTIONS:
-1. First, read codeevolver.md to understand the system architecture
+1. Read codeevolver.md to understand the system architecture
 2. Explore the codebase to understand its structure
-3. Plan your changes, but DO NOT use EnterPlanMode or ExitPlanMode. DO NOT use AskUserQuestion.
-4. Make the requested changes autonomously based on best engineering practices
-5. Ensure the changes maintain code quality and don't break existing functionality. If uncertain, choose the most conservative/safe approach
-6. After making changes, verify they are syntactically correct. 
-7. Update codeevolver.md if your changes affect the architecture (new parent module, new modules, changed data flow, etc.)
+3. For complex changes affecting multiple files, you MAY use plan mode - it will be auto-approved
+4. Make the requested changes based on best engineering practices
+5. Ensure the changes maintain code quality and don't break existing functionality
+6. If uncertain about implementation details, choose the most conservative/safe approach
+7. After making changes, verify they are syntactically correct
+8. Update codeevolver.md if your changes affect the architecture
 
 CONSTRAINTS:
 - Only modify files directly related to the change request and AI workflow
@@ -50,10 +58,10 @@ CONSTRAINTS:
 - Do NOT modify configuration files unless explicitly requested
 
 Codeevolver.md Details:
-- Ensure the parent module is correct and in the format PARENT_MODULE_PATH:"", with dot notation for the path, from the project root (see metric path for comparison)
-- 500-2500 characters that describes what this program does, key modules, data flow, services available, and AI System-specific details.
+- Ensure the parent module is correct in the format PARENT_MODULE_PATH:"", with dot notation for the path, from the project root (see metric path for comparison)
+- 500-2500 characters describing what this program does, key modules, data flow, services
 
-The changes will be evaluated automatically. Work efficiently and make changes directly."""
+The changes will be evaluated automatically. Work efficiently."""
 
 
 def get_prompt_mutation_prompt(

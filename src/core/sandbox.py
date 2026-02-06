@@ -7,6 +7,8 @@ Uses GitHubAppService for private repository authentication.
 Uses SandboxGitService for git operations within the sandbox.
 """
 
+import base64
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -14,7 +16,7 @@ from typing import Any
 
 import modal
 
-from .agent import generate_agent_script, parse_agent_output
+from .deploy_agent import build_agent_config, parse_agent_output
 from .program_runner import (
     ProgramRunResult,
     apply_prompt_mutation,
@@ -370,24 +372,29 @@ class SandboxApp:
         self.metadata.status = SandboxStatus.MUTATING
         self.metadata.updated_at = datetime.now()
 
-        # Generate and write the agent script
-        print(f"[apply_code_mutation] Generating agent script...")
-        script = generate_agent_script(
+        # Build agent config and write as JSON to sandbox
+        print(f"[apply_code_mutation] Building agent config...")
+        config = build_agent_config(
             workspace_path=self._workspace,
             change_request=change_request,
             change_location=change_location,
         )
+        config_json = json.dumps(config)
+        config_b64 = base64.b64encode(config_json.encode()).decode()
 
-        print(f"[apply_code_mutation] Writing agent script to sandbox...")
+        print(f"[apply_code_mutation] Writing agent config to sandbox...")
         self.sandbox.exec(
             "bash",
             "-c",
-            f"cat > /tmp/agent_script.py << 'EOFAGENT'\n{script}\nEOFAGENT",
+            f"echo '{config_b64}' | base64 -d > /tmp/agent_config.json",
         ).wait()
 
         # Run the agent
         print(f"[apply_code_mutation] Running Claude agent (this may take a few minutes)...")
-        p = self.sandbox.exec("python", "/tmp/agent_script.py")
+        p = self.sandbox.exec(
+            "bash", "-c",
+            "python /app/sandbox_scripts/coding_agent.py --config /tmp/agent_config.json 2>&1",
+        )
         p.wait()
 
         stdout = p.stdout.read()

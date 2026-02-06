@@ -10,9 +10,9 @@ import base64
 import json
 import logging
 
-from ..core.agent import (
-    generate_agent_script,
-    generate_reflection_agent_script,
+from ..core.deploy_agent import (
+    build_agent_config,
+    build_reflection_config,
     parse_agent_output,
     parse_reflection_output,
 )
@@ -86,18 +86,19 @@ class GEPASandbox(ClientSandbox):
         logger.info(f"Executing agent for: {change_request[:100]}...")
         print(f"[AGENT] Change request (full): {change_request}", flush=True)
 
-        # Generate agent script
-        script = generate_agent_script(
+        # Build agent config and write as JSON to sandbox
+        config = build_agent_config(
             workspace_path=self._workspace,
             change_request=change_request,
             change_location=change_location,
             max_turns=max_turns,
         )
+        config_json = json.dumps(config)
+        config_b64 = base64.b64encode(config_json.encode()).decode()
 
-        # Write script to sandbox
         self._sandbox.exec(
             "bash", "-c",
-            f"cat > /tmp/agent_script.py << 'EOFAGENT'\n{script}\nEOFAGENT",
+            f"echo '{config_b64}' | base64 -d > /tmp/agent_config.json",
         ).wait()
 
         # Verify Claude Code CLI and API key before running
@@ -115,13 +116,13 @@ class GEPASandbox(ClientSandbox):
         if verify_stderr:
             print(f"[AGENT] CLI verification stderr: {verify_stderr}", flush=True)
 
-        # Execute with system Python (has claude-agent-sdk)
+        # Execute sandbox_scripts/coding_agent.py with system Python (has claude-agent-sdk)
         # Source .env first for API keys
         print("[AGENT] Starting agent script execution...", flush=True)
         p = self._sandbox.exec(
             "bash", "-c",
             f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
-            f"python /tmp/agent_script.py 2>&1",
+            f"python /app/sandbox_scripts/coding_agent.py --config /tmp/agent_config.json 2>&1",
         )
         p.wait()
 
@@ -435,26 +436,27 @@ class GEPASandbox(ClientSandbox):
             schema = ChangeRequestOutput.model_json_schema()
             output_key = "change_request"
 
-        # Generate reflection agent script with structured output
-        script = generate_reflection_agent_script(
+        # Build reflection config and write as JSON to sandbox
+        config = build_reflection_config(
             workspace_path=self._workspace,
             prompt=prompt,
             output_schema=schema,
             max_turns=max_turns,
         )
+        config_json = json.dumps(config)
+        config_b64 = base64.b64encode(config_json.encode()).decode()
 
-        # Write script to sandbox
         self._sandbox.exec(
             "bash", "-c",
-            f"cat > /tmp/reflection_script.py << 'EOFREFLECT'\n{script}\nEOFREFLECT",
+            f"echo '{config_b64}' | base64 -d > /tmp/reflection_config.json",
         ).wait()
 
-        # Execute with system Python (has claude-agent-sdk)
+        # Execute sandbox_scripts/reflection_agent.py with system Python
         print("[REFLECT] Starting reflection agent...", flush=True)
         p = self._sandbox.exec(
             "bash", "-c",
             f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
-            f"python /tmp/reflection_script.py 2>&1",
+            f"python /app/sandbox_scripts/reflection_agent.py --config /tmp/reflection_config.json 2>&1",
         )
         p.wait()
 

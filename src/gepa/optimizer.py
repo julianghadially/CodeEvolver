@@ -10,6 +10,7 @@ eval sandbox) and calls gepa.optimize().
 No dspy is imported here — all DSPy operations happen inside the sandbox.
 """
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -179,16 +180,21 @@ def run_gepa_optimization(
     """
     ws = Path(workspace_path)
     updater = CallbackJobUpdater(callback_url, jwt_token, job_id)
+    optimization_start = time.time()
 
     # Update job status to running
     updater.set_running()
+    print(f"[TIMER] Starting optimization run", flush=True)
 
     try:
         # Resolve datasets as raw dicts (no dspy.Example — conversion happens in sandbox)
+        dataset_start = time.time()
         trainset = _resolve_dataset_raw(ws, trainset_json, trainset_path, required=True)
         valset = _resolve_dataset_raw(ws, valset_json, valset_path, required=False)
+        print(f"[TIMER] Dataset loading took {time.time() - dataset_start:.2f}s", flush=True)
 
         # Create the adapter (RPC proxy to sandbox)
+        adapter_start = time.time()
         adapter = CodeEvolverDSPyAdapter(
             sandbox_manager=sandbox_manager,
             program=program,
@@ -202,9 +208,13 @@ def run_gepa_optimization(
             code_lm=code_lm,
             initial_branch=initial_branch,
         )
+        print(f"[TIMER] Adapter creation took {time.time() - adapter_start:.2f}s", flush=True)
 
         # Build seed candidate from program.json (via sandbox)
+        seed_start = time.time()
+        print(f"[TIMER] Starting: build_seed_candidate", flush=True)
         seed_candidate = adapter.build_seed_candidate()
+        print(f"[TIMER] build_seed_candidate took {time.time() - seed_start:.2f}s", flush=True)
 
         # Create callback progress tracker (also handles cancellation)
         tracker = CallbackProgressTracker(callback_url, jwt_token, job_id)
@@ -232,6 +242,10 @@ def run_gepa_optimization(
         )
 
         # Run GEPA optimization (synchronous, blocking)
+        # Note: Per-iteration timing is inside the GEPA package.
+        # We log evaluate() and propose_new_texts() timing in adapter.py
+        gepa_start = time.time()
+        print(f"[TIMER] Starting: gepa_optimize (main loop)", flush=True)
         result: GEPAResult = gepa_optimize(
             seed_candidate=seed_candidate,
             trainset=trainset,
@@ -246,6 +260,8 @@ def run_gepa_optimization(
             module_selector=effective_module_selector,
             batch_sampler=batch_sampler,
         )
+        gepa_elapsed = time.time() - gepa_start
+        print(f"[TIMER] gepa_optimize took {gepa_elapsed:.2f}s ({gepa_elapsed/60:.1f} minutes)", flush=True)
 
         # Build result dict
         best_idx = result.best_idx
@@ -271,9 +287,14 @@ def run_gepa_optimization(
             num_candidates=result.num_candidates,
         )
 
+        total_elapsed = time.time() - optimization_start
+        print(f"[TIMER] Total optimization run took {total_elapsed:.2f}s ({total_elapsed/60:.1f} minutes)", flush=True)
+
         return result_dict
 
     except Exception as e:
         # Update job status to failed via callback
+        total_elapsed = time.time() - optimization_start
+        print(f"[TIMER] Optimization failed after {total_elapsed:.2f}s ({total_elapsed/60:.1f} minutes)", flush=True)
         updater.set_failed(str(e))
         raise

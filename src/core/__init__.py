@@ -13,10 +13,13 @@ from .sandbox import (
     get_sandbox_image,
 )
 from .client_sandbox import ClientSandbox
-from .agent import (
+from .deploy_agent import (
     AgentResult,
-    generate_agent_script,
+    build_agent_config,
+    build_reflection_config,
     parse_agent_output,
+    parse_reflection_output,
+    ReflectionResult,
     run_code_mutation_agent,
 )
 from .program_runner import (
@@ -48,9 +51,12 @@ __all__ = [
     "ClientSandbox",
     # Agent
     "AgentResult",
+    "ReflectionResult",
     "run_code_mutation_agent",
-    "generate_agent_script",
+    "build_agent_config",
+    "build_reflection_config",
     "parse_agent_output",
+    "parse_reflection_output",
     # Program Runner
     "ProgramOutput",
     "ProgramRunResult",

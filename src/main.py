@@ -471,6 +471,7 @@ async def change_request(request: ChangeRequest) -> ChangeResponse:
             branch_name=request.branch_name,
             push_to_remote=request.push_to_remote,
             github_token=github_token,
+            initial_branch=request.initial_branch,
         )
 
         return ChangeResponse(

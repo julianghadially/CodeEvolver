@@ -10,7 +10,8 @@
       "WebSearch",
       "WebFetch(domain:modal.com)",
       "WebFetch(domain:docs.litellm.ai)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "Bash(python -m py_compile:*)"
     ]
   }
 }

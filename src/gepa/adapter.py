@@ -13,6 +13,7 @@ Copyright (c) 2025 Lakshya A Agrawal and the GEPA contributors
 
 import json
 import logging
+import time
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -171,6 +172,8 @@ class CodeEvolverDSPyAdapter:
         Returns:
             Dict mapping component names to new text values.
         """
+        start_time = time.time()
+        print(f"[TIMER] Starting: propose_new_texts for {components_to_update}", flush=True)
         new_texts = {}
 
         for component_name in components_to_update:
@@ -184,6 +187,8 @@ class CodeEvolverDSPyAdapter:
                     component_name, candidate, reflective_dataset
                 )
 
+        elapsed = time.time() - start_time
+        print(f"[TIMER] propose_new_texts took {elapsed:.2f}s", flush=True)
         return new_texts
 
     def build_seed_candidate(self) -> dict[str, str]:
@@ -196,12 +201,18 @@ class CodeEvolverDSPyAdapter:
         Returns:
             Dict with 'git_branch', '_code' key and predictor instruction texts.
         """
+        build_start = time.time()
+        print(f"[TIMER] Starting: build_seed_candidate", flush=True)
         print(f"[ADAPTER] build_seed_candidate() called: program={self.program_path}", flush=True)
+
+        # Step 1: Extract initial instructions via sandbox
+        step_start = time.time()
         result = self._sandbox.exec_prebuilt({
             "command": "build_seed_candidate",
             "program": self.program_path,
             "saved_program_json_path": self.saved_program_json_path,
         })
+        print(f"[TIMER] exec_prebuilt(build_seed_candidate) took {time.time() - step_start:.2f}s", flush=True)
 
         print(f"[ADAPTER] build_seed_candidate result: success={result.get('success')}", flush=True)
         if not result.get("success", False):
@@ -212,22 +223,29 @@ class CodeEvolverDSPyAdapter:
                 f"build_seed_candidate failed: {result.get('error', 'unknown')}"
             )
 
-        # Create the run's main branch from initial_branch (usually "main")
+        # Step 2: Create the run's main branch from initial_branch (usually "main")
+        step_start = time.time()
         self._ce_main_branch = f"codeevolver-{self._run_timestamp}-main"
         self._create_ce_main_branch()
+        print(f"[TIMER] _create_ce_main_branch took {time.time() - step_start:.2f}s", flush=True)
 
-        # Ensure .gitignore has .venv and .env BEFORE any mutations
-        # This prevents the venv from being committed to mutation branches
-        # All mutation branches stem from ce_main_branch, so they inherit this .gitignore
+        # Step 3: Ensure .gitignore has .venv and .env BEFORE any mutations
+        step_start = time.time()
         ensure_gitignore_committed(self._sandbox, self._ce_main_branch)
+        print(f"[TIMER] ensure_gitignore_committed took {time.time() - step_start:.2f}s", flush=True)
 
         # Set commit message on sandbox for all future mutations
         self._sandbox.commit_message = f"codeevolver mutation. Date: {self._run_timestamp}"
 
-        # Generate architecture summary and save to codeevolver.md
+        # Step 4: Generate architecture summary and save to codeevolver.md
         # Architecture lives in the file (not _code JSON) so it stays in sync with code
+        step_start = time.time()
         architecture = self._generate_architecture_summary()
+        print(f"[TIMER] _generate_architecture_summary (reflection agent) took {time.time() - step_start:.2f}s", flush=True)
+
+        step_start = time.time()
         self._save_architecture_to_file(architecture)
+        print(f"[TIMER] _save_architecture_to_file took {time.time() - step_start:.2f}s", flush=True)
 
         # Parse the architecture to get initial parent_module_path
         # The reflection agent may have identified a different entry point
@@ -341,6 +359,8 @@ class CodeEvolverDSPyAdapter:
         Returns:
             EvaluationBatch with outputs, scores, and optional trajectories.
         """
+        start_time = time.time()
+        print(f"[TIMER] Starting: evaluate (batch_size={len(batch)})", flush=True)
         print(f"[ADAPTER] evaluate() called: batch_size={len(batch)}, capture_traces={capture_traces}", flush=True)
         prompt_texts = self._get_prompt_texts(candidate)
         git_branch = self._get_git_branch_from_candidate(candidate)
@@ -381,12 +401,16 @@ class CodeEvolverDSPyAdapter:
             print(f"[ADAPTER] Evaluation failed: {result.get('error', 'unknown')}", flush=True)
             if result.get("traceback"):
                 print(f"[ADAPTER] Traceback:\n{result.get('traceback')}", flush=True)
+            elapsed = time.time() - start_time
+            print(f"[TIMER] evaluate took {elapsed:.2f}s (failed)", flush=True)
             return EvaluationBatch(
                 outputs=[None] * len(batch),
                 scores=[self.failure_score] * len(batch),
                 trajectories=None,
             )
 
+        elapsed = time.time() - start_time
+        print(f"[TIMER] evaluate took {elapsed:.2f}s", flush=True)
         return EvaluationBatch(
             outputs=result.get("outputs", []),
             scores=result.get("scores", []),
@@ -485,17 +509,26 @@ class CodeEvolverDSPyAdapter:
         Raises:
             RuntimeError: If code mutation fails.
         """
+        mutation_start_time = time.time()
+        print(f"[TIMER] Starting: _propose_code_mutation (full code mutation)", flush=True)
+
         current_code_data = json.loads(candidate.get(CODE_COMPONENT_KEY, "{}"))
         code_feedback = list(reflective_dataset.get(CODE_COMPONENT_KEY, []))
         parent_branch = current_code_data.get("git_branch", self._ce_main_branch or "main")
 
         # Phase 1: Reflective LM proposes what to change (reads codeevolver.md for architecture)
+        reflection_start = time.time()
+        print(f"[TIMER] Starting: Phase 1 - reflection agent", flush=True)
         print(f"[ADAPTER] Phase 1: Calling reflection agent for code mutation...", flush=True)
         proposed_change = self._reflect_on_code(code_feedback, parent_branch)
+        reflection_elapsed = time.time() - reflection_start
+        print(f"[TIMER] Phase 1 - reflection agent took {reflection_elapsed:.2f}s", flush=True)
         print(f"[ADAPTER] Reflection proposed: {proposed_change[:500] if proposed_change else 'None'}...", flush=True)
 
         if not proposed_change or proposed_change == "No change proposed":
             # Return unchanged if reflection couldn't propose anything
+            mutation_elapsed = time.time() - mutation_start_time
+            print(f"[TIMER] _propose_code_mutation took {mutation_elapsed:.2f}s (no change)", flush=True)
             print("[ADAPTER] No change proposed by reflection, returning unchanged", flush=True)
             return json.dumps({
                 "git_branch": parent_branch,  # Stay on same branch
@@ -509,11 +542,15 @@ class CodeEvolverDSPyAdapter:
 
         # Execute coding agent (commits and pushes changes automatically)
         # Agent also updates codeevolver.md if architectural changes are made
+        agent_start = time.time()
+        print(f"[TIMER] Starting: Phase 3 - coding agent", flush=True)
         print(f"[ADAPTER] Phase 3: Executing coding agent on branch {new_branch}...", flush=True)
         result = self._sandbox.exec_agent(
             proposed_change,
             push_branch=new_branch,
         )
+        agent_elapsed = time.time() - agent_start
+        print(f"[TIMER] Phase 3 - coding agent took {agent_elapsed:.2f}s", flush=True)
         print(f"[ADAPTER] Agent result: success={result.get('success')}, error={result.get('error')}", flush=True)
         if result.get("output"):
             print(f"[ADAPTER] Agent output: {result.get('output')[:1000]}", flush=True)
@@ -538,6 +575,8 @@ class CodeEvolverDSPyAdapter:
         print(f"[ADAPTER] parent_module_path from codeevolver.md: {parent_module_path}", flush=True)
 
         # Return updated _code with new git_branch and parent_module_path inside
+        mutation_elapsed = time.time() - mutation_start_time
+        print(f"[TIMER] _propose_code_mutation took {mutation_elapsed:.2f}s total", flush=True)
         return json.dumps({
             "git_branch": new_branch,
             "parent_module_path": parent_module_path,
