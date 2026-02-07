@@ -49,3 +49,12 @@ You will need the following (See guide):
 ## Private Cloud
 
 Please contact us on linkedin: /in/julianghadially
+
+
+## Gratitude and References
+This work is built on GEPA. We would like to extend a special thank you to Lakshya Agrawal and the team behind GEPA for the powerful algorithm that drives CodeEvolver.
+``` 
+Agrawal, L. A., Tan, S., Soylu, D., Ziems, N., Khare, R., Opsahl-Ong, K., Singhvi, A., Shandilya, H., Ryan, M. J., Jiang, M., Potts, C., Sen, K., Dimakis, A. G., Stoica, I., Klein, D., Zaharia, M., & Khattab, O. GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning [Computer software]
+```
+
+This work is also built on DSPy. A special thank you goes out to Omar Khottab and the DSPy community that made self-improving prompts a thing, and showcased broad interest and support in self-improving AI systems and the idea of not having to write prompts!
