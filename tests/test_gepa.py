@@ -27,57 +27,13 @@ from typing import Any
 import httpx
 import pytest
 
+from src.schemas.job_schemas import OptimizationResult
+from experiments.FactChecker.input import OPTIMIZE_CONFIG
+from experiments.run import run_optimization
 
 # Modal app URL
 DEFAULT_MODAL_URL = "https://julianghadially--codeevolver-fastapi-app-dev.modal.run"
 
-additional_instructions = """## Available Services
-
-The following external services are available with API keys already configured in the environment:
-
-### Firecrawl (Web Scraping & Page Fetching)
-- **API Key**: Available as `FIRECRAWL_API_KEY` environment variable
-- **Documentation**: https://docs.firecrawl.dev/
-- **Use cases**:
-  - Fetch and parse web page content
-  - Convert web pages to clean markdown
-  - Crawl websites for structured data extraction
-- **Python usage**: `from firecrawl import FirecrawlApp`
-
-### Serper.dev (Web Search)
-- **API Key**: Available as `SERPER_API_KEY` environment variable
-- **Documentation**: https://serper.dev/
-- **Use cases**:
-  - Search the web for real-time information
-  - Get search results with snippets, URLs, and metadata
-  - Useful for fact-checking and information retrieval
-- **Python usage**: HTTP requests to `https://google.serper.dev/search`
-
-## Ideas for Optimization
-- Consider adding web search capability to verify claims against current information
-- Web scraping could help retrieve source documents for fact verification
-- These services can augment the context pipeline with real-time data
-- Consider different search architectures (iterative search, Evidence workspace, Searching specific websites (e.g., Wikipedia))
-"""
-
-# Optimization configuration
-OPTIMIZE_CONFIG = {
-    "repo_url": "https://github.com/julianghadially/FactChecker",
-    "program": "src.factchecker.modules.judge_module.JudgeModule",
-    "metric": "src.codeevolver.metric.metric",
-    "trainset_path": "data/FactChecker_news_claims_normalized.csv", # data/FacTool_QA_train_normalized.jsonl
-    "input_keys": ["statement"],
-    "reflection_lm": "openai/gpt-5-mini",
-    "max_metric_calls": 1000,
-    "num_threads": 5,
-    "seed": 42,
-    "additional_instructions": additional_instructions,
-    "initial_branch": "simple",  # Start from the 'simple' branch
-    # Using default round_robin selector (no initial specified)
-    # This lets GEPA's ReflectionComponentSelector handle component selection
-}
-
-# Polling configuration
 POLL_INTERVAL_SECONDS = 30
 MAX_POLL_DURATION_SECONDS = 3600  # 60 minutes (increased for 5 iterations)
 REQUIRED_ITERATIONS = 5
@@ -86,70 +42,17 @@ REQUIRED_ITERATIONS = 5
 def get_modal_app_url() -> str:
     return os.getenv("MODAL_APP_URL", DEFAULT_MODAL_URL)
 
-
-async def _async_sleep(seconds: float):
-    """Async-compatible sleep using asyncio."""
+async def run_optimization_test(modal_url: str) -> OptimizationResult:
     import asyncio
-    await asyncio.sleep(seconds)
+    result = await run_optimization(modal_url, OPTIMIZE_CONFIG)
+    job_id = result["final_status"]["job_id"]
+    if result.final_status["status"] in ["failed", "cancelled"]:
+        pytest.fail(f"Optimization job failed: result = {result}")
 
-
-@dataclass
-class OptimizationResult:
-    """Container for optimization results used across tests."""
-    final_status: dict[str, Any]
-    score_history: list[float]
-    job_id: str
-    elapsed_seconds: int
-
-
-async def run_optimization(modal_url: str) -> OptimizationResult:
-    """Run the optimization and return results for multiple tests to use.
-
-    This function is called once by the class-scoped fixture, and its results
-    are shared across all tests in the class.
-    """
-    async with httpx.AsyncClient(
-        timeout=120.0, follow_redirects=True
-    ) as client:
-        # --- Health check ---
-        try:
-            health = await client.get(f"{modal_url}/health")
-            assert health.status_code == 200, (
-                f"Health check failed: {health.status_code}. "
-                "Is 'modal serve modal_app.py' running?"
-            )
-            print(f"Health check passed: {health.json()}")
-        except httpx.ConnectError as exc:
-            pytest.fail(
-                f"Cannot connect to Modal app at {modal_url}: {exc}\n"
-                "Make sure 'modal serve modal_app.py' is running."
-            )
-
-        # --- Submit optimization job ---
-        print(f"\nSubmitting optimization job...")
-        print(f"  Repository: {OPTIMIZE_CONFIG['repo_url']}")
-        print(f"  Program:    {OPTIMIZE_CONFIG['program']}")
-        print(f"  Metric:     {OPTIMIZE_CONFIG['metric']}")
-        print(f"  Trainset:   {OPTIMIZE_CONFIG['trainset_path']}")
-
-        response = await client.post(
-            f"{modal_url}/optimize",
-            json=OPTIMIZE_CONFIG,
-        )
-        assert response.status_code == 200, (
-            f"POST /optimize failed: {response.status_code} {response.text}"
-        )
-
-        result = response.json()
-        job_id = result["job_id"]
-        assert result["status"] != "failed", (
-            f"Job creation failed immediately: {result}"
-        )
-        print(f"  Job created: {job_id} (status: {result['status']})")
-
+    with httpx.AsyncClient() as client:
         # --- Poll for progress ---
         print(f"\nPolling job {job_id} every {POLL_INTERVAL_SECONDS}s "
-              f"(max {MAX_POLL_DURATION_SECONDS}s)...")
+                f"(max {MAX_POLL_DURATION_SECONDS}s)...")
         print(f"Waiting for {REQUIRED_ITERATIONS} completed iterations...\n")
 
         start_time = time.time()
@@ -205,7 +108,7 @@ async def run_optimization(modal_url: str) -> OptimizationResult:
                 final_status = status
                 break
 
-            await _async_sleep(POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
         elapsed = int(time.time() - start_time)
 
@@ -214,12 +117,14 @@ async def run_optimization(modal_url: str) -> OptimizationResult:
             f"{REQUIRED_ITERATIONS} iterations."
         )
 
-        return OptimizationResult(
-            final_status=final_status,
-            score_history=score_history,
-            job_id=job_id,
-            elapsed_seconds=elapsed,
-        )
+    return OptimizationResult(
+        final_status=final_status,
+        score_history=score_history,
+        job_id=job_id,
+        elapsed_seconds=elapsed,
+    )
+
+
 
 
 @pytest.mark.integration

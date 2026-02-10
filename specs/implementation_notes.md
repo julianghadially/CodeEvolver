@@ -459,10 +459,10 @@ GEPA orchestrates the evolutionary optimization. Runs on this service via /optim
 - [ ] Add code change request to GEPA optimization loop
 - [ ] GEPA Checklist
 - [ ] End-to-end testing of GEPA with code mutations + evaluate
-- [ ] Reflection LLM agent
+- [x] Reflection LLM agent (Claude Agent SDK, sandbox_scripts/reflection_agent.py)
 - [ ] CodeEvolver service
 - [ ] Proxy To safeguard (mask) our anthropic API key and unify into one key
-- [ ] Code mutations in GEPA optimization (v2: Claude Agent SDK reflection)
+- [ ] Code mutations in GEPA optimization
 
 
 ### Implementation Notes (v0.2.1)
@@ -490,13 +490,18 @@ src/
     __init__.py
     sandbox.py             # SandboxApp class, execute_mutation() (short-lived, per-mutation)
     client_sandbox.py      # ClientSandbox base class (long-lived, for optimizers)
-    agent.py               # Claude agent script generation
+    deploy_agent.py        # Agent config builders and output parsers
     program_runner.py      # DSPy program execution
     system_prompt.py       # Prompts for coding agent
-    sandbox_scripts/       # Scripts that run inside client sandboxes
+    sandbox_scripts/       # Prebuilt scripts that run inside client sandboxes
       __init__.py
+      utils.py             # Shared utilities (timer, git helpers)
+      environment_setup.py # Agent env setup (prompt streaming, API key, CLI check)
+      user_proxy.py        # User proxy for can_use_tool callbacks
+      coding_agent.py      # Coding agent (Claude Agent SDK, full edit tools)
+      reflection_agent.py  # Reflection agent (Claude Agent SDK, read-only tools)
       master.py            # Main dispatcher (entry point)
-      dspy/                # DSPy-specific handlers
+      dspy_scripts/        # DSPy-specific handlers
         __init__.py        # Shared utilities
         build_seed_candidate.py
         evaluate.py
@@ -523,10 +528,10 @@ modal_app.py               # Modal app entrypoint (includes run_optimization)
 - **SandboxApp Pattern**: Similar to modal-vibe's `SandboxApp`, manages sandbox lifecycle: create -> clone -> install -> mutate -> run -> terminate.
 - **Private Repo Authentication**: `SandboxApp.create()` accepts optional `installation_id` parameter. When provided, uses `GitHubAppService.get_installation_token()` and `get_authenticated_repo_url()` to clone private repositories.
 - **Automatic Token Refresh**: Sandbox calls refresh_github_token() GET /internal/job/{job_id}/github-token (with JWT). FastAPI generates fresh token → returns it
-- **Agent Scripts**: Code mutations generate Python scripts that run Claude Agent SDK inside the sandbox, where native tools work via subprocess.
+- **Agent Scripts**: Prebuilt scripts (`sandbox_scripts/coding_agent.py`, `sandbox_scripts/reflection_agent.py`) run Claude Agent SDK inside the sandbox, where native tools work via subprocess. Config is passed via JSON files; `deploy_agent.py` builds configs and parses output.
 - **Git Worktrees**: Using GitPython's `git.worktree` commands. Each program gets its own worktree directory at `{workspace_root}/{client_id}/{program_id}/`
 - **Prompt Mutations**: Directly edit `signature.instructions` in program.json via `apply_prompt_mutation()`, then commit
-- **Code Mutations**: Generate and execute agent scripts in sandbox (requires Modal deployment)
+- **Code Mutations**: Execute prebuilt coding agent script in sandbox (requires Modal deployment)
 - **Program Execution**: Imports and instantiates DSPy modules directly (no runner scripts needed)
 - **Local Development**: Use `modal serve modal_app.py` for dev, `modal deploy modal_app.py` for production
 
@@ -553,7 +558,7 @@ modal_app.py               # Modal app entrypoint (includes run_optimization)
 - Candidates are `dict[str, str]` mapping predictor names to instruction text
 - No git branching — instructions applied in-memory via `pred.signature.with_instructions()`
 - Reflection uses GEPA's default `InstructionProposalSignature` with litellm
-- No Claude Agent SDK for reflection (deferred to v2 with code mutations)
+- Reflection uses Claude Agent SDK via `sandbox_scripts/reflection_agent.py` with structured output
 
 **Metric Function:**
 Users provide a metric as a single dotted import path (e.g., `eval.evaluate.metric`). Last component is the function name. The function signature must be `metric(example: dspy.Example, prediction: dspy.Prediction) -> float`.
@@ -643,8 +648,8 @@ execute_change_request (Modal Function, sandbox_image)
     │       └── Creates branch if specified
     │
     ├── GEPASandbox.exec_agent(change_request, ...)
-    │       ├── generate_agent_script()
-    │       ├── Execute with system Python (claude-agent-sdk)
+    │       ├── Build config JSON (deploy_agent.py)
+    │       ├── Execute prebuilt coding_agent.py with system Python
     │       └── parse_agent_output()
     │
     ├── SandboxGitService.push(branch_name)  [if push_to_remote]
