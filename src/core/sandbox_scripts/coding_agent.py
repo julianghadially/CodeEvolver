@@ -126,6 +126,9 @@ def main_sync():
 
                     elif isinstance(message, ResultMessage):
                         timer_printer("Agent result received")
+                        # Signal done immediately so prompt_stream can exit
+                        done_event.set()
+
                         if message.is_error:
                             error_occurred = True
                             error_message = message.result

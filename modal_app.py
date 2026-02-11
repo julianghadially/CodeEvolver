@@ -289,7 +289,7 @@ def run_optimization(
     valset_path: str | None = None,
     program_lm: str = "openai/gpt-5-mini",
     reflection_lm: str = "openai/gpt-5-mini",
-    max_metric_calls: int = 1000,
+    max_metric_calls: int = 6000,
     github_token: str | None = None,
     input_keys: list[str] | None = None,
     num_threads: int = 1,
@@ -298,11 +298,13 @@ def run_optimization(
     jwt_token: str = "",
     python_version: str = "3.11",
     additional_instructions: str | None = None,
-    initial: int | None = None,
+    initial: int = 1,
     decay_rate: int = 25,
     decay_factor: int = 2,
     code_cutoff_step: int | None = None,
+    subsample_size: int = 10,
     initial_branch: str = "main",
+    max_valset_size: int | None = None,
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 
@@ -380,7 +382,9 @@ def run_optimization(
             decay_rate=decay_rate,
             decay_factor=decay_factor,
             code_cutoff_step=code_cutoff_step,
+            subsample_size=subsample_size,
             initial_branch=initial_branch,
+            max_valset_size=max_valset_size,
         )
         return result
     finally:

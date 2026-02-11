@@ -39,17 +39,18 @@ The following external services are available with API keys already configured i
 
 OPTIMIZE_CONFIG = {
     "repo_url": "https://github.com/julianghadially/LangProBe-CodeEvolver",
-    "program": "langProBe.hover.hover_program.HoverMultiHopPredict",
+    "program": "langProBe.hover.hover_pipeline.HoverMultiHopPredictPipeline",
     "metric": "langProBe.hover.hover_utils.discrete_retrieval_eval",
     "trainset_path": "data/hoverBench_train.json", # data/FacTool_QA_train_normalized.jsonl
     "valset_path": "data/hoverBench_val.json", # data/FacTool_QA_train_normalized.jsonl
     "input_keys": ["claim"],
-    "reflection_lm": "openai/gpt-4-mini",
-    "max_metric_calls": 1000,
-    "num_threads": 5,
+    "reflection_lm": "openai/gpt-4.1-mini",
+    "max_metric_calls": 6000,  # 150 examples × 40 full evals (with subsampled valset)
+    "num_threads": 20,  # Increased from 5 to 20 for better parallelization
+    "max_valset_size": 150,  # Subsample validation set to 150 examples (from 300) for faster evaluation
     "seed": 42,
     "additional_instructions": additional_instructions,
     "initial_branch": "hover",  # Start from the 'simple' branch
-    # Using default round_robin selector (no initial specified)
-    # This lets GEPA's ReflectionComponentSelector handle component selection
+    # Using default CodeFrequencyComponentSelector (initial=1, decay_rate=25)
+    # This does 1:1 code/prompt ratio initially, then increases prompts per code every 25 iterations
 }

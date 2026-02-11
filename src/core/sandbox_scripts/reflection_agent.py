@@ -100,6 +100,9 @@ def main_sync():
                 ):
                     if isinstance(message, ResultMessage):
                         timer_printer("Reflection result received")
+                        # Signal done immediately so prompt_stream can exit
+                        done_event.set()
+
                         if message.is_error:
                             print(f"REFLECT_ERROR: {message.result}")
                             return None

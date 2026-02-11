@@ -55,17 +55,17 @@ The following external services are available with API keys already configured i
 
 OPTIMIZE_CONFIG = {
     "repo_url": "https://github.com/julianghadially/LangProBe-CodeEvolver",
-    "program": "langProPlus.hotpotGEPA.hotpot_program.HotpotMultiHopPredict",
+    "program": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPredictPipeline",
     "metric": "langProPlus.hotpotGEPA.__init__.exact_match_metric",
     "trainset_path": "data/hotpotQABench_train.json", # data/FacTool_QA_train_normalized.jsonl
     "valset_path": "data/hotpotQABench_val.json", # data/FacTool_QA_train_normalized.jsonl
     "input_keys": ["question"],
-    "reflection_lm": "openai/gpt-4-mini",
-    "max_metric_calls": 1000,
+    "reflection_lm": "openai/gpt-4.1-mini",
+    "max_metric_calls": 300*20,
     "num_threads": 5,
     "seed": 42,
     "additional_instructions": additional_instructions,
     "initial_branch": "hotpotGEPA",  # Start from the 'simple' branch
-    # Using default round_robin selector (no initial specified)
-    # This lets GEPA's ReflectionComponentSelector handle component selection
+    # Using default CodeFrequencyComponentSelector (initial=1, decay_rate=25)
+    # This does 1:1 code/prompt ratio initially, then increases prompts per code every 25 iterations
 }

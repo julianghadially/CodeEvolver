@@ -36,6 +36,25 @@ from ..utils import get_logger, make_error_result, make_success_result
 
 log = get_logger("evaluate")
 
+# Version detection for legacy compatibility
+def _get_dspy_version_tuple():
+    """Parse DSPy version into tuple for comparison."""
+    try:
+        version_str = dspy.__version__
+        parts = version_str.split('.')
+        return tuple(int(p) for p in parts[:3])  # (major, minor, patch)
+    except Exception:
+        # If we can't parse version, assume it's recent
+        return (999, 0, 0)
+
+_DSPY_VERSION = _get_dspy_version_tuple()
+_USE_LEGACY_TRACE_CAPTURE = _DSPY_VERSION < (3, 0, 0)
+
+if _USE_LEGACY_TRACE_CAPTURE:
+    log.info(f"[VERSION] DSPy {dspy.__version__} (< 3.0.0) detected - using legacy trace capture")
+else:
+    log.info(f"[VERSION] DSPy {dspy.__version__} (>= 3.0.0) detected - using modern trace capture")
+
 
 def handle(cmd: dict, workspace: str) -> dict:
     """Run evaluation: load program, apply candidate, score batch.
@@ -131,14 +150,32 @@ def handle(cmd: dict, workspace: str) -> dict:
 
     if capture_traces:
         log.info("Running evaluation with traces...")
-        return _evaluate_with_traces(
-            program, metric_fn, examples, failure_score, num_threads
-        )
+        # Route to legacy implementation for older DSPy versions
+        if _USE_LEGACY_TRACE_CAPTURE:
+            return _evaluate_with_traces_legacy_wrapper(
+                program, metric_fn, examples, failure_score, num_threads
+            )
+        else:
+            return _evaluate_with_traces(
+                program, metric_fn, examples, failure_score, num_threads
+            )
     else:
         log.info("Running simple evaluation...")
         return _evaluate_simple(
             program, metric_fn, examples, failure_score, num_threads
         )
+
+
+def _evaluate_with_traces_legacy_wrapper(program, metric_fn, examples, failure_score, num_threads) -> dict:
+    """Wrapper to call legacy trace capture for DSPy < 2.7.0."""
+    try:
+        from .dspy_legacy.evaluate import evaluate_with_traces_legacy
+        return evaluate_with_traces_legacy(program, metric_fn, examples, failure_score, num_threads)
+    except ImportError as e:
+        log.error(f"Failed to import legacy trace capture: {e}")
+        # Fallback to simple evaluation without traces
+        log.warning("Falling back to simple evaluation without traces")
+        return _evaluate_simple(program, metric_fn, examples, failure_score, num_threads)
 
 
 def _evaluate_simple(program, metric_fn, examples, failure_score, num_threads) -> dict:
@@ -187,7 +224,9 @@ def _evaluate_simple(program, metric_fn, examples, failure_score, num_threads) -
 def _evaluate_with_traces(program, metric_fn, examples, failure_score, num_threads) -> dict:
     """Evaluate with trace capture for reflective dataset building.
 
-    Note: Requires DSPy >= 2.6.0 with bootstrap_trace support.
+    Modern implementation for DSPy >= 3.0.0 using bootstrap_trace_data.
+    For DSPy < 3.0.0, see dspy_legacy/evaluate.py which uses dspy.context().
+
     Traces are essential for GEPA's reflective mutation - failures will propagate.
     """
     from dspy.teleprompt.bootstrap_trace import bootstrap_trace_data

@@ -18,6 +18,7 @@ from ..core.deploy_agent import (
 )
 from ..core.client_sandbox import ClientSandbox, _get_agent_capable_sandbox_image
 from ..core.sandbox_scripts.debug_env import get_debug_python_command
+from ..core.verify_environment import validate_sandbox_environment
 from ..schemas.lm_output_schemas import ArchitectureOutput, ChangeRequestOutput
 from ..services.git_sandbox import SandboxGitService
 from ..services.github_app import GitHubAppService
@@ -398,6 +399,37 @@ class GEPASandbox(ClientSandbox):
             "stderr": stderr,
             "returncode": p.returncode,
         }
+
+    def validate_environment(
+        self,
+        program: str,
+        metric: str,
+        batch: list[dict],
+        seed_candidate: dict[str, str],
+        **kwargs,
+    ) -> dict:
+        """Validate sandbox environment by running evaluation on a small subset.
+
+        Delegates to core.verify_environment.validate_sandbox_environment().
+
+        Args:
+            program: Dotted import path to DSPy module class.
+            metric: Dotted import path to metric function.
+            batch: Full training dataset.
+            seed_candidate: Seed candidate dict with prompt texts (excludes _code).
+            **kwargs: Additional arguments passed to validate_sandbox_environment.
+
+        Returns:
+            Dict with 'success' (bool), 'error' (str) if failed, 'error_details' (list).
+        """
+        return validate_sandbox_environment(
+            sandbox=self,
+            program=program,
+            metric=metric,
+            batch=batch,
+            seed_candidate=seed_candidate,
+            **kwargs,
+        )
 
     def exec_reflection_agent(
         self,

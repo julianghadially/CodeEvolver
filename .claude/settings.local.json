@@ -11,7 +11,8 @@
       "WebFetch(domain:modal.com)",
       "WebFetch(domain:docs.litellm.ai)",
       "WebFetch(domain:api.github.com)",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "WebFetch(domain:pypi.org)"
     ]
   }
 }

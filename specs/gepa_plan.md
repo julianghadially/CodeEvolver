@@ -383,7 +383,8 @@ ClaudeAgentOptions(permission_mode="bypassPermissions", can_use_tool=user_proxy)
 This allows Claude to use plan mode for complex multi-file changes while running autonomously.
 See `specs/ralph_claude_code.md` for analysis of alternative CLI-based approaches.
 
-#### Remaining
+
+## Remaining
 - [x] Reflection LLM agent
 - [ ] End-to-end testing of GEPA with code mutations + evaluate
 - [ ] Performance results and tuning

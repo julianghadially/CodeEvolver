@@ -10,6 +10,7 @@ eval sandbox) and calls gepa.optimize().
 No dspy is imported here — all DSPy operations happen inside the sandbox.
 """
 
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from .utils import (
     get_git_branch_from_candidate,
     load_dataset_from_file,
     save_file_to_sandbox,
+    subsample_validation_set,
 )
 
 
@@ -132,13 +134,14 @@ def run_gepa_optimization(
     seed: int = 0,
     program_lm: str = "openai/gpt-5-mini",
     additional_instructions: str | None = None,
-    initial: int | None = None,
+    initial: int = 1,
     decay_rate: int = 25,
     decay_factor: int = 2,
     code_cutoff_step: int | None = None,
     code_lm: str = "anthropic/claude-sonnet-4-5-20250929",
-    subsample_size: int = 5,
+    subsample_size: int = 10,
     initial_branch: str = "main",
+    max_valset_size: int | None = None,
 ) -> dict[str, Any]:
     """Run GEPA optimization. Called from the Modal function.
 
@@ -166,14 +169,16 @@ def run_gepa_optimization(
             May include constraints (off-limits changes), services (available APIs
             with keys in environment), and ideas for optimization.
         initial: Starting prompts per code (default: 1). The ratio represents
-            prompts per code change. If None, uses GEPA's default "round_robin".
+            prompts per code change. Uses CodeFrequencyComponentSelector by default.
         decay_rate: Iterations between each multiplier step (default: 25).
         decay_factor: Multiplier applied at each decay step (default: 2).
-        code_cutoff_step: Stop code mutations after this iteration. Only used
-            when initial is provided. Default is None (no cutoff).
+        code_cutoff_step: Stop code mutations after this iteration. Default is None (no cutoff).
         code_lm: Language model for code mutations. Default is Claude Sonnet 4.5.
-        subsample_size: Number of examples per evaluation batch. Default is 5.
+        subsample_size: Number of examples per evaluation batch. Default is 10.
         initial_branch: Git branch to use as starting point for optimization. Default is "main".
+        max_valset_size: Maximum size of validation set. If specified, randomly subsamples
+            the validation set to this size using the provided seed. The same subsample
+            is used throughout the optimization run. Default is None (use full validation set).
 
     Returns:
         Dict with optimization results.
@@ -191,6 +196,10 @@ def run_gepa_optimization(
         dataset_start = time.time()
         trainset = _resolve_dataset_raw(ws, trainset_json, trainset_path, required=True)
         valset = _resolve_dataset_raw(ws, valset_json, valset_path, required=False)
+
+        # Subsample validation set if max_valset_size is specified
+        valset = subsample_validation_set(valset, max_valset_size, seed)
+
         print(f"[TIMER] Dataset loading took {time.time() - dataset_start:.2f}s", flush=True)
 
         # Create the adapter (RPC proxy to sandbox)
@@ -216,23 +225,49 @@ def run_gepa_optimization(
         seed_candidate = adapter.build_seed_candidate()
         print(f"[TIMER] build_seed_candidate took {time.time() - seed_start:.2f}s", flush=True)
 
+        # Validate sandbox environment with a small subset of data
+        # This catches environment issues (missing deps, import errors) early
+        # Extract prompt texts from seed_candidate (exclude _code key)
+        from .utils import CODE_COMPONENT_KEY
+        prompt_texts = {k: v for k, v in seed_candidate.items() if k != CODE_COMPONENT_KEY}
+        git_branch = json.loads(seed_candidate.get(CODE_COMPONENT_KEY, "{}")).get("git_branch")
+
+        validation_start = time.time()
+        print(f"[TIMER] Starting: sandbox environment validation", flush=True)
+        validation_result = sandbox_manager.validate_environment(
+            program=program,
+            metric=metric,
+            batch=trainset,
+            seed_candidate=prompt_texts,
+            saved_program_json_path=saved_program_json_path,
+            program_lm=program_lm,
+            num_threads=num_threads,
+            input_keys=input_keys,
+            failure_score=adapter.failure_score,
+            git_branch=git_branch,
+            max_validation_rows=15,
+            error_threshold=0.05,
+            capture_traces=True,  # Enable traces for detailed error diagnostics
+        )
+        print(f"[TIMER] Sandbox validation took {time.time() - validation_start:.2f}s", flush=True)
+
+        if not validation_result.get("success"):
+            error_msg = validation_result.get("error", "Unknown validation error")
+            print(f"[OPTIMIZER] Validation failed:\n{error_msg}", flush=True)
+            updater.set_failed(error_msg)
+            raise RuntimeError(f"Sandbox validation failed:\n{error_msg}")
+
         # Create callback progress tracker (also handles cancellation)
         tracker = CallbackProgressTracker(callback_url, jwt_token, job_id)
 
-        # Determine module selector based on initial (prompts per code)
-        # If initial is provided, use CodeFrequencyComponentSelector with decay
-        # Otherwise use GEPA's default "round_robin"
-        effective_module_selector: CodeFrequencyComponentSelector | str
-        if initial is not None:
-            effective_module_selector = CodeFrequencyComponentSelector(
-                initial=initial,
-                decay_rate=decay_rate,
-                decay_factor=decay_factor,
-                code_cutoff_step=code_cutoff_step,
-            )
-        else:
-            # Use GEPA's default round-robin selection
-            effective_module_selector = "round_robin"
+        # Use CodeFrequencyComponentSelector by default
+        # This controls the ratio of code mutations vs prompt mutations
+        effective_module_selector = CodeFrequencyComponentSelector(
+            initial=initial,
+            decay_rate=decay_rate,
+            decay_factor=decay_factor,
+            code_cutoff_step=code_cutoff_step,
+        )
 
         # Create batch sampler with specified minibatch size
         import random

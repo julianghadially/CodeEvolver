@@ -6,6 +6,7 @@ Pure file I/O and import utilities. No dspy dependency.
 import csv
 import importlib
 import json
+import random
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -365,3 +366,52 @@ def read_codeevolver_md_from_sandbox(sandbox: Any) -> str | None:
     if result.get("returncode") == 0:
         return result.get("stdout", "")
     return None
+
+
+def subsample_validation_set(
+    valset: list[dict[str, Any]] | None,
+    max_valset_size: int | None,
+    seed: int = 0,
+) -> list[dict[str, Any]] | None:
+    """Randomly subsample validation set if max_valset_size is specified.
+
+    This function deterministically subsamples the validation set using the provided
+    seed, ensuring the same subsample is used throughout the optimization run.
+    This significantly speeds up evaluation time without cluttering the main code.
+
+    Args:
+        valset: Full validation dataset (list of dicts), or None.
+        max_valset_size: Maximum number of validation examples to use. If None or
+            greater than len(valset), the full validation set is used.
+        seed: Random seed for reproducible subsampling (default: 0).
+
+    Returns:
+        Subsampled validation set, full validation set, or None if valset is None.
+
+    Example:
+        >>> valset = [{"x": i} for i in range(300)]
+        >>> subsampled = subsample_validation_set(valset, max_valset_size=100, seed=42)
+        >>> len(subsampled)
+        100
+    """
+    if valset is None:
+        return None
+
+    if max_valset_size is None or max_valset_size >= len(valset):
+        print(
+            f"[UTILS] Using full validation set ({len(valset)} examples)",
+            flush=True
+        )
+        return valset
+
+    # Deterministically subsample using the provided seed
+    rng = random.Random(seed)
+    subsampled = rng.sample(valset, max_valset_size)
+
+    print(
+        f"[UTILS] Subsampled validation set: {len(subsampled)} examples "
+        f"(from {len(valset)} total, seed={seed})",
+        flush=True
+    )
+
+    return subsampled
