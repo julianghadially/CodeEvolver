@@ -87,7 +87,7 @@ Read all the assistant responses and the corresponding feedback. Identify all ni
 
 Provide the new instructions within ``` blocks.
 
-### CodeEvolver Component Selectors (src/gepa/component_selector.py)
+### CodeEvolver Component Selectors (src/optimizer/component_selector.py)
 
 **CodeFrequencyComponentSelector** controls code vs prompt mutation frequency with exponential decay.
 
@@ -345,10 +345,10 @@ The GEPA optimizer process is managed by a long-running MODAL function that mana
 
 `GEPASandbox` manages the client sandbox environment (long-running), in service of a long-running Modal function that runs the optimization loop.
 
-`GEPASandbox` inherits from `ClientSandbox` (in `src/core/client_sandbox.py`). The client sandbox mimics the client's AI application environment — it installs the client's repository and `requirements.txt`. To run GEPA without any DSPy dependencies in the orchestrator, evaluation commands are delegated to prebuilt scripts inside the sandbox.
+`GEPASandbox` inherits from `ClientSandbox` (in `src/sandbox/client_sandbox.py`). The client sandbox mimics the client's AI application environment — it installs the client's repository and `requirements.txt`. To run GEPA without any DSPy dependencies in the orchestrator, evaluation commands are delegated to prebuilt scripts inside the sandbox.
 
 **Key Methods:**
-- `GEPASandbox.exec_prebuilt(command)` — Sends JSON command to `master.py`, returns JSON result
+- `GEPASandbox.exec_prebuilt(command)` — Sends JSON command to `master_script.py`, returns JSON result
 - `GEPASandbox.exec_agent(change_request)` — Execute coding agent for code mutations
 - `GEPASandbox.exec_reflection_agent(prompt)` — Execute reflection agent with read-only tools (Read/Grep/Glob)
 - `ClientSandbox.start()` — Clones repo, installs client requirements.txt

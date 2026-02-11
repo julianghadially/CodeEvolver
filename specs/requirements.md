@@ -57,7 +57,7 @@ Modal Function (gepa_image — no dspy)         Modal Sandbox (client's env)
 │ run_optimization()                  │       │ /workspace/ (cloned from GitHub) │
 │                                     │       │ pip install -r requirements.txt  │
 │ GEPA loop:                          │       │                                  │
-│   adapter.build_seed_candidate()    │       │ sandbox_scripts/master.py        │
+│   adapter.build_seed_candidate()    │       │ sandbox/mounted/master_script.py │
 │     → sandbox.exec_prebuilt()     ──┼──────>│   dispatches to dspy/*.py        │
 │     ← JSON result                 <─┼───────│                                  │
 │   adapter.evaluate(batch, cand)     │       │ EVAL_RESULT:{json} on stdout     │
@@ -68,8 +68,8 @@ Modal Function (gepa_image — no dspy)         Modal Sandbox (client's env)
 
 This avoids dependency conflicts between GEPA's orchestration deps and the client's dspy version.
 
-**Prebuilt Scripts** (`src/core/sandbox_scripts/`):
-Scripts copied into the sandbox image and executed via `sandbox.exec()`. They have full access to the client's Python environment. The `master.py` dispatcher routes commands to appropriate handlers.
+**Prebuilt Scripts** (`src/sandbox/mounted/`, `src/ai_frameworks/mounted/`):
+Scripts copied into the sandbox image and executed via `sandbox.exec()`. They have full access to the client's Python environment. The `master_script.py` dispatcher routes commands to appropriate handlers.
 
 For GEPA-specific sandbox details, see `specs/gepa_plan.md`.
 
@@ -139,12 +139,12 @@ We want the sandbox environment to work with every code base. This is difficult 
 Early in the optimization set up phase (probably before seed candidates are proposed, and probably before the architecture is defined - Definitely after the main sandbox is created) The system should simply start by running an evaluation on the first (up to) 15 rows of data. If there are errors on more than 5% of the rows, we should send back a error message that details, exactly what the errors were.
 
 ### Implementation (v1)
-The sandbox validation is implemented in `src/core/verify_environment.py` and called via `GEPASandbox.validate_environment()`:
+The sandbox validation is implemented in `src/sandbox/verify_environment.py` and called via `GEPASandbox.validate_environment()`:
 
 **Architecture:**
-- **Module**: `src/core/verify_environment.py` - Core validation logic
+- **Module**: `src/sandbox/verify_environment.py` - Core validation logic
 - **Wrapper**: `GEPASandbox.validate_environment()` - Convenience method
-- **Caller**: `src/gepa/optimizer.py` - Calls validation after seed candidate is built
+- **Caller**: `src/optimizer/optimizer.py` - Calls validation after seed candidate is built
 
 **Validation Flow:**
 - **When**: After seed candidate is built, before GEPA optimization loop starts
