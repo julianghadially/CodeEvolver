@@ -2,7 +2,7 @@
 """Agent script for code mutation, executed inside Modal sandbox.
 
 Accepts parameters via a JSON config file:
-    python /app/sandbox_scripts/coding_agent.py --config /tmp/agent_config.json
+    python /app/agent/mounted/coding_agent.py --config /tmp/agent_config.json
 
 Config JSON structure:
     {
@@ -22,16 +22,16 @@ import warnings
 
 warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*was never awaited.*")
 
-# Import utilities from sandbox (mounted at /app/sandbox_scripts/)
+# Import utilities from sandbox (mounted at /app/sandbox/, /app/agent/)
 sys.path.insert(0, "/app")
-from sandbox_scripts.utils import timer_printer, verify_changes_with_git
-from sandbox_scripts.environment_setup import (
+from sandbox.mounted.utils import timer_printer, verify_changes_with_git
+from agent.mounted.environment_setup import (
     setup_sandbox_env,
     verify_claude_cli,
     create_keep_stream_hook,
     create_prompt_stream,
 )
-from sandbox_scripts.user_proxy import create_user_proxy
+from agent.mounted.user_proxy import create_user_proxy
 
 
 def parse_config() -> dict:

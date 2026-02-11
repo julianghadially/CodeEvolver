@@ -19,13 +19,8 @@ except ImportError as _import_err:
     raise
 
 # Import from parent package
-import sys
-import os
-# Add parent directory to path for relative imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from dspy_scripts import signature_key
-from sandbox_scripts.utils import get_logger, make_success_result
+from ai_frameworks.mounted.dspy import signature_key
+from sandbox.mounted.utils import get_logger, make_success_result
 
 log = get_logger("evaluate_legacy")
 

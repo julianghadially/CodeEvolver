@@ -12,8 +12,8 @@ import argparse
 import json
 import sys
 
-from sandbox_scripts.debug_env import _log_environment_debug
-from sandbox_scripts.utils import get_logger, make_error_result
+from sandbox.mounted.debug_env import _log_environment_debug
+from sandbox.mounted.utils import get_logger, make_error_result
 
 # Command handlers are imported dynamically based on command type
 # Currently supported: dspy.build_seed_candidate, dspy.evaluate, dspy.make_reflective_dataset
@@ -29,9 +29,9 @@ def _register_dspy_handlers():
     _log_environment_debug(log)
 
     try:
-        from sandbox_scripts.dspy_scripts import build_seed_candidate
-        from sandbox_scripts.dspy_scripts import evaluate
-        from sandbox_scripts.dspy_scripts import make_reflective_dataset
+        from ai_frameworks.mounted.dspy import build_seed_candidate
+        from ai_frameworks.mounted.dspy import evaluate
+        from ai_frameworks.mounted.dspy import make_reflective_dataset
 
         HANDLERS["build_seed_candidate"] = build_seed_candidate.handle
         HANDLERS["evaluate"] = evaluate.handle

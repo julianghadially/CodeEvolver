@@ -16,21 +16,6 @@ class GetProgramResponse(BaseModel):
     status: str
     created_at: datetime
 
-class ExecuteStepResponse(BaseModel):
-    """Response payload for /execute_step endpoint."""
-
-    program_id: str
-    status: Literal["success", "failed"]
-    pipeline_outputs: list[PipelineOutput] = Field(default_factory=list)
-    traces: list[Any] | None = Field(default=None, description="Execution traces if captured")
-    branch_name: str | None = Field(default=None, description="Branch name for code mutations")
-    program_json: dict[str, Any] | None = Field(
-        default=None,
-        description="Updated program state after mutation",
-    )
-    error: str | None = Field(default=None, description="Error message if failed")
-
-
 class ConnectGitResponse(BaseModel):
     """Response payload for /connect-git endpoint."""
 
@@ -46,9 +31,6 @@ class ChangeResponse(BaseModel):
     error: str | None = Field(default=None)
     output: str | None = Field(default=None, description="Agent execution output/logs")
 
-
-# Keep ExecuteSandboxResponse as deprecated alias for backwards compatibility
-ExecuteSandboxResponse = ChangeResponse
 
 class OptimizeResponse(BaseModel):
     """Response payload for POST /optimize."""

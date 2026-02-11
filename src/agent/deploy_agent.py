@@ -1,7 +1,7 @@
 """Claude agent deployment and output parsing for code mutations and reflection.
 
 Contains config builders and output parsers for the agent scripts that run
-inside the Modal sandbox (sandbox_scripts/coding_agent.py, sandbox_scripts/reflection_agent.py).
+inside the Modal sandbox (agent/mounted/coding_agent.py, agent/mounted/reflection_agent.py).
 """
 
 import json
@@ -86,7 +86,7 @@ def build_agent_config(
     """Build a config dict for the sandbox agent script.
 
     The config is written as JSON to the sandbox and passed to
-    sandbox_scripts/coding_agent.py via --config.
+    agent/mounted/coding_agent.py via --config.
 
     Args:
         workspace_path: Path to the workspace in the sandbox.
@@ -165,7 +165,7 @@ def build_reflection_config(
     """Build a config dict for the sandbox reflection agent script.
 
     The config is written as JSON to the sandbox and passed to
-    sandbox_scripts/reflection_agent.py via --config.
+    agent/mounted/reflection_agent.py via --config.
 
     Args:
         workspace_path: Path to the workspace in the sandbox.

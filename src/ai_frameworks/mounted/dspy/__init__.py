@@ -19,7 +19,7 @@ def load_import_path(workspace_path: str, dotted_path: str) -> Any:
     - We APPEND workspace to sys.path (not insert at 0) to avoid shadowing venv packages
 
     This ensures import priority is:
-    1. /app (sandbox_scripts via PYTHONPATH)
+    1. /app (sandbox/mounted/, agent/mounted/, ai_frameworks/mounted/ via PYTHONPATH)
     2. /workspace/.venv/lib/python3.11/site-packages (dspy, client deps)
     3. /workspace (client source code)
     """

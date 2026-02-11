@@ -29,10 +29,9 @@ def _get_base_sandbox_image(python_version: str = "3.11") -> modal.Image:
     return (
         modal.Image.debian_slim(python_version=python_version)
         .apt_install("git")
-        .add_local_dir(
-            "src/core/sandbox_scripts",
-            remote_path="/app/sandbox_scripts",
-        )
+        .add_local_dir("src/sandbox/mounted", remote_path="/app/sandbox/mounted")
+        .add_local_dir("src/agent/mounted", remote_path="/app/agent/mounted")
+        .add_local_dir("src/ai_frameworks/mounted", remote_path="/app/ai_frameworks/mounted")
     )
 
 
@@ -48,10 +47,9 @@ def _get_agent_capable_sandbox_image(python_version: str = "3.11") -> modal.Imag
         .apt_install("git", "curl", "nodejs", "npm")
         .run_commands("npm install -g @anthropic-ai/claude-code")
         .pip_install("claude-agent-sdk>=0.1.21", "anyio>=4.0.0")
-        .add_local_dir(
-            "src/core/sandbox_scripts",
-            remote_path="/app/sandbox_scripts",
-        )
+        .add_local_dir("src/sandbox/mounted", remote_path="/app/sandbox/mounted")
+        .add_local_dir("src/agent/mounted", remote_path="/app/agent/mounted")
+        .add_local_dir("src/ai_frameworks/mounted", remote_path="/app/ai_frameworks/mounted")
     )
 
 

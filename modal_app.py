@@ -120,7 +120,7 @@ def execute_change_request(
     sys.path.insert(0, "/app")
     os.chdir("/app")
 
-    from src.gepa.gepa_sandbox import GEPASandbox
+    from src.optimizer.gepa_sandbox import GEPASandbox
     from src.services.git_sandbox import SandboxGitService
 
     # Create sandbox with pre-generated token
@@ -168,84 +168,6 @@ def execute_change_request(
 
     finally:
         sandbox.stop()
-
-
-# DEPRECATED: Keep execute_in_sandbox for backwards compatibility
-# Will be removed in a future version - use execute_change_request instead
-@app.function(
-    image=sandbox_image,
-    timeout=600,
-    cpu=2,
-    memory=4096,
-    secrets=[modal.Secret.from_name("codeevolver-secrets")],
-)
-async def execute_in_sandbox(
-    client_id: str,
-    program_id: str,
-    repo_url: str,
-    mutation_type: str,
-    program_json_path: str,
-    entry_point: str,
-    candidate: dict | None = None,
-    change_request: str | None = None,
-    change_location: str | None = None,
-    test_examples: list | None = None,
-    capture_traces: bool = False,
-    installation_id: int | None = None,
-    skip_program_run: bool = False,
-    branch_name: str | None = None,
-    push_to_remote: bool = False,
-) -> dict:
-    """
-    DEPRECATED: Use execute_change_request instead.
-
-    Execute a mutation inside an isolated Modal Sandbox.
-    """
-    import os
-    import sys
-
-    sys.path.insert(0, "/app")
-
-    from src.core import execute_mutation
-
-    # Build secrets dict from environment
-    secrets = {}
-    if os.getenv("ANTHROPIC_API_KEY"):
-        secrets["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY")
-    if os.getenv("OPENAI_KEY"):
-        secrets["OPENAI_KEY"] = os.getenv("OPENAI_KEY")
-
-    result = await execute_mutation(
-        app=app,
-        client_id=client_id,
-        program_id=program_id,
-        repo_url=repo_url,
-        mutation_type=mutation_type,
-        program_json_path=program_json_path,
-        entry_point=entry_point,
-        candidate=candidate,
-        change_request=change_request,
-        change_location=change_location,
-        test_examples=test_examples,
-        capture_traces=capture_traces,
-        secrets=secrets,
-        installation_id=installation_id,
-        skip_program_run=skip_program_run,
-        branch_name=branch_name,
-        push_to_remote=push_to_remote,
-    )
-
-    # Convert dataclass to dict for serialization
-    return {
-        "status": result.status,
-        "program_id": result.program_id,
-        "program_json": result.program_json,
-        "pipeline_outputs": result.pipeline_outputs,
-        "traces": result.traces,
-        "branch_name": result.branch_name,
-        "error": result.error,
-    }
-
 
 # Image for GEPA optimization orchestrator (litellm, gepa — NO dspy).
 # DSPy and client deps are installed inside the eval sandbox instead.
@@ -322,8 +244,8 @@ def run_optimization(
     os.chdir("/app")
 
     from src.services.github_app import GitHubAppService
-    from src.gepa.gepa_sandbox import GEPASandbox
-    from src.gepa.optimizer import run_gepa_optimization
+    from src.optimizer.gepa_sandbox import GEPASandbox
+    from src.optimizer.optimizer import run_gepa_optimization
 
     # Clone repo to workspace (for dataset file access by the orchestrator)
     workspace_path = f"/workspaces/gepa_{job_id}/main"

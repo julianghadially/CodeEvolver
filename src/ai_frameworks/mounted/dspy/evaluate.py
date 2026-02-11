@@ -21,7 +21,7 @@ Requires DSPy >= 3.0.0.
 
 import sys
 
-from sandbox_scripts.debug_env import get_dspy_import_diagnostic
+from sandbox.mounted.debug_env import get_dspy_import_diagnostic
 
 try:
     import dspy
@@ -32,7 +32,7 @@ except ImportError as _import_err:
     raise ImportError(_diag) from _import_err
 
 from . import build_program, load_import_path, signature_key
-from ..utils import get_logger, make_error_result, make_success_result
+from sandbox.mounted.utils import get_logger, make_error_result, make_success_result
 
 log = get_logger("evaluate")
 

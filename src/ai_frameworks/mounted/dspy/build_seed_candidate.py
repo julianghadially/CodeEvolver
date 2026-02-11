@@ -4,7 +4,7 @@ Extracts initial instructions from all predictors in a DSPy module.
 """
 
 from . import build_program
-from ..utils import get_logger, make_success_result
+from sandbox.mounted.utils import get_logger, make_success_result
 
 log = get_logger("build_seed")
 

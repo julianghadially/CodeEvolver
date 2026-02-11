@@ -8,53 +8,6 @@ from pydantic import BaseModel, Field, model_validator
 from .program_schemas import MutationType
 from .job_schemas import JobStatus
 
-
-class ExecuteStepRequest(BaseModel):
-    """Request payload for /execute_step endpoint."""
-
-    client_id: str = Field(..., description="Client identifier from /connect-git")
-    program_id: str = Field(..., description="New program id for this mutation")
-    parent_program_id: str = Field(..., description="Parent program id")
-    mutation_type: MutationType = Field(..., description="Type of mutation: prompt or code")
-
-    # Program location
-    program_json_path: str = Field(
-        ...,
-        description="Path to program.json from project root",
-        examples=["src/fire/program.json"],
-    )
-    entry_point: str = Field(
-        ...,
-        description="DSPy module to instantiate (e.g., 'fire.FIREJudge')",
-    )
-
-    # For prompt mutations
-    candidate: dict[str, str] | None = Field(
-        default=None,
-        description="For prompt mutations: component_name -> new instruction text",
-    )
-
-    # For code mutations
-    change_request: str | None = Field(
-        default=None,
-        description="Natural language description of code change",
-    )
-    change_location: str | None = Field(
-        default=None,
-        description="Module path hint for code changes (optional)",
-    )
-
-    # Test data
-    test_examples: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="DSPy Examples to run after mutation",
-    )
-    capture_traces: bool = Field(
-        default=False,
-        description="Whether to return execution traces",
-    )
-
-
 class ConnectGitRequest(BaseModel):
     """Request payload for /connect-git endpoint."""
 
@@ -98,9 +51,6 @@ class ChangeRequest(BaseModel):
         description="Git branch to clone from before creating the new branch",
     )
 
-
-# Keep ExecuteSandboxRequest as deprecated alias for backwards compatibility
-ExecuteSandboxRequest = ChangeRequest
 
 class OptimizeRequest(BaseModel):
     """Request payload for POST /optimize.

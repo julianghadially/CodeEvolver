@@ -1,7 +1,7 @@
 def get_debug_python_command(workspace):
     """Return bash command string to check venv/dspy existence before running Python."""
     return (
-        f"echo '[VENV DEBUG] Checking venv before master.py...' && "
+        f"echo '[VENV DEBUG] Checking venv before master_script.py...' && "
         f"ls -la {workspace}/.venv/bin/python 2>&1 || echo 'VENV PYTHON MISSING!' && "
         f"ls -la {workspace}/.venv/lib/python*/site-packages/dspy 2>&1 | head -1 || echo 'DSPY PACKAGE MISSING!' && "
         f"which python && "

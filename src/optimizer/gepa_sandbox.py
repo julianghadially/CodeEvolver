@@ -10,15 +10,15 @@ import base64
 import json
 import logging
 
-from ..core.deploy_agent import (
+from ..agent.deploy_agent import (
     build_agent_config,
     build_reflection_config,
     parse_agent_output,
     parse_reflection_output,
 )
-from ..core.client_sandbox import ClientSandbox, _get_agent_capable_sandbox_image
-from ..core.sandbox_scripts.debug_env import get_debug_python_command
-from ..core.verify_environment import validate_sandbox_environment
+from ..sandbox.client_sandbox import ClientSandbox, _get_agent_capable_sandbox_image
+from ..sandbox.mounted.debug_env import get_debug_python_command
+from ..sandbox.verify_environment import validate_sandbox_environment
 from ..schemas.lm_output_schemas import ArchitectureOutput, ChangeRequestOutput
 from ..services.git_sandbox import SandboxGitService
 from ..services.github_app import GitHubAppService
@@ -30,7 +30,7 @@ class GEPASandbox(ClientSandbox):
     """Modal Sandbox for GEPA DSPy program evaluation and code mutations.
 
     Inherits generic sandbox lifecycle from ClientSandbox and implements:
-    - exec_prebuilt(): Execute DSPy-specific commands via master.py
+    - exec_prebuilt(): Execute DSPy-specific commands via master_script.py
     - exec_agent(): Execute coding agent for code mutations
 
     When started with use_venv=True:
@@ -117,13 +117,13 @@ class GEPASandbox(ClientSandbox):
         if verify_stderr:
             print(f"[AGENT] CLI verification stderr: {verify_stderr}", flush=True)
 
-        # Execute sandbox_scripts/coding_agent.py with system Python (has claude-agent-sdk)
+        # Execute agent/mounted/coding_agent.py with system Python (has claude-agent-sdk)
         # Source .env first for API keys
         print("[AGENT] Starting agent script execution...", flush=True)
         p = self._sandbox.exec(
             "bash", "-c",
             f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
-            f"python /app/sandbox_scripts/coding_agent.py --config /tmp/agent_config.json 2>&1",
+            f"python /app/agent/mounted/coding_agent.py --config /tmp/agent_config.json 2>&1",
         )
         p.wait()
 
@@ -178,9 +178,9 @@ class GEPASandbox(ClientSandbox):
         }
 
     def exec_prebuilt(self, command: dict) -> dict:
-        """Execute a prebuilt DSPy command via master.py.
+        """Execute a prebuilt DSPy command via master_script.py.
 
-        Writes the command to a temp file, executes master.py,
+        Writes the command to a temp file, executes master_script.py,
         and parses the EVAL_RESULT: prefix from stdout.
 
         Args:
@@ -227,7 +227,7 @@ class GEPASandbox(ClientSandbox):
                     f"echo '{chunk_b64}' | base64 -d >> /tmp/prebuilt_command.json",
                 ).wait()
 
-        # Execute master.py dispatcher (source .env first to load environment variables)
+        # Execute master_script.py dispatcher (source .env first to load environment variables)
         # Use venv Python (where client deps like dspy are installed)
         venv_path_export = f'export PATH="{self._workspace}/.venv/bin:$PATH" && ' if self._use_venv else ""
 
@@ -239,7 +239,7 @@ class GEPASandbox(ClientSandbox):
             f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
             f"{venv_path_export}"
             f"{debug_cmd}"
-            f"PYTHONPATH=/app:$PYTHONPATH python /app/sandbox_scripts/master.py "
+            f"PYTHONPATH=/app:$PYTHONPATH python /app/sandbox/mounted/master_script.py "
             f"--workspace {self._workspace} "
             f"--command-file /tmp/prebuilt_command.json",
         )
@@ -253,7 +253,7 @@ class GEPASandbox(ClientSandbox):
             print(f"[SANDBOX STDERR]\n{stderr}", flush=True)
 
         if p.returncode != 0:
-            print(f"[SANDBOX ERROR] master.py failed (rc={p.returncode}): {stderr}", flush=True)
+            print(f"[SANDBOX ERROR] master_script.py failed (rc={p.returncode}): {stderr}", flush=True)
             return {
                 "success": False,
                 "error": f"Prebuilt script exit code {p.returncode}: {stderr[:2000]}",
@@ -483,12 +483,12 @@ class GEPASandbox(ClientSandbox):
             f"echo '{config_b64}' | base64 -d > /tmp/reflection_config.json",
         ).wait()
 
-        # Execute sandbox_scripts/reflection_agent.py with system Python
+        # Execute agent/mounted/reflection_agent.py with system Python
         print("[REFLECT] Starting reflection agent...", flush=True)
         p = self._sandbox.exec(
             "bash", "-c",
             f"set -a && source {self._workspace}/.env 2>/dev/null; set +a; "
-            f"python /app/sandbox_scripts/reflection_agent.py --config /tmp/reflection_config.json 2>&1",
+            f"python /app/agent/mounted/reflection_agent.py --config /tmp/reflection_config.json 2>&1",
         )
         p.wait()
 
