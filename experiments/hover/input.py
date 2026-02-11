@@ -50,7 +50,7 @@ OPTIMIZE_CONFIG = {
     "max_valset_size": 150,  # Subsample validation set to 150 examples (from 300) for faster evaluation
     "seed": 42,
     "additional_instructions": additional_instructions,
-    "initial_branch": "hover",  # Start from the 'simple' branch
+    "initial_branch": "hover",  
     # Using default CodeFrequencyComponentSelector (initial=1, decay_rate=25)
     # This does 1:1 code/prompt ratio initially, then increases prompts per code every 25 iterations
 }

@@ -397,9 +397,17 @@ def subsample_validation_set(
     if valset is None:
         return None
 
+    # Debug logging to help diagnose parameter passing
+    print(
+        f"[UTILS] Validation set subsampling: max_valset_size={max_valset_size}, "
+        f"valset_size={len(valset)}, seed={seed}",
+        flush=True
+    )
+
     if max_valset_size is None or max_valset_size >= len(valset):
         print(
-            f"[UTILS] Using full validation set ({len(valset)} examples)",
+            f"[UTILS] Using full validation set ({len(valset)} examples) - "
+            f"max_valset_size={'None' if max_valset_size is None else max_valset_size}",
             flush=True
         )
         return valset

@@ -61,11 +61,12 @@ OPTIMIZE_CONFIG = {
     "valset_path": "data/hotpotQABench_val.json", # data/FacTool_QA_train_normalized.jsonl
     "input_keys": ["question"],
     "reflection_lm": "openai/gpt-4.1-mini",
-    "max_metric_calls": 300*20,
-    "num_threads": 5,
+    "max_metric_calls": 6000, # 150 examples × 40 full evals (with subsampled valset)
+    "num_threads": 20,
+    "max_valset_size": 150, # Subsample validation set to 150 examples (from 300) for faster evaluation
     "seed": 42,
     "additional_instructions": additional_instructions,
-    "initial_branch": "hotpotGEPA",  # Start from the 'simple' branch
+    "initial_branch": "hotpotGEPA",  
     # Using default CodeFrequencyComponentSelector (initial=1, decay_rate=25)
     # This does 1:1 code/prompt ratio initially, then increases prompts per code every 25 iterations
 }

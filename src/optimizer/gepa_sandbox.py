@@ -6,7 +6,6 @@ Extends ClientSandbox with exec_prebuilt() for DSPy command execution
 and exec_agent() for coding agent code mutations.
 """
 
-import base64
 import json
 import logging
 
@@ -95,12 +94,10 @@ class GEPASandbox(ClientSandbox):
             max_turns=max_turns,
         )
         config_json = json.dumps(config)
-        config_b64 = base64.b64encode(config_json.encode()).decode()
 
-        self._sandbox.exec(
-            "bash", "-c",
-            f"echo '{config_b64}' | base64 -d > /tmp/agent_config.json",
-        ).wait()
+        # Write config directly to sandbox file (avoids ARG_MAX limit)
+        with self._sandbox.open("/tmp/agent_config.json", "w") as f:
+            f.write(config_json)
 
         # Verify Claude Code CLI and API key before running
         print("[AGENT] Verifying Claude Code CLI...", flush=True)
@@ -199,33 +196,9 @@ class GEPASandbox(ClientSandbox):
         # Serialize command to JSON
         cmd_json = json.dumps(command)
 
-        # Write command file in chunks to avoid ARG_MAX limits (65KB)
-        # Large trajectory data can exceed this when passed as single command arg
-        # Use 30KB raw chunks (base64 expands ~33% to ~40KB, safely under 65KB)
-        chunk_size = 30000
-
-        if len(cmd_json) <= chunk_size:
-            # Small payload - single write (original approach)
-            cmd_b64 = base64.b64encode(cmd_json.encode()).decode()
-            write_p = self._sandbox.exec(
-                "bash", "-c",
-                f"echo '{cmd_b64}' | base64 -d > /tmp/prebuilt_command.json",
-            )
-            write_p.wait()
-        else:
-            # Large payload - chunked write
-            # Each chunk is base64-encoded independently, decoded, and appended
-            # Clear file first
-            self._sandbox.exec("bash", "-c", "> /tmp/prebuilt_command.json").wait()
-
-            # Write raw JSON chunks (base64 encode each separately)
-            for i in range(0, len(cmd_json), chunk_size):
-                chunk = cmd_json[i:i + chunk_size]
-                chunk_b64 = base64.b64encode(chunk.encode()).decode()
-                self._sandbox.exec(
-                    "bash", "-c",
-                    f"echo '{chunk_b64}' | base64 -d >> /tmp/prebuilt_command.json",
-                ).wait()
+        # Write command directly to sandbox file (avoids ARG_MAX limit)
+        with self._sandbox.open("/tmp/prebuilt_command.json", "w") as f:
+            f.write(cmd_json)
 
         # Execute master_script.py dispatcher (source .env first to load environment variables)
         # Use venv Python (where client deps like dspy are installed)
@@ -476,12 +449,10 @@ class GEPASandbox(ClientSandbox):
             max_turns=max_turns,
         )
         config_json = json.dumps(config)
-        config_b64 = base64.b64encode(config_json.encode()).decode()
 
-        self._sandbox.exec(
-            "bash", "-c",
-            f"echo '{config_b64}' | base64 -d > /tmp/reflection_config.json",
-        ).wait()
+        # Write config directly to sandbox file (avoids ARG_MAX limit)
+        with self._sandbox.open("/tmp/reflection_config.json", "w") as f:
+            f.write(config_json)
 
         # Execute agent/mounted/reflection_agent.py with system Python
         print("[REFLECT] Starting reflection agent...", flush=True)

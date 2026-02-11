@@ -136,39 +136,16 @@ This architecture is preferable to the alternatives.
 ## Flexible, Reliable Sandboxes Work for Every Client
 We want the sandbox environment to work with every code base. This is difficult to achieve, but for v1, We can start with a evaluation testing script that quickly let the user know whether there is a failure.
 
-Early in the optimization set up phase (probably before seed candidates are proposed, and probably before the architecture is defined - Definitely after the main sandbox is created) The system should simply start by running an evaluation on the first (up to) 15 rows of data. If there are errors on more than 5% of the rows, we should send back a error message that details, exactly what the errors were.
-
-### Implementation (v1)
 The sandbox validation is implemented in `src/sandbox/verify_environment.py` and called via `GEPASandbox.validate_environment()`:
 
-**Architecture:**
-- **Module**: `src/sandbox/verify_environment.py` - Core validation logic
-- **Wrapper**: `GEPASandbox.validate_environment()` - Convenience method
-- **Caller**: `src/optimizer/optimizer.py` - Calls validation after seed candidate is built
+After seed candidate is built, before GEPA optimization loop starts, we run evaluation on the first (up to) 15 rows of training data. It captures execution traces for detailed error diagnostics
 
-**Validation Flow:**
-- **When**: After seed candidate is built, before GEPA optimization loop starts
-- **What**: Runs evaluation on first (up to) 15 rows of training data
-- **Traces**: Captures execution traces for detailed error diagnostics
-- **Threshold**: Fails if errors occur on >5% of rows
-
-**Error Details**: Returns comprehensive error information including:
+Fails if system errors occur on >10% of rows OR if accuracy is 0%. Returns comprehensive error information, including:
   - Row indices that failed
   - Inputs, outputs, and scores for failed rows
   - Execution trace information (trace length, failed steps)
   - Failed step details with signature and error messages
   - First 5 error examples (to avoid overwhelming output)
-
-**Result**: If validation fails, the optimization job is marked as failed with a detailed error message
-
-This early validation catches:
-- Missing dependencies in client environment
-- Import errors in client code
-- Configuration issues (missing env vars, API keys, etc.)
-- Metric function errors
-- Program instantiation failures
-- DSPy module execution failures (with trace-level diagnostics)
-
 
 ## Security Architecture
 - **Client-specific isolation (v2):** Execution of code will be isolated in v2. Each client should be in a separate container (e.g., client could have malicious code to steal other clients' data or secrets)
