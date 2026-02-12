@@ -13,9 +13,15 @@ The architecture follows the modal-vibe pattern:
 
 import modal
 from modal import FilePatternMatcher
+from src.config import determine_environment
 
 # Create or lookup the Modal app
 app = modal.App("codeevolver")
+
+# Get deployment mode from environment variable
+# Set this when deploying: modal deploy modal_app.py --env APP_MODE=prod
+import os
+APP_MODE = determine_environment()
 
 # Shared volume for git workspaces (persists across function calls)
 workspaces_volume = modal.Volume.from_name(
@@ -69,6 +75,7 @@ sandbox_image = (
     image=web_image,
     volumes={"/workspaces": workspaces_volume},
     secrets=[modal.Secret.from_name("codeevolver-secrets")],
+    env={"APP_MODE": APP_MODE},  # Set environment mode (dev/prod)
     min_containers=1,
     timeout=1500,  # Allow enough time for change_request calls (1200s) plus overhead
 )
@@ -100,6 +107,7 @@ def fastapi_app():
     cpu=2,
     memory=4096,
     secrets=[modal.Secret.from_name("codeevolver-secrets")],
+    env={"APP_MODE": APP_MODE},  # Set environment mode (dev/prod)
 )
 def execute_change_request(
     repo_url: str,
@@ -194,6 +202,7 @@ gepa_image = (
     image=gepa_image,
     volumes={"/workspaces": workspaces_volume},
     secrets=[modal.Secret.from_name("codeevolver-worker-secrets")],
+    env={"APP_MODE": APP_MODE},  # Set environment mode (dev/prod)
     timeout=43200,  # 12 hours - KEEP IN SYNC with src/config.py gepa_job_timeout
     cpu=4,
     memory=8192,

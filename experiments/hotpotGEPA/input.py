@@ -57,8 +57,8 @@ OPTIMIZE_CONFIG = {
     "repo_url": "https://github.com/julianghadially/LangProBe-CodeEvolver",
     "program": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPredictPipeline",
     "metric": "langProPlus.hotpotGEPA.__init__.exact_match_metric",
-    "trainset_path": "data/hotpotQABench_train.json", # data/FacTool_QA_train_normalized.jsonl
-    "valset_path": "data/hotpotQABench_val.json", # data/FacTool_QA_train_normalized.jsonl
+    "trainset_path": "data/HotpotQABench_train.json", # data/FacTool_QA_train_normalized.jsonl
+    "valset_path": "data/HotpotQABench_val.json", # data/FacTool_QA_train_normalized.jsonl
     "input_keys": ["question"],
     "reflection_lm": "openai/gpt-4.1-mini",
     "max_metric_calls": 6000, # 150 examples × 40 full evals (with subsampled valset)

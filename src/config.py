@@ -8,10 +8,22 @@ import os
 
 def determine_environment() -> Literal['local', 'dev', 'prod']:
     """Determine the current environment."""
-    app_mode: Literal['local', 'dev', 'prod'] = str(os.getenv('APP_MODE', 'dev')).lower()
+    print(f"[INFO] Determining environment from APP_MODE: {os.getenv('APP_MODE','APP_MODE not found')}")
+    app_mode: Literal['local', 'dev', 'prod'] = str(os.getenv('APP_MODE', 'prod')).lower()
     if os.getenv('LOCATION', '') == 'local':
         app_mode = 'local'
     return app_mode
+
+def determine_api_url() -> str:
+    """Determine the API URL based on the environment."""
+    app_mode = determine_environment()
+    if app_mode in ['dev', 'local']:
+        return 'https://julianghadially--codeevolver-fastapi-app-dev.modal.run'
+    elif app_mode == 'prod':
+        return 'https://julianghadially--codeevolver-fastapi-app.modal.run'
+    else:
+        print(f"[WARNING] Invalid app mode: {app_mode}")
+        return 'https://julianghadially--codeevolver-fastapi-app-dev.modal.run'
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -47,7 +59,8 @@ class Settings(BaseSettings):
 
     # JWT / callback settings (for GEPA sandbox → FastAPI communication)
     jwt_secret: Optional[str] = None       # CODEEVOLVER_JWT_SECRET (HS256 key)
-    callback_url: str = "https://julianghadially--codeevolver-fastapi-app-dev.modal.run"                 # CODEEVOLVER_CALLBACK_URL (Modal web endpoint)
+    app_mode: Literal['local', 'dev', 'prod'] = determine_environment()
+    callback_url: str = determine_api_url()                # CODEEVOLVER_CALLBACK_URL (Modal web endpoint)
 
     model_config = {"env_prefix": "CODEEVOLVER_"}
     

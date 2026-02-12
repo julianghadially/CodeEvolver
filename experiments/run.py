@@ -6,8 +6,8 @@ import asyncio
 import httpx
 from src.schemas.job_schemas import OptimizationResult
 
-
-DEFAULT_MODAL_URL = "https://julianghadially--codeevolver-fastapi-app-dev.modal.run"
+DEFAULT_MODAL_URL = "https://julianghadially--codeevolver-fastapi-app.modal.run"
+#DEFAULT_MODAL_URL = "https://julianghadially--codeevolver-fastapi-app-dev.modal.run"
 
 
 async def run_optimization(modal_url: str, OPTIMIZE_CONFIG: dict) -> OptimizationResult:
