@@ -142,6 +142,8 @@ def run_gepa_optimization(
     subsample_size: int = 10,
     initial_branch: str = "main",
     max_valset_size: int | None = None,
+    debug: bool = False,
+    debug_max_iterations: int | None = None,
 ) -> dict[str, Any]:
     """Run GEPA optimization. Called from the Modal function.
 
@@ -258,7 +260,15 @@ def run_gepa_optimization(
             raise RuntimeError(f"Sandbox validation failed:\n{error_msg}")
 
         # Create callback progress tracker (also handles cancellation)
-        tracker = CallbackProgressTracker(callback_url, jwt_token, job_id)
+        tracker = CallbackProgressTracker(
+            callback_url,
+            jwt_token,
+            job_id,
+            debug_max_iterations=debug_max_iterations,
+        )
+
+        if debug_max_iterations:
+            print(f"\n[DEBUG MODE] Will stop after {debug_max_iterations} iterations\n", flush=True)
 
         # Use CodeFrequencyComponentSelector by default
         # This controls the ratio of code mutations vs prompt mutations
@@ -306,7 +316,40 @@ def run_gepa_optimization(
             "best_idx": best_idx,
             "num_candidates": result.num_candidates,
             "total_metric_calls": result.total_metric_calls,
+            "all_candidates": result.candidates,
+            "candidate_scores": result.val_aggregate_scores,
+            "parent_programs": result.parents,
         }
+
+        if debug:
+            # DEBUG: Analyze candidate evolution before saving
+            print("\n" + "="*80, flush=True)
+            print("[DEBUG] Candidate evolution analysis:", flush=True)
+            for idx in range(min(10, len(result.candidates))):
+                candidate = result.candidates[idx]
+                score = result.val_aggregate_scores[idx]
+                is_best = (idx == best_idx)
+                marker = " ← BEST" if is_best else ""
+
+                # Count prompt length as proxy for complexity
+                prompt_lengths = {k: len(v) for k, v in candidate.items() if k != "_code"}
+                total_prompt_chars = sum(prompt_lengths.values())
+
+                # Check if this is a code mutation
+                has_code_change = False
+                if "_code" in candidate:
+                    import json as json_mod
+                    code_data = json_mod.loads(candidate["_code"])
+                    has_code_change = bool(code_data.get("change_request"))
+
+                print(f"  Candidate {idx}: score={score:.4f}, prompts={total_prompt_chars}chars, "
+                    f"code={'YES' if has_code_change else 'NO'}{marker}", flush=True)
+
+                if idx < 3 or is_best:  # Show details for first 3 and best
+                    for key in list(prompt_lengths.keys())[:2]:  # Show first 2 prompts
+                        preview = candidate[key][:80].replace('\n', ' ')
+                        print(f"      {key}: {preview}...", flush=True)
+            print("="*80 + "\n", flush=True)
 
         # Save best candidate artifact to winning branch
         _save_best_candidate_artifact(
@@ -314,12 +357,54 @@ def run_gepa_optimization(
             best_candidate=result.best_candidate,
         )
 
+        # Build a mock GEPAState for the callback (contains the essential data)
+        from gepa.core.state import GEPAState
+        # Create a minimal state object with the data we need
+        class FinalGEPAState:
+            """Minimal state container for callback serialization."""
+            def __init__(self, result: GEPAResult):
+                self.program_candidates = result.candidates
+                self.program_full_scores_val_set = result.val_aggregate_scores
+                self.parent_program_for_candidate = result.parents  # Note: singular form!
+                self.i = result.num_candidates - 1  # Last iteration index
+                self.total_num_evals = result.total_metric_calls or 0
+
+        final_state = FinalGEPAState(result)
+        
+        if debug:
+            # DEBUG: Print final state summary
+            print("\n" + "="*80, flush=True)
+            print("[DEBUG] Final GEPA state summary:", flush=True)
+            print(f"  Total candidates: {len(result.candidates)}", flush=True)
+            print(f"  Best candidate index: {best_idx}", flush=True)
+            print(f"  Best score: {result.val_aggregate_scores[best_idx]:.4f}", flush=True)
+            print(f"  All scores: {[f'{s:.3f}' for s in result.val_aggregate_scores[:10]]}{'...' if len(result.val_aggregate_scores) > 10 else ''}", flush=True)
+
+            # Show best candidate prompts
+            print(f"\n[DEBUG] Best candidate prompts:", flush=True)
+            for key, value in result.best_candidate.items():
+                if key != "_code":
+                    preview = value[:150] if isinstance(value, str) else str(value)[:150]
+                    print(f"  {key}: {preview}...", flush=True)
+
+            # Show parent relationships for best candidate
+            if result.parents and best_idx < len(result.parents):
+                parents = result.parents[best_idx]
+                print(f"\n[DEBUG] Best candidate parents: {parents}", flush=True)
+                if parents:
+                    for parent_idx in parents:
+                        if parent_idx is not None and parent_idx < len(result.val_aggregate_scores):
+                            parent_score = result.val_aggregate_scores[parent_idx]
+                            print(f"    Parent {parent_idx}: score={parent_score:.4f}", flush=True)
+            print("="*80 + "\n", flush=True)
+
         # Persist final results via callback
         updater.set_completed(
             best_candidate=result.best_candidate,
             best_score=result.val_aggregate_scores[best_idx],
             total_metric_calls=result.total_metric_calls,
             num_candidates=result.num_candidates,
+            gepa_state=final_state,
         )
 
         total_elapsed = time.time() - optimization_start

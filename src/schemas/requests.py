@@ -165,6 +165,15 @@ class OptimizeRequest(BaseModel):
         description="Git branch to use as the starting point for optimization",
     )
 
+    # Debug mode
+    debug_max_iterations: int | None = Field(
+        default=None,
+        description=(
+            "DEBUG: Stop optimization after this many iterations (for testing). "
+            "Recommended: 5 for quick tests. None=run until max_metric_calls."
+        ),
+    )
+
     @model_validator(mode="after")
     def check_trainset_provided(self) -> "OptimizeRequest":
         if self.trainset is None and self.trainset_path is None:
@@ -180,6 +189,7 @@ class JobStatusUpdateRequest(BaseModel):
     total_metric_calls: int | None = None
     num_candidates: int | None = None
     error: str | None = None
+    gepa_state: dict[str, Any] | None = None  # Full GEPA state on completion
 
 
 class JobProgressUpdateRequest(BaseModel):

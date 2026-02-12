@@ -146,7 +146,7 @@ Fails if system errors occur on >10% of rows OR if accuracy is 0%. Returns compr
   - Execution trace information (trace length, failed steps)
   - Failed step details with signature and error messages
   - First 5 error examples (to avoid overwhelming output)
-
+Oh
 ## Security Architecture
 - **Client-specific isolation (v2):** Execution of code will be isolated in v2. Each client should be in a separate container (e.g., client could have malicious code to steal other clients' data or secrets)
 - **Network Egress Control and whitelists:** Limit urls to allowed domains and ips set by our best practices and by the user (e.g., api.firecrawl.dev)

@@ -43,3 +43,9 @@ class JobRecord(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # GEPA State (stored on completion)
+    gepa_state: dict[str, Any] | None = None  # Full GEPAState serialized
+    program_candidates: list[dict[str, str]] | None = None  # All candidates
+    candidate_scores: list[float] | None = None  # Validation scores per candidate
+    parent_programs: list[list[int] | None] | None = None  # Parent indices for each candidate

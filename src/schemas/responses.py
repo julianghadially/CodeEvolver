@@ -86,3 +86,24 @@ class CancelCheckResponse(BaseModel):
 
     cancelled: bool
 
+
+class JobDetailedStateResponse(BaseModel):
+    """Response payload for GET /job/{job_id}/state with full GEPA state."""
+
+    job_id: str
+    status: JobStatus
+    # All program candidates from optimization
+    program_candidates: list[dict[str, str]] | None = None
+    # Validation scores for each candidate
+    candidate_scores: list[float] | None = None
+    # Parent indices for each candidate (genealogy)
+    parent_programs: list[list[int] | None] | None = None
+    # Best candidate info
+    best_candidate: dict[str, str] | None = None
+    best_score: float | None = None
+    best_idx: int | None = None
+    # Metadata
+    num_candidates: int | None = None
+    total_metric_calls: int | None = None
+    num_iterations: int | None = None
+

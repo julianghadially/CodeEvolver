@@ -11,17 +11,17 @@ The architecture follows the modal-vibe pattern:
 - Core logic lives in src/core/
 """
 
+import os
 import modal
 from modal import FilePatternMatcher
-from src.config import determine_environment
 
 # Create or lookup the Modal app
 app = modal.App("codeevolver")
 
 # Get deployment mode from environment variable
-# Set this when deploying: modal deploy modal_app.py --env APP_MODE=prod
-import os
-APP_MODE = determine_environment()
+# Set this when deploying: APP_MODE=dev modal deploy modal_app.py
+# Reads from local shell during deploy, then passed to Modal functions via env={}
+APP_MODE = os.getenv("APP_MODE", "prod")
 
 # Shared volume for git workspaces (persists across function calls)
 workspaces_volume = modal.Volume.from_name(
@@ -236,6 +236,7 @@ def run_optimization(
     subsample_size: int = 10,
     initial_branch: str = "main",
     max_valset_size: int | None = None,
+    debug_max_iterations: int | None = None,
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 
@@ -316,6 +317,7 @@ def run_optimization(
             subsample_size=subsample_size,
             initial_branch=initial_branch,
             max_valset_size=max_valset_size,
+            debug_max_iterations=debug_max_iterations,
         )
         return result
     finally:

@@ -20,6 +20,7 @@ from .schemas import (
     OptimizeRequest,
     OptimizeResponse,
     JobStatusResponse,
+    JobDetailedStateResponse,
     JobStatusUpdateRequest,
     JobProgressUpdateRequest,
     CancelCheckResponse,
@@ -176,6 +177,7 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
             decay_factor=request.decay_factor,
             code_cutoff_step=request.code_cutoff_step,
             initial_branch=request.initial_branch,
+            debug_max_iterations=request.debug_max_iterations,
         )
     except ImportError:
         # Not running on Modal — update job status to failed
@@ -212,6 +214,56 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         started_at=job.get("started_at"),
         completed_at=job.get("completed_at"),
         updated_at=job.get("updated_at"),
+    )
+
+
+@app.get("/job/{job_id}/state", response_model=JobDetailedStateResponse)
+async def get_job_detailed_state(job_id: str) -> JobDetailedStateResponse:
+    """Get detailed GEPA state for a job, including all candidates and trajectories.
+
+    This endpoint provides access to the complete optimization history:
+    - All program candidates evaluated during optimization
+    - Validation scores for each candidate
+    - Parent relationships (genealogy) between candidates
+    - Best candidate identification
+
+    Args:
+        job_id: The unique job identifier
+
+    Returns:
+        JobDetailedStateResponse with full GEPA state data
+    """
+    db = get_database()
+    job = await db.jobs.find_one({"job_id": job_id})
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    # Extract GEPA state if available
+    gepa_state = job.get("gepa_state", {})
+    program_candidates = job.get("program_candidates") or gepa_state.get("program_candidates")
+    candidate_scores = job.get("candidate_scores") or gepa_state.get("candidate_scores")
+    parent_programs = job.get("parent_programs") or gepa_state.get("parent_programs")
+
+    # Find best candidate index
+    best_idx = None
+    if candidate_scores and job.get("best_candidate"):
+        best_score = job.get("best_score")
+        if best_score is not None and best_score in candidate_scores:
+            best_idx = candidate_scores.index(best_score)
+
+    return JobDetailedStateResponse(
+        job_id=job["job_id"],
+        status=job["status"],
+        program_candidates=program_candidates,
+        candidate_scores=candidate_scores,
+        parent_programs=parent_programs,
+        best_candidate=job.get("best_candidate"),
+        best_score=job.get("best_score"),
+        best_idx=best_idx,
+        num_candidates=job.get("num_candidates"),
+        total_metric_calls=job.get("total_metric_calls"),
+        num_iterations=gepa_state.get("num_iterations"),
     )
 
 
@@ -377,6 +429,13 @@ async def internal_update_job_status(
         update["num_candidates"] = body.num_candidates
     if body.error is not None:
         update["error"] = body.error
+
+    # Save GEPA state if provided (includes all candidates, scores, parents)
+    if body.gepa_state is not None:
+        update["gepa_state"] = body.gepa_state
+        update["program_candidates"] = body.gepa_state.get("program_candidates", [])
+        update["candidate_scores"] = body.gepa_state.get("candidate_scores", [])
+        update["parent_programs"] = body.gepa_state.get("parent_programs", [])
 
     db = get_database()
     await db.jobs.update_one({"job_id": job_id}, {"$set": update})
