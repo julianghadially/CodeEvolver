@@ -63,8 +63,6 @@ def main_sync():
 
         timer_printer("SDK imports complete")
         print(f"[REFLECT] Starting reflection...")
-        print(f"[REFLECT] Workspace: {workspace}")
-        print(f"[REFLECT] Prompt (first 300 chars): {prompt_text[:300]}...")
         sys.stdout.flush()
 
         # Create helpers from utils

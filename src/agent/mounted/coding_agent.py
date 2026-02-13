@@ -75,7 +75,6 @@ def main_sync():
 
         timer_printer("SDK imports complete")
         print(f"[AGENT] Starting code mutation...")
-        print(f"[AGENT] Workspace: {workspace}")
         print(f"[AGENT] Change request: {change_request[:500]}...")
         sys.stdout.flush()
 
@@ -113,8 +112,6 @@ def main_sync():
                         for block in message.content:
                             if isinstance(block, ToolUseBlock):
                                 tool_uses.append(block.name)
-                                timer_printer(f"Tool: {block.name}")
-                                print(f"[AGENT] Tool: {block.name}")
                                 if block.name in ["Write", "Edit"]:
                                     file_path = block.input.get("file_path", "unknown")
                                     print(f"[AGENT]   -> {file_path}")
@@ -125,7 +122,6 @@ def main_sync():
                         sys.stdout.flush()
 
                     elif isinstance(message, ResultMessage):
-                        timer_printer("Agent result received")
                         # Signal done immediately so prompt_stream can exit
                         done_event.set()
 
@@ -160,7 +156,6 @@ def main_sync():
         changes_made = anyio.run(run_agent)
 
         # Verify changes with git
-        timer_printer("Verifying git changes")
         has_changes, changed_files = verify_changes_with_git(workspace)
 
         if has_changes:

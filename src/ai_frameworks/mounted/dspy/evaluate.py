@@ -32,6 +32,7 @@ except ImportError as _import_err:
     raise ImportError(_diag) from _import_err
 
 from . import build_program, load_import_path, signature_key
+from .debug import log_debug_info
 from sandbox.mounted.git_commands import checkout_branch_if_needed
 from sandbox.mounted.utils import get_logger, make_error_result, make_success_result
 
@@ -97,22 +98,14 @@ def handle(cmd: dict, workspace: str) -> dict:
     # Use module-level dspy imports (imported at top before any workspace manipulation)
     Example = DspyExample
 
-    log.info(f"DSPy version: {dspy.__version__}")
-
-    # Configure DSPy with the specified LM
-    log.info(f"Configuring DSPy with LM: {program_lm}")
     lm = dspy.LM(program_lm)
     dspy.configure(lm=lm)
-    log.info(f"Program: {program_path}, Metric: {metric_path}")
-    log.info(f"Batch size: {len(batch)}, capture_traces: {capture_traces}, num_threads: {num_threads}")
-
     # Load metric function
     metric_fn = load_import_path(workspace, metric_path)
-    log.info(f"Loaded metric: {metric_fn}")
 
     # Build program with candidate instructions
     program = build_program(workspace, program_path, saved_json, candidate)
-    log.info(f"Built program: {type(program).__name__}")
+    
 
     # Convert batch dicts to dspy.Example
     examples = []
@@ -121,8 +114,7 @@ def handle(cmd: dict, workspace: str) -> dict:
         if input_keys:
             ex = ex.with_inputs(*input_keys)
         examples.append(ex)
-    log.info(f"Converted {len(examples)} examples")
-
+    
     if capture_traces:
         log.info("Running evaluation with traces...")
         # Route to legacy implementation for older DSPy versions
@@ -135,7 +127,7 @@ def handle(cmd: dict, workspace: str) -> dict:
                 program, metric_fn, examples, failure_score, num_threads
             )
     else:
-        log.info("Running simple evaluation...")
+        log.info("Running simple evaluation without traces...")
         return _evaluate_simple(
             program, metric_fn, examples, failure_score, num_threads
         )
@@ -169,14 +161,11 @@ def _evaluate_simple(program, metric_fn, examples, failure_score, num_threads) -
         return_all_scores=True,
     )
 
-    log.info("Running evaluator...")
     result = evaluator(program)
-    log.info(f"Evaluator returned: type={type(result)}, has_results={hasattr(result, 'results')}")
-
+    
     # DSPy 3.0+: result.results is a list of (example, prediction, score) tuples
     results_list = result.results
-    log.info(f"results_list: len={len(results_list)}")
-
+    
     outputs = []
     scores = []
     for _example, pred, score in results_list:
@@ -189,7 +178,6 @@ def _evaluate_simple(program, metric_fn, examples, failure_score, num_threads) -
         except (TypeError, ValueError):
             scores.append(failure_score)
 
-    log.info(f"Simple evaluation complete: {len(outputs)} outputs")
     return make_success_result(
         {"outputs": outputs, "scores": scores},
         logs=log.get_logs()
