@@ -1,4 +1,4 @@
-from src.sandbox.mounted.utils import timer_printer
+from sandbox.mounted.utils import timer_printer
 
 def create_user_proxy(prefix: str = "AGENT", handle_questions: bool = True):
     """Create a user proxy callback for autonomous agent execution.

@@ -32,7 +32,6 @@ except ImportError as _import_err:
     raise ImportError(_diag) from _import_err
 
 from . import build_program, load_import_path, signature_key
-from .debug import log_debug_info
 from sandbox.mounted.git_commands import checkout_branch_if_needed
 from sandbox.mounted.utils import get_logger, make_error_result, make_success_result
 

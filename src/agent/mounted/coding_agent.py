@@ -24,7 +24,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*was never 
 
 # Import utilities from sandbox (mounted at /app/sandbox/, /app/agent/)
 sys.path.insert(0, "/app")
-from src.sandbox.mounted.utils import timer_printer, verify_changes_with_git
+from sandbox.mounted.utils import timer_printer, verify_changes_with_git
 from agent.mounted.environment_setup import (
     setup_sandbox_env,
     verify_claude_cli,
