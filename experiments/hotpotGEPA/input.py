@@ -41,16 +41,12 @@ The following external services are available with API keys already configured i
 - **Python usage**: HTTP requests to `https://google.serper.dev/search`
 
 ## Ideas for Optimization
-- Consider adding web search capability to verify claims against current information
-- Web scraping could help retrieve source documents for fact verification
-- These services can augment the context pipeline with real-time data
 - Consider different search architectures (iterative search, Evidence workspace, Searching specific websites (e.g., Wikipedia))
-- Consider different search architectures (query-only; query + rerank per query; query + rerank after all queries; increase or decrease k, etc.)
+- Consider increasing the number of k retrieved
 - Consider different context retrieval pipelines, including query + rerankers (pairwise rerankers, list rerankers, score-based reranking, sliding-window rerankers, etc.)
-- Text reranker paper here on pairwise: https://arxiv.org/abs/2306.17563
-- Utility-oriented rerankers: https://arxiv.org/abs/2110.09059
-- LLM enhanced rerankers: https://arxiv.org/html/2406.12433v2
-- FIRST Faster Improved Listwise Reranking with Single Token Decoding rerankers: https://arxiv.org/abs/2406.15657
+- Consider removing question summaries, and providing raw evidence instead (This performed well in a prior GEPA run)
+- Consider replacing Generate Answer with Extract Answer - i.e., extracting the exact short factoid answer from the passages (This performed well in a prior GEPA run)
+- Consider adding chain of thought reasoning - this performed well in a prior GEPA run
 """
 
 OPTIMIZE_CONFIG = {

@@ -8,6 +8,7 @@ by a job-scoped JWT.
 import httpx
 
 from gepa.core.state import GEPAState
+from modal.app import P
 
 from .gepa_state import GEPAStateRecord
 
@@ -54,6 +55,8 @@ class CallbackJobUpdater:
         # Serialize GEPA state if provided
         if gepa_state is not None:
             payload["gepa_state"] = gepa_state.to_dict()
+        else:
+            print("GEPA state is None during CallbackJobUpdater.set_completed")
 
         with httpx.Client(timeout=60) as client:
             client.put(

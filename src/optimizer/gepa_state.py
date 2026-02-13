@@ -52,10 +52,11 @@ class GEPAStateRecord:
         Returns:
             GEPAStateRecord with current state snapshot.
         """
+        parent_programs=getattr(gepa_state, "parent_program_for_candidate",  getattr(gepa_state, "parent_program_for_candidates", []))
         return cls(
             program_candidates=gepa_state.program_candidates,
             candidate_scores=gepa_state.program_full_scores_val_set,
-            parent_programs=gepa_state.parent_program_for_candidates,
+            parent_programs=parent_programs,
             num_iterations=gepa_state.i + 1,
             total_evals=gepa_state.total_num_evals,
         )
