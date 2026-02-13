@@ -4,6 +4,7 @@ Extracts initial instructions from all predictors in a DSPy module.
 """
 
 from . import build_program
+from sandbox.mounted.git_commands import checkout_branch_if_needed
 from sandbox.mounted.utils import get_logger, make_success_result
 
 log = get_logger("build_seed")
@@ -16,6 +17,7 @@ def handle(cmd: dict, workspace: str) -> dict:
         cmd: Command dict with keys:
             - program: Dotted import path to DSPy module class
             - saved_program_json_path: Optional path to program.json
+            - git_branch: Optional branch to checkout before building (for code mutations)
         workspace: Path to cloned client repository
 
     Returns:
@@ -23,6 +25,11 @@ def handle(cmd: dict, workspace: str) -> dict:
     """
     program_path = cmd["program"]
     saved_json = cmd.get("saved_program_json_path")
+    git_branch = cmd.get("git_branch")
+
+    # Checkout the specified branch if provided (needed for code-mutated candidates)
+    if git_branch:
+        checkout_branch_if_needed(workspace, git_branch, log)
 
     log.info(f"Building program: {program_path}")
     program = build_program(workspace, program_path, saved_json)

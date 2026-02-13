@@ -9,6 +9,8 @@ import httpx
 
 from gepa.core.state import GEPAState
 
+from .gepa_state import GEPAStateRecord
+
 
 class CallbackJobUpdater:
     """Update job status via HTTP callbacks to the FastAPI internal API.
@@ -39,7 +41,7 @@ class CallbackJobUpdater:
         best_score: float,
         total_metric_calls: int,
         num_candidates: int,
-        gepa_state: GEPAState | None = None,
+        gepa_state: GEPAStateRecord | None = None,
     ) -> None:
         payload = {
             "status": "completed",
@@ -51,13 +53,7 @@ class CallbackJobUpdater:
 
         # Serialize GEPA state if provided
         if gepa_state is not None:
-            payload["gepa_state"] = {
-                "program_candidates": gepa_state.program_candidates,
-                "candidate_scores": gepa_state.program_full_scores_val_set,
-                "parent_programs": gepa_state.parent_program_for_candidates,
-                "num_iterations": gepa_state.i + 1,
-                "total_evals": gepa_state.total_num_evals,
-            }
+            payload["gepa_state"] = gepa_state.to_dict()
 
         with httpx.Client(timeout=60) as client:
             client.put(
@@ -141,17 +137,15 @@ class CallbackProgressTracker:
                     print(f"[DEBUG] Best score so far: {best_score:.4f}", flush=True)
                     return True  # Stop optimization
 
+            # Convert live GEPA state to serializable record
+            state_record = GEPAStateRecord.from_gepa_state(gepa_state)
+            progress_payload = state_record.create_progress_payload(best_score, best_candidate)
+
             with httpx.Client(timeout=60) as client:
-                # Report progress
+                # Report progress with full GEPA state
                 client.put(
                     self._progress_url(),
-                    json={
-                        "current_iteration": gepa_state.i + 1,
-                        "best_score": best_score,
-                        "best_candidate": best_candidate,
-                        "total_metric_calls": gepa_state.total_num_evals,
-                        "num_candidates": len(gepa_state.program_candidates),
-                    },
+                    json=progress_payload,
                     headers=self.headers,
                 )
 

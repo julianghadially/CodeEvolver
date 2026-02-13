@@ -31,6 +31,9 @@ from .services import GitService, GitHubAppService
 from .services.jwt_service import mint_job_token, validate_job_token
 from modal_app import run_optimization
 
+# Import test routes
+from .routes.test_routes import router as test_router
+
 # Check if running on Modal (sandbox execution enabled)
 USE_SANDBOX = os.getenv("CODEEVOLVER_USE_SANDBOX", "false").lower() == "true"
 
@@ -40,6 +43,9 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+
+# Register test routes
+app.include_router(test_router)
 
 
 @app.post("/connect-git", response_model=ConnectGitResponse)

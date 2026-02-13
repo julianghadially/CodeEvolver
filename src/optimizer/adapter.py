@@ -178,10 +178,23 @@ class CodeEvolverDSPyAdapter:
 
         for component_name in components_to_update:
             if component_name == CODE_COMPONENT_KEY:
-                # Code mutation returns _code with git_branch inside
-                new_texts[CODE_COMPONENT_KEY] = self._propose_code_mutation(
-                    candidate, reflective_dataset
+                # Code mutation returns updated _code component
+                new_code_text = self._propose_code_mutation(candidate, reflective_dataset)
+
+                # After code mutation, rebuild entire candidate to sync module structure
+                code_data = json.loads(new_code_text)
+                new_git_branch = code_data["git_branch"]
+
+                # Get synchronized candidate with all current modules
+                synchronized_candidate = self._rebuild_candidate_after_code_mutation(
+                    old_candidate=candidate,
+                    new_git_branch=new_git_branch,
+                    new_code_component=new_code_text,
                 )
+
+                # Return ALL keys (not just _code) so GEPA updates the entire candidate
+                # This includes: _code + all current prompt components
+                new_texts.update(synchronized_candidate)
             else:
                 new_texts[component_name] = self._propose_prompt_mutation(
                     component_name, candidate, reflective_dataset
@@ -583,6 +596,77 @@ class CodeEvolverDSPyAdapter:
             "change_request": proposed_change,
             "last_change_summary": result.get("output", "Change applied")[:500]
         })
+
+    def _rebuild_candidate_after_code_mutation(
+        self,
+        old_candidate: dict[str, str],
+        new_git_branch: str,
+        new_code_component: str,
+    ) -> dict[str, str]:
+        """Rebuild candidate after code mutation to sync with new module structure.
+
+        After a code mutation changes the DSPy program structure (adds/removes modules),
+        this rebuilds the candidate JSON to match the new code while preserving
+        optimized prompts for modules that still exist.
+
+        Args:
+            old_candidate: Candidate before code mutation
+            new_git_branch: Git branch with mutated code
+            new_code_component: Updated _code JSON string
+
+        Returns:
+            Complete synchronized candidate with:
+            - _code: Updated with new git_branch
+            - Existing modules: Preserved prompts (keep optimizations)
+            - New modules: Default prompts from code (enable future optimization)
+            - Removed modules: Excluded (prevent failed mutations)
+        """
+        print(f"[ADAPTER] Rebuilding candidate after code mutation on {new_git_branch}", flush=True)
+
+        # Extract current module structure from the new branch
+        result = self._sandbox.exec_prebuilt(
+            command={
+                "command": "build_seed_candidate",
+                "program": self._get_parent_module_path_from_codeevolver_md(),
+                "saved_program_json_path": self.saved_program_json_path,
+                "git_branch": new_git_branch,  # Use the new branch
+            }
+        )
+
+        if not result.get("success"):
+            raise RuntimeError(f"Failed to build seed candidate on new branch: {result.get('error')}")
+
+        new_seed = result["candidate"]  # Dict of current module names -> default instructions
+        old_prompts = self._get_prompt_texts(old_candidate)  # Exclude _code
+
+        # Build synchronized candidate
+        synchronized_candidate = {CODE_COMPONENT_KEY: new_code_component}
+
+        added_count = 0
+        preserved_count = 0
+        removed_count = 0
+
+        for module_name, default_instruction in new_seed.items():
+            if module_name in old_prompts:
+                # Module exists in both old and new → preserve optimized prompt
+                synchronized_candidate[module_name] = old_prompts[module_name]
+                preserved_count += 1
+                print(f"[ADAPTER] Preserved prompt for existing module: {module_name}", flush=True)
+            else:
+                # New module created by code mutation → use default prompt
+                synchronized_candidate[module_name] = default_instruction
+                added_count += 1
+                print(f"[ADAPTER] Added new module with default prompt: {module_name}", flush=True)
+
+        # Identify removed modules (existed in old but not in new)
+        removed_modules = set(old_prompts.keys()) - set(new_seed.keys())
+        removed_count = len(removed_modules)
+        if removed_modules:
+            print(f"[ADAPTER] Removed {removed_count} modules: {removed_modules}", flush=True)
+
+        print(f"[ADAPTER] Candidate sync complete: {preserved_count} preserved, {added_count} added, {removed_count} removed", flush=True)
+
+        return synchronized_candidate
 
     def _create_mutation_branch(self, parent_branch: str) -> str:
         """Checkout parent branch and create a new branch for mutation.

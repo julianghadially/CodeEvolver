@@ -1,4 +1,6 @@
 def get_debug_python_command(workspace):
+    import os
+    import subprocess
     """Return bash command string to check venv/dspy existence before running Python."""
     return (
         f"echo '[VENV DEBUG] Checking venv before master_script.py...' && "
@@ -65,6 +67,97 @@ def get_debug_env_info():
         "path_env_start": os.environ.get("PATH", "NOT SET")[:150],
     }
     return _debug_info
+
+def get_foler_structure_debug(logger):
+    import sys
+    import subprocess
+    # DEBUG: Log directory structure to understand the sandbox environment
+    log = logger
+    log.info("=== SANDBOX DIRECTORY STRUCTURE DEBUG ===")
+
+    log.info("Contents of /app/:")
+    try:
+        app_contents = subprocess.run(["ls", "-la", "/app/"], capture_output=True, text=True, timeout=5)
+        log.info(app_contents.stdout)
+    except Exception as e:
+        log.info(f"Error listing /app/: {e}")
+
+    log.info("Contents of /workspace/:")
+    try:
+        workspace_contents = subprocess.run(["ls", "-la", "/workspace/"], capture_output=True, text=True, timeout=5)
+        log.info(workspace_contents.stdout)
+    except Exception as e:
+        log.info(f"Error listing /workspace/: {e}")
+
+    log.info("Looking for 'src' directories (max depth 3):")
+    try:
+        find_src = subprocess.run(
+            ["find", "/app", "/workspace", "-maxdepth", "3", "-type", "d", "-name", "src"],
+            capture_output=True, text=True, timeout=10
+        )
+        log.info(f"Found src dirs:\n{find_src.stdout if find_src.stdout else '(none)'}")
+    except Exception as e:
+        log.info(f"Error finding src: {e}")
+
+    log.info("Looking for 'sandbox' directories (max depth 3):")
+    try:
+        find_sandbox = subprocess.run(
+            ["find", "/app", "-maxdepth", "3", "-type", "d", "-name", "sandbox"],
+            capture_output=True, text=True, timeout=10
+        )
+        log.info(f"Found sandbox dirs:\n{find_sandbox.stdout if find_sandbox.stdout else '(none)'}")
+    except Exception as e:
+        log.info(f"Error finding sandbox: {e}")
+
+    # Check which git branch we're on (CRITICAL: should be 'main', NOT 'simple')
+    log.info("Checking git branch:")
+    try:
+        branch_check = subprocess.run(
+            ["git", "-C", "/workspace", "branch", "--show-current"],
+            capture_output=True, text=True, timeout=5
+        )
+        current_branch = branch_check.stdout.strip()
+        log.info(f"Current git branch: '{current_branch}'")
+
+        if current_branch == "simple":
+            log.info("WARNING: On 'simple' branch - research_agent_module.py won't exist!")
+        elif current_branch == "main":
+            log.info("✓ On 'main' branch - research_agent_module.py should exist")
+        else:
+            log.info(f"Note: On unexpected branch '{current_branch}'")
+
+        # Show recent commits to verify
+        log_check = subprocess.run(
+            ["git", "-C", "/workspace", "log", "--oneline", "-n", "3"],
+            capture_output=True, text=True, timeout=5
+        )
+        log.info(f"Recent commits:\n{log_check.stdout}")
+    except Exception as e:
+        log.info(f"Error checking git branch: {e}")
+
+    # Check if research_agent_module.py exists (critical for factchecker)
+    log.info("Checking for research_agent_module.py:")
+    try:
+        ls_modules = subprocess.run(
+            ["ls", "-la", "/workspace/src/factchecker/modules/"],
+            capture_output=True, text=True, timeout=5
+        )
+        log.info(f"Contents of /workspace/src/factchecker/modules/:\n{ls_modules.stdout}")
+
+        # Specifically check for the file
+        module_check = subprocess.run(
+            ["test", "-f", "/workspace/src/factchecker/modules/research_agent_module.py"],
+            capture_output=True, text=True, timeout=5
+        )
+        if module_check.returncode == 0:
+            log.info("✓ research_agent_module.py EXISTS")
+        else:
+            log.info("✗ research_agent_module.py MISSING")
+    except Exception as e:
+        log.info(f"Error checking modules directory: {e}")
+
+    log.info(f"Current sys.path: {sys.path}")
+    log.info("=== END DIRECTORY STRUCTURE DEBUG ===")
 
 def _log_environment_debug(logger):
     import sys

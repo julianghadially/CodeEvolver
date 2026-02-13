@@ -19,6 +19,7 @@ from .responses import (
     ChangeResponse,
     OptimizeResponse,
     JobStatusResponse,
+    JobDetailedStateResponse,
     CancelCheckResponse,
 )
 from .db_schemas import (
@@ -45,6 +46,7 @@ __all__ = [
     "OptimizeRequest",
     "OptimizeResponse",
     "JobStatusResponse",
+    "JobDetailedStateResponse",
     "JobStatusUpdateRequest",
     "JobProgressUpdateRequest",
     "CancelCheckResponse",

@@ -355,3 +355,185 @@ class TestGEPAOptimization:
             print(f"\nPASSED: Mutated branch has {num_changed_lines} changed lines")
             print(f"  Branch: {mutated_branch}")
             print(f"  Diff preview (first 500 chars):\n{full_diff[:500]}")
+
+    @pytest.mark.asyncio
+    async def test_factchecker_module_rename(self, modal_url: str):
+        """Test refactoring: rename ResearchAgentModule to ResearchAgentModuleTest.
+
+        This test verifies the coding agent can perform a systematic refactoring:
+        1. Create a new branch
+        2. Rename research_agent_module.py to research_agent_module_test.py
+        3. Rename the class ResearchAgentModule to ResearchAgentModuleTest
+        4. Update all references (imports, instantiation, etc.)
+
+        This tests the agent's ability to make coordinated changes across multiple files.
+        """
+        import asyncio
+
+        # Configuration for this specific refactoring test
+        refactor_config = {
+            "repo_url": "https://github.com/julianghadially/FactChecker",
+            "program": "src.factchecker.modules.fact_checker_pipeline.FactCheckerPipeline",
+            "metric": "src.codeevolver.metric.metric",
+            "trainset_path": "data/FactChecker_news_claims_normalized.csv",
+            "input_keys": ["statement"],
+            "reflection_lm": "openai/gpt-5-mini",
+            "max_metric_calls": 10,  # Minimal - just verify it works after refactoring
+            "num_threads": 1,
+            "seed": 42,
+            "initial_branch": "main",
+            "additional_instructions": """
+## Refactoring Task
+
+Perform the following systematic refactoring:
+
+1. **Rename file**: `src/factchecker/modules/research_agent_module.py` → `research_agent_module_test.py`
+2. **Rename class**: `ResearchAgentModule` → `ResearchAgentModuleTest`
+3. **Update all references**:
+   - In `src/factchecker/modules/fact_checker_pipeline.py`:
+     - Import: `from .research_agent_module_test import ResearchAgentModuleTest`
+     - Instantiation: `self.research_agent = ResearchAgentModuleTest(...)`
+     - Signature reference: Update any type hints or docstrings
+   - In `src/factchecker/modules/__init__.py`:
+     - Export: `from .research_agent_module_test import ResearchAgentModuleTest`
+     - Add to `__all__` list
+4. **Search and replace**: Find all instances of `ResearchAgentModule(` and replace with `ResearchAgentModuleTest(`
+
+Ensure all imports and references are updated consistently.
+""",
+            # Stop after just 1 code mutation
+            "code_cutoff_step": 1,
+        }
+
+        print(f"\n{'='*60}")
+        print("REFACTORING TEST: Rename ResearchAgentModule")
+        print(f"{'='*60}\n")
+
+        # Submit optimization job
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(f"{modal_url}/optimize", json=refactor_config)
+            assert response.status_code == 200, f"POST /optimize failed: {response.text}"
+
+            result = response.json()
+            job_id = result["job_id"]
+            print(f"Started refactoring job: {job_id}\n")
+
+            # Poll for completion (shorter timeout since we only need 1 code mutation)
+            start_time = time.time()
+            max_wait = 600  # 10 minutes
+            final_status = None
+
+            while time.time() - start_time < max_wait:
+                job_response = await client.get(f"{modal_url}/job/{job_id}")
+                assert job_response.status_code == 200
+
+                status = job_response.json()
+                state = status["status"]
+                iteration = status.get("current_iteration", 0)
+
+                elapsed = int(time.time() - start_time)
+                print(f"  [{elapsed:>4d}s] status={state}  iteration={iteration}")
+
+                if state == "failed":
+                    pytest.fail(f"Refactoring job failed: {status.get('error')}")
+
+                if state == "completed":
+                    final_status = status
+                    break
+
+                # For this test, we can stop after the first code mutation
+                # (iteration 0 is seed, iteration 1 should be our code mutation)
+                if iteration >= 2:
+                    final_status = status
+                    break
+
+                await asyncio.sleep(10)
+
+            assert final_status is not None, f"Refactoring timed out after {max_wait}s"
+
+            # Get the mutated branch
+            best_candidate = final_status.get("best_candidate")
+            assert best_candidate is not None, "No best_candidate found"
+
+            code_str = best_candidate.get("_code")
+            assert code_str is not None, "_code not found in candidate"
+
+            code_data = json.loads(code_str)
+            mutated_branch = code_data.get("git_branch")
+            assert mutated_branch is not None, "git_branch not found in _code"
+
+            print(f"\nRefactored branch: {mutated_branch}")
+
+        # Verify the changes in git
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Clone and checkout the refactored branch
+            clone_result = subprocess.run(
+                ["git", "clone", "--depth", "10", "--branch", "main",
+                 refactor_config["repo_url"], tmpdir],
+                capture_output=True,
+                text=True,
+            )
+            assert clone_result.returncode == 0, f"Clone failed: {clone_result.stderr}"
+
+            # Fetch the mutated branch
+            subprocess.run(
+                ["git", "fetch", "origin", mutated_branch],
+                cwd=tmpdir,
+                capture_output=True,
+                text=True,
+            )
+
+            # Checkout the mutated branch
+            checkout_result = subprocess.run(
+                ["git", "checkout", mutated_branch],
+                cwd=tmpdir,
+                capture_output=True,
+                text=True,
+            )
+            assert checkout_result.returncode == 0, f"Checkout failed: {checkout_result.stderr}"
+
+            # Verify the changes
+            print("\nVerifying refactoring changes:")
+
+            # 1. Check that research_agent_module_test.py exists
+            test_module_path = os.path.join(tmpdir, "src/factchecker/modules/research_agent_module_test.py")
+            assert os.path.exists(test_module_path), \
+                "research_agent_module_test.py not found"
+            print("  ✓ research_agent_module_test.py exists")
+
+            # 2. Check that the class is renamed
+            with open(test_module_path, "r") as f:
+                test_module_content = f.read()
+            assert "class ResearchAgentModuleTest" in test_module_content, \
+                "Class not renamed to ResearchAgentModuleTest"
+            print("  ✓ Class renamed to ResearchAgentModuleTest")
+
+            # 3. Check that fact_checker_pipeline.py imports the new module
+            pipeline_path = os.path.join(tmpdir, "src/factchecker/modules/fact_checker_pipeline.py")
+            if os.path.exists(pipeline_path):
+                with open(pipeline_path, "r") as f:
+                    pipeline_content = f.read()
+                assert "ResearchAgentModuleTest" in pipeline_content, \
+                    "fact_checker_pipeline.py doesn't reference ResearchAgentModuleTest"
+                print("  ✓ fact_checker_pipeline.py updated")
+
+            # 4. Check that __init__.py exports the new module
+            init_path = os.path.join(tmpdir, "src/factchecker/modules/__init__.py")
+            if os.path.exists(init_path):
+                with open(init_path, "r") as f:
+                    init_content = f.read()
+                assert "ResearchAgentModuleTest" in init_content, \
+                    "__init__.py doesn't export ResearchAgentModuleTest"
+                print("  ✓ __init__.py updated")
+
+            # 5. Check that old references are removed (optional - may still exist)
+            # We'll just warn if they exist rather than fail
+            old_module_path = os.path.join(tmpdir, "src/factchecker/modules/research_agent_module.py")
+            if os.path.exists(old_module_path):
+                print("  ⚠ Warning: Old research_agent_module.py still exists (not removed)")
+            else:
+                print("  ✓ Old research_agent_module.py removed")
+
+            print(f"\nPASSED: Refactoring completed successfully")
+            print(f"  Branch: {mutated_branch}")
+            print(f"  Elapsed: {int(time.time() - start_time)}s")

@@ -199,7 +199,7 @@ def evaluate(self, batch, candidate, capture_traces=False):
 
 | Repository | Role |
 |------------|------|
-| **GEPA** (github.com/gepa-ai/gepa) | Optimization algorithm and execution orchestration, State tracking, adapter protocol |
+| **GEPA-CodeEvolver** (github.com/julianghadially/GEPA-CodeEvolver) | Optimization algorithm and execution orchestration, State tracking, adapter protocol. Note: There is one line of modification to allow the proposer to access new candidates |
 | **CodeEvolver** | Execution service, CodeEvolverAdapter implementation, Reflection agent with code read tool implementations, sandbox, git, etc. |
 
 ### Optimization jobs to be done 
@@ -230,7 +230,7 @@ Implements gepa.optimizer and runs in /optimize at API in CE.
 
 *CE = CodeEvolver*
 *GEPA = gepa-ai/gepa, no fork no mod
-*GEPAmod = GEPA-CodeEvolver*
+*GEPAmod = GEPA-CodeEvolver* <- modified to allow new candidate program key
 
 ### GEPA Changes:
 
@@ -303,6 +303,7 @@ The `_code` component participates in GEPA's round-robin selection. When selecte
         1. Reflection agent (Read/Grep/Glob tools) analyzes feedback and proposes a change
         2. Coding agent (Read/Write/Edit/Bash tools) executes the change on a new branch
     - When `_code` is mutated, also updates `git_branch` to the new branch name
+    - After `_code` is mutated, propose_new_texts calls a synchronization of modules via build_seed_candidate
 - Branch handling: checkout parent branch → create new branch (`codeevolver-{timestamp}-{uuid}`) → execute mutation
 - Instead of inheriting from GEPAAdapter, the adapter conforms via duck typing
 

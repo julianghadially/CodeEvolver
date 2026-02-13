@@ -19,6 +19,8 @@ from gepa import optimize as gepa_optimize
 from gepa.core.result import GEPAResult
 from gepa.strategies.batch_sampler import EpochShuffledBatchSampler
 
+from .gepa_state import GEPAStateRecord
+
 from .adapter import CodeEvolverDSPyAdapter
 from .callback import CallbackJobUpdater, CallbackProgressTracker
 from .component_selector import CodeFrequencyComponentSelector
@@ -357,19 +359,8 @@ def run_gepa_optimization(
             best_candidate=result.best_candidate,
         )
 
-        # Build a mock GEPAState for the callback (contains the essential data)
-        from gepa.core.state import GEPAState
-        # Create a minimal state object with the data we need
-        class FinalGEPAState:
-            """Minimal state container for callback serialization."""
-            def __init__(self, result: GEPAResult):
-                self.program_candidates = result.candidates
-                self.program_full_scores_val_set = result.val_aggregate_scores
-                self.parent_program_for_candidate = result.parents  # Note: singular form!
-                self.i = result.num_candidates - 1  # Last iteration index
-                self.total_num_evals = result.total_metric_calls or 0
-
-        final_state = FinalGEPAState(result)
+        # Create a serializable state record from the final result
+        final_state = GEPAStateRecord.from_gepa_result(result)
         
         if debug:
             # DEBUG: Print final state summary

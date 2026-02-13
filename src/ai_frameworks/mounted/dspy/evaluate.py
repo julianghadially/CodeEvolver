@@ -32,6 +32,7 @@ except ImportError as _import_err:
     raise ImportError(_diag) from _import_err
 
 from . import build_program, load_import_path, signature_key
+from sandbox.mounted.git_commands import checkout_branch_if_needed
 from sandbox.mounted.utils import get_logger, make_error_result, make_success_result
 
 log = get_logger("evaluate")
@@ -77,10 +78,6 @@ def handle(cmd: dict, workspace: str) -> dict:
     Returns:
         Dict with 'success', 'outputs', 'scores', and optionally 'trajectories'
     """
-    import importlib
-    import subprocess
-    import sys
-
     program_path = cmd["program"]
     metric_path = cmd["metric"]
     saved_json = cmd.get("saved_program_json_path")
@@ -95,29 +92,7 @@ def handle(cmd: dict, workspace: str) -> dict:
 
     # Checkout the specified branch if provided (needed for code-mutated candidates)
     if git_branch:
-        log.info(f"Checking out branch: {git_branch}")
-        result = subprocess.run(
-            ["git", "checkout", git_branch],
-            cwd=workspace,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            log.warn(f"Failed to checkout branch {git_branch}: {result.stderr}")
-        else:
-            log.info(f"Successfully checked out branch: {git_branch}")
-
-        # Clear workspace modules from sys.modules to force reimport from new branch.
-        # Only clear user code modules (src.*), NOT external packages like dspy.
-        # Note: We intentionally do NOT call importlib.invalidate_caches() as it
-        # corrupts dspy's module locators over repeated invocations.
-        workspace_modules = [
-            name for name in list(sys.modules.keys())
-            if name.startswith("src.") or name == "src"
-        ]
-        for mod_name in workspace_modules:
-            del sys.modules[mod_name]
-            log.info(f"Cleared cached module: {mod_name}")
+        checkout_branch_if_needed(workspace, git_branch, log)
 
     # Use module-level dspy imports (imported at top before any workspace manipulation)
     Example = DspyExample

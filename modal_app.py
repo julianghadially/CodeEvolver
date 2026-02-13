@@ -177,6 +177,7 @@ def execute_change_request(
     finally:
         sandbox.stop()
 
+
 # Image for GEPA optimization orchestrator (litellm, gepa — NO dspy).
 # DSPy and client deps are installed inside the eval sandbox instead.
 # DB drivers (pymongo/motor) are NOT needed here — progress is reported via HTTP callbacks.
@@ -190,11 +191,83 @@ gepa_image = (
         "httpx>=0.27.0",
         "pyjwt[cryptography]>=2.8.0",
         "tqdm>=4.66.1",
-        "gepa>=0.0.26",
+        # Install custom GEPA with CodeEvolver modifications from GitHub
+        "git+https://github.com/julianghadially/GEPA-CodeEvolver.git@main",
     )
     .add_local_dir(".", remote_path="/app", ignore=FilePatternMatcher.from_file(".modalignore"),)
 )
 
+
+# ---------------------------------------------------------------------------
+# Test Functions
+# ---------------------------------------------------------------------------
+# Modal functions for component testing
+# Implementation code lives in src/test_functions.py for reusability
+
+@app.function(
+    image=gepa_image,
+    volumes={"/workspaces": workspaces_volume},
+    secrets=[modal.Secret.from_name("codeevolver-worker-secrets")],
+    env={"APP_MODE": APP_MODE},  # Set environment mode (dev/prod)
+    timeout=43200,  # 12 hours - KEEP IN SYNC with src/config.py gepa_job_timeout
+    cpu=4,
+    memory=8192,
+    nonpreemptible=False,  # Prevent mid-optimization restarts (3x CPU/memory cost)
+)
+def test_build_seed_candidate(
+    repo_url: str,
+    program: str,
+    initial_branch: str = "main",
+    saved_program_json_path: str | None = None,
+    installation_id: int | None = None,
+    refactor_files: dict[str, str] | None = None,
+    refactor_classes: dict[str, str] | None = None,
+) -> dict:
+    """Test build_seed_candidate using GEPASandbox (production-like environment).
+
+    Uses gepa_image because GEPASandbox imports require the gepa package.
+    The actual DSPy test execution happens inside the GEPASandbox (sandbox_image).
+
+    This creates a GEPASandbox with the client's repository and calls
+    exec_prebuilt() to run build_seed_candidate inside the sandbox.
+    This mirrors the production environment exactly and avoids import conflicts.
+
+    Args:
+        repo_url: Git repository URL
+        program: Dotted import path to DSPy module
+        initial_branch: Branch to clone
+        saved_program_json_path: Optional path to program.json
+        installation_id: GitHub App installation ID for private repos
+        refactor_files: Optional dict of file renames {'old_path': 'new_path'}
+        refactor_classes: Optional dict of class renames {'OldClass': 'NewClass'}
+
+    Returns:
+        Dict with 'success', 'candidate', 'num_predictors', 'predictor_names', 'error', 'logs'
+    """
+    import os
+    import sys
+
+    if "/app" not in sys.path:
+        sys.path.append("/app")
+    os.chdir("/app")
+
+    from src.test_functions import test_build_seed_candidate_impl
+
+    return test_build_seed_candidate_impl(
+        repo_url=repo_url,
+        program=program,
+        initial_branch=initial_branch,
+        saved_program_json_path=saved_program_json_path,
+        installation_id=installation_id,
+        refactor_files=refactor_files,
+        refactor_classes=refactor_classes,
+        app_for_sandbox=app,  # Pass Modal app for sandbox creation
+    )
+
+
+# ---------------------------------------------------------------------------
+# GEPA Optimization
+# ---------------------------------------------------------------------------
 
 # NOTE: timeout must match settings.gepa_job_timeout in src/config.py
 # Decorator values are evaluated at import time, so we can't use settings here

@@ -36,4 +36,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "unit: marks tests as unit tests (fast, isolated component tests)",
 ]

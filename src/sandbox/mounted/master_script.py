@@ -12,7 +12,12 @@ import argparse
 import json
 import sys
 
-from sandbox.mounted.debug_env import _log_environment_debug
+# Add /app to sys.path for sandbox imports
+# Sandbox structure: /app/sandbox/mounted/, /app/ai_frameworks/mounted/, etc.
+if "/app" not in sys.path:
+    sys.path.insert(0, "/app")
+
+from sandbox.mounted.debug_env import _log_environment_debug, get_foler_structure_debug
 from sandbox.mounted.utils import get_logger, make_error_result
 
 # Command handlers are imported dynamically based on command type
@@ -52,6 +57,8 @@ def main():
     parser.add_argument("--workspace", required=True, help="Path to cloned repo")
     parser.add_argument("--command-file", required=True, help="Path to JSON command file")
     args = parser.parse_args()
+
+    get_foler_structure_debug(log)
 
     # Read command file
     with open(args.command_file) as f:
