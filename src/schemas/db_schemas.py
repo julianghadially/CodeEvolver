@@ -49,3 +49,6 @@ class JobRecord(BaseModel):
     program_candidates: list[dict[str, str]] | None = None  # All candidates
     candidate_scores: list[float] | None = None  # Validation scores per candidate
     parent_programs: list[list[int] | None] | None = None  # Parent indices for each candidate
+
+    # Per-iteration history: dict keyed by candidate index (string for MongoDB)
+    gepa_state_history: dict[str, Any] | None = None

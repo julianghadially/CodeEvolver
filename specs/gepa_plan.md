@@ -385,6 +385,27 @@ This allows Claude to use plan mode for complex multi-file changes while running
 See `specs/ralph_claude_code.md` for analysis of alternative CLI-based approaches.
 
 
+### GEPA State History (per-iteration tracking)
+
+Per-iteration state is stored in MongoDB under `gepa_state_history`, keyed by candidate index (string for MongoDB compatibility). Only candidates that pass subsample evaluation are tracked — rejected candidates never enter `program_candidates`.
+
+```
+gepa_state_history: {
+  "<candidate_idx>": {
+    candidate:          dict[str, str]   // full candidate dict (prompts + _code)
+    score:              float            // aggregate validation score
+    parent_candidates:  list[int | null] // parent indices (null for seed)
+    change_type:        "seed" | "code" | "prompt"
+    change_description: str              // what changed this iteration
+    git_branch:         str | null       // from _code.git_branch
+  }
+}
+```
+#### Notes
+- **Change detection** (`GEPAStateRecord._detect_change`): compares each candidate to its parent to determine what changed in that iteration:
+- **Progress path:** Progress endpoint (`/internal/job/{job_id}/progress`): saves new candidates incrementally via `$set` with dotted keys (additive)
+- **Status endpoint:** (`/internal/job/{job_id}/status`): backfills full history on completion
+
 ## Remaining
 - [x] Reflection LLM agent
 - [ ] End-to-end testing of GEPA with code mutations + evaluate

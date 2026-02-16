@@ -182,7 +182,12 @@ def validate_sandbox_environment(
 
         logger.info("Sandbox validation passed!")
         print("[VALIDATION] Passed!", flush=True)
-        return {"success": True, "system_error_rate": system_error_rate, "accuracy": accuracy}
+        return {
+            "success": True,
+            "system_error_rate": system_error_rate,
+            "accuracy": accuracy,
+            "trajectories": trajectories,
+        }
 
     except Exception as e:
         error_msg = (

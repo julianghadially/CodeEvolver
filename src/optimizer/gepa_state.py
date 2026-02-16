@@ -7,6 +7,8 @@ This module provides state containers for tracking GEPA optimization progress
 and serializing state for callbacks and persistence.
 """
 
+import json
+
 from gepa.core.result import GEPAResult
 from gepa.core.state import GEPAState
 
@@ -94,6 +96,91 @@ class GEPAStateRecord:
             "num_iterations": self.num_iterations,
             "total_evals": self.total_evals,
         }
+    @staticmethod
+    def _parse_code_field(candidate: dict[str, str]) -> dict:
+        """Parse the _code JSON field from a candidate. Returns empty dict on failure."""
+        code_str = candidate.get("_code", "")
+        if not code_str:
+            return {}
+        try:
+            return json.loads(code_str)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    def _detect_change(
+        self, idx: int, candidate: dict[str, str]
+    ) -> tuple[str, str, str | None]:
+        """Detect what changed between a candidate and its parent.
+
+        Returns (change_type, change_description, git_branch).
+
+        change_type is one of: "seed", "code", "prompt".
+        change_description explains what changed this iteration.
+        """
+        code_data = self._parse_code_field(candidate)
+        git_branch = code_data.get("git_branch")
+
+        # Seed candidate (no parent)
+        parents = self.parent_programs[idx] if idx < len(self.parent_programs) else None
+        if not parents or parents[0] is None or idx == 0:
+            return "seed", "Initial seed candidate", git_branch
+
+        parent_idx = parents[0]
+        if parent_idx >= len(self.program_candidates):
+            return "unknown", "Parent not found", git_branch
+
+        parent = self.program_candidates[parent_idx]
+        parent_code_data = self._parse_code_field(parent)
+
+        # Code change: _code.git_branch differs from parent's
+        parent_branch = parent_code_data.get("git_branch")
+        if git_branch and parent_branch and git_branch != parent_branch:
+            change_request = code_data.get("change_request", "Code change")
+            return "code", change_request or "Code change", git_branch
+        else:
+            # Prompt change: find which prompt components differ
+            changed_components = []
+            for key in candidate:
+                if key == "_code":
+                    continue
+                if candidate[key] != parent.get(key, ""):
+                    changed_components.append(key)
+
+            if changed_components:
+                desc = f"Prompt change at {', '.join(changed_components)}"
+                return "prompt", desc, git_branch
+
+        return "unknown", "No detectable change", git_branch
+
+    def to_history_dict(self) -> dict[str, dict]:
+        """Return per-candidate iteration records for state history tracking.
+
+        Only candidates in program_candidates are tracked — GEPA only adds
+        candidates that pass subsample evaluation (losers are skipped and
+        never enter program_candidates).
+
+        Returns a dict keyed by candidate index (as string for MongoDB compatibility).
+        Each value contains the candidate, score, parent info, change type/description,
+        and git_branch.
+        """
+        history: dict[str, dict] = {}
+        for idx, candidate in enumerate(self.program_candidates):
+            change_type, change_description, git_branch = self._detect_change(idx, candidate)
+            parent_candidates = (
+                self.parent_programs[idx]
+                if idx < len(self.parent_programs)
+                else None
+            )
+            history[str(idx)] = {
+                "candidate": candidate,
+                "score": self.candidate_scores[idx] if idx < len(self.candidate_scores) else None,
+                "parent_candidates": parent_candidates,
+                "change_type": change_type,
+                "change_description": change_description,
+                "git_branch": git_branch,
+            }
+        return history
+
     def create_progress_payload(self, best_score: float, best_candidate: dict) -> dict:
         return {
             "current_iteration": self.num_iterations,

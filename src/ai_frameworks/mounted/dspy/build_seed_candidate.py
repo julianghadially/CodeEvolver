@@ -3,7 +3,7 @@
 Extracts initial instructions from all predictors in a DSPy module.
 """
 
-from . import build_program
+from . import build_program, signature_key
 from sandbox.mounted.git_commands import checkout_branch_if_needed
 from sandbox.mounted.utils import get_logger, make_success_result
 
@@ -36,9 +36,14 @@ def handle(cmd: dict, workspace: str) -> dict:
     log.info(f"Program type: {type(program).__name__}")
 
     candidate = {}
+    sig_keys = {}
     for name, pred in program.named_predictors():
         candidate[name] = pred.signature.instructions
+        sig_keys[name] = signature_key(pred.signature)
         log.info(f"Predictor '{name}': {len(pred.signature.instructions)} chars")
 
     log.info(f"Extracted {len(candidate)} predictors")
-    return make_success_result({"candidate": candidate}, logs=log.get_logs())
+    return make_success_result(
+        {"candidate": candidate, "signature_keys": sig_keys},
+        logs=log.get_logs(),
+    )

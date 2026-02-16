@@ -200,6 +200,7 @@ class JobProgressUpdateRequest(BaseModel):
     best_candidate: dict[str, str]
     total_metric_calls: int
     num_candidates: int
+    gepa_state: dict[str, Any] | None = None
 
 
 class GitHubTokenResponse(BaseModel):

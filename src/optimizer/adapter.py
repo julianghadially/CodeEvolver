@@ -99,6 +99,8 @@ class CodeEvolverDSPyAdapter:
         self._ce_main_branch: str | None = None
         # Cached LM callable for prompt mutations
         self._reflection_lm_callable: Callable[[str], str] | None = None
+        # Mapping of predictor name -> signature_key (set during build_seed_candidate)
+        self._predictor_sig_keys: dict[str, str] = {}
 
     def _get_reflection_lm_callable(self) -> Callable[[str], str]:
         """Get a cached callable function that invokes the reflection LM.
@@ -267,12 +269,69 @@ class CodeEvolverDSPyAdapter:
         print(f"[ADAPTER] Initial parent_module_path: {initial_parent_module}", flush=True)
 
         candidate = result["candidate"]
+        # Store signature_key mapping for later filtering of inactive predictors
+        self._predictor_sig_keys = result.get("signature_keys", {})
         # git_branch and parent_module_path stored INSIDE _code to prevent GEPA from treating them as mutable components
         candidate[CODE_COMPONENT_KEY] = self._build_initial_code_component(
             self._ce_main_branch, parent_module_path=initial_parent_module
         )
         print(f"[ADAPTER] Seed candidate has {len(candidate)} keys", flush=True)
         return candidate
+
+    def filter_seed_candidate(
+        self,
+        seed_candidate: dict[str, str],
+        trajectories: list[dict] | None,
+    ) -> dict[str, str]:
+        """Filter seed candidate to only include predictors active in traces.
+
+        Predictors defined via named_predictors() but never called during forward()
+        will have no matching signature_keys in evaluation traces. Including them
+        in the seed candidate causes make_reflective_dataset to fail when the
+        component selector picks one of these inactive predictors.
+
+        Args:
+            seed_candidate: Full seed candidate dict (including _code).
+            trajectories: Trajectory data from a traced evaluation (e.g., validation).
+
+        Returns:
+            Filtered seed candidate with only _code + active predictors.
+        """
+        if not trajectories or not self._predictor_sig_keys:
+            return seed_candidate
+
+        # Collect all signature_keys that appeared in any trace entry
+        active_sig_keys: set[str] = set()
+        for traj in trajectories:
+            if traj is None or not isinstance(traj, dict):
+                continue
+            for entry in traj.get("trace", []):
+                if isinstance(entry, dict) and "signature_key" in entry:
+                    active_sig_keys.add(entry["signature_key"])
+
+        if not active_sig_keys:
+            return seed_candidate
+
+        filtered = {}
+        removed = []
+        for key, value in seed_candidate.items():
+            if key == CODE_COMPONENT_KEY:
+                filtered[key] = value
+            elif self._predictor_sig_keys.get(key) in active_sig_keys:
+                filtered[key] = value
+            else:
+                removed.append(key)
+
+        if removed:
+            print(
+                f"[ADAPTER] Filtered {len(removed)} inactive predictors "
+                f"from seed candidate: {removed}",
+                flush=True,
+            )
+        else:
+            print("[ADAPTER] All predictors are active in traces", flush=True)
+
+        return filtered
 
     def _create_ce_main_branch(self) -> None:
         """Create the run's main branch from the initial branch.

@@ -261,6 +261,12 @@ def run_gepa_optimization(
             updater.set_failed(error_msg)
             raise RuntimeError(f"Sandbox validation failed:\n{error_msg}")
 
+        # Filter seed candidate to only include predictors that are active in traces.
+        # Predictors defined but never called in forward() cause make_reflective_dataset
+        # failures when the component selector picks them (no trace data to reflect on).
+        validation_trajectories = validation_result.get("trajectories")
+        seed_candidate = adapter.filter_seed_candidate(seed_candidate, validation_trajectories)
+
         # Create callback progress tracker (also handles cancellation)
         tracker = CallbackProgressTracker(
             callback_url,

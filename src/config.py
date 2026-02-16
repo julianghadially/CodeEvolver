@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # GEPA optimization settings
     # This timeout is used for: Modal function, sandbox, and JWT TTL
-    gepa_job_timeout: int = 43200  # 12 hours (in seconds)
+    gepa_job_timeout: int = 43200*2  # 12 hours (in seconds)
     gepa_optimization_cpu: int = 4
     gepa_optimization_memory: int = 8192  # MB
 

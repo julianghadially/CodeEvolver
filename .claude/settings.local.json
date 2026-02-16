@@ -12,7 +12,9 @@
       "WebFetch(domain:docs.litellm.ai)",
       "WebFetch(domain:api.github.com)",
       "Bash(python -m py_compile:*)",
-      "WebFetch(domain:pypi.org)"
+      "WebFetch(domain:pypi.org)",
+      "Bash(python3:*)",
+      "Bash(find:*)"
     ]
   }
 }

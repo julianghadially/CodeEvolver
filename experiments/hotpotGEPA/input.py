@@ -1,16 +1,31 @@
+'''
+Controls
+- search count
+- final document count
+- reasoning variable controlled by allowing chain of thought reasoning
+- The program is limited to Wikipedia documents.
+Not controlled
+- module creation, removal, and modification
+- # of database documents retrieved per search (same cost)
+
+Future:
+- Consider different search architectures (iterative search, Evidence workspace, Searching specific websites (e.g., Wikipedia))
+'''
+
 additional_instructions = """
 HotpotQA is designed to contain information from Wikipedia. 
 #### What's Allowed
-- The program is not required to stay on Wikipedia only.
-- The program is allowed to create or remove modules, dynamic prompts, tool calls, etc.
-- The program is allowed to change the module types (e.g., dspy.ReAct for tool calling, dspy.ChainOfThought, dspy.Predict, etc.)
-- There is no limit on the number of search results to display per query
-- Available services: Firecrawl and serper.dev. 
+- The program is allowed to create or remove modules
+- The program is allowed to create or remove dynamic prompts
+- The program is allowed to add rerankers
+- There is no limit on the number of search results to retrieve per query (same cost)
+- Available services: wikipedia colbert-server (Via dspy.Retrieve)
 
 #### Constraints:
 - Do NOT search more than two times per question. This is a hard requirement.
-- Do NOT visit more than one page per query
+- Do NOT use any external websearch services.
 - Do NOT use the HotpotQA dataset as context. 
+- The program is limited to Wikipedia documents.
 
 ### Available Services
 
@@ -22,32 +37,14 @@ The following external services are available with API keys already configured i
   - Retrieve information from Wikipedia abstracts
   - Useful for fact-checking and information retrieval
 - **Python usage**: `from dspy import Retrieve`
-### Firecrawl (Web Scraping & Page Fetching)
-- **API Key**: Available as `FIRECRAWL_API_KEY` environment variable
-- **Documentation**: https://docs.firecrawl.dev/
-- **Use cases**:
-  - Fetch and parse web page content
-  - Convert web pages to clean markdown
-  - Crawl websites for structured data extraction
-- **Python usage**: `from firecrawl import FirecrawlApp`
-
-### Serper.dev (Web Search)
-- **API Key**: Available as `SERPER_API_KEY` environment variable
-- **Documentation**: https://serper.dev/
-- **Use cases**:
-  - Search the web for real-time information
-  - Get search results with snippets, URLs, and metadata
-  - Useful for fact-checking and information retrieval
-- **Python usage**: HTTP requests to `https://google.serper.dev/search`
 
 ## Ideas for Optimization
-- Consider different search architectures (iterative search, Evidence workspace, Searching specific websites (e.g., Wikipedia))
 - Consider increasing the number of k retrieved
 - Consider different context retrieval pipelines, including query + rerankers (pairwise rerankers, list rerankers, score-based reranking, sliding-window rerankers, etc.)
 - Consider removing question summaries, and providing raw evidence instead (This performed well in a prior GEPA run)
 - Consider replacing Generate Answer with Extract Answer - i.e., extracting the exact short factoid answer from the passages (This performed well in a prior GEPA run)
-- Consider adding chain of thought reasoning - this performed well in a prior GEPA run
 """
+
 
 OPTIMIZE_CONFIG = {
     "repo_url": "https://github.com/julianghadially/LangProBe-CodeEvolver",

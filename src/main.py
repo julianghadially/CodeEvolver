@@ -418,6 +418,13 @@ async def internal_update_job_status(
     """Update job status (called by GEPA sandbox via callback)."""
     _validate_internal_jwt(job_id, authorization)
 
+    print(
+        f"[STATUS-API] Received status update for {job_id}: status={body.status}, "
+        f"has_best_candidate={body.best_candidate is not None}, "
+        f"best_score={body.best_score}, has_gepa_state={body.gepa_state is not None}",
+        flush=True,
+    )
+
     update: dict = {"status": body.status, "updated_at": datetime.now(timezone.utc)}
 
     if body.status == "running":
@@ -443,6 +450,19 @@ async def internal_update_job_status(
         update["candidate_scores"] = body.gepa_state.get("candidate_scores", [])
         update["parent_programs"] = body.gepa_state.get("parent_programs", [])
 
+        # Backfill full gepa_state_history on completion
+        if body.status in ("completed", "failed"):
+            from .optimizer.gepa_state import GEPAStateRecord
+
+            state_record = GEPAStateRecord(
+                program_candidates=body.gepa_state.get("program_candidates", []),
+                candidate_scores=body.gepa_state.get("candidate_scores", []),
+                parent_programs=body.gepa_state.get("parent_programs", []),
+                num_iterations=body.gepa_state.get("num_iterations", 0),
+                total_evals=body.gepa_state.get("total_evals", 0),
+            )
+            update["gepa_state_history"] = state_record.to_history_dict()
+
     db = get_database()
     await db.jobs.update_one({"job_id": job_id}, {"$set": update})
     return {"ok": True}
@@ -457,6 +477,14 @@ async def internal_update_job_progress(
     """Update iteration progress (called each GEPA iteration)."""
     _validate_internal_jwt(job_id, authorization)
 
+    print(
+        f"[PROGRESS-API] Received progress for {job_id}: "
+        f"iteration={body.current_iteration}, best_score={body.best_score}, "
+        f"num_candidates={body.num_candidates}, total_metric_calls={body.total_metric_calls}, "
+        f"has_gepa_state={body.gepa_state is not None}",
+        flush=True,
+    )
+
     update = {
         "current_iteration": body.current_iteration,
         "best_score": body.best_score,
@@ -467,7 +495,39 @@ async def internal_update_job_progress(
     }
 
     db = get_database()
-    await db.jobs.update_one({"job_id": job_id}, {"$set": update})
+
+    # Persist per-iteration state history if gepa_state is provided
+    if body.gepa_state is not None:
+        from .optimizer.gepa_state import GEPAStateRecord
+
+        state_record = GEPAStateRecord(
+            program_candidates=body.gepa_state.get("program_candidates", []),
+            candidate_scores=body.gepa_state.get("candidate_scores", []),
+            parent_programs=body.gepa_state.get("parent_programs", []),
+            num_iterations=body.gepa_state.get("num_iterations", 0),
+            total_evals=body.gepa_state.get("total_evals", 0),
+        )
+        history = state_record.to_history_dict()
+
+        # Find which candidates are new by comparing to previously stored count
+        job = await db.jobs.find_one({"job_id": job_id}, {"num_candidates": 1})
+        prev_num = (job.get("num_candidates") or 0) if job else 0
+
+        # Use $set with dotted keys — additive, won't overwrite existing entries
+        history_update = {}
+        for idx_str, record in history.items():
+            if int(idx_str) >= prev_num:
+                history_update[f"gepa_state_history.{idx_str}"] = record
+
+        if history_update:
+            await db.jobs.update_one({"job_id": job_id}, {"$set": history_update})
+            print(f"[PROGRESS-API] Saved {len(history_update)} new candidate(s) to history for {job_id}", flush=True)
+
+    result = await db.jobs.update_one({"job_id": job_id}, {"$set": update})
+    print(
+        f"[PROGRESS-API] MongoDB update for {job_id}: matched={result.matched_count}, modified={result.modified_count}",
+        flush=True,
+    )
     return {"ok": True}
 
 

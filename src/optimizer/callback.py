@@ -103,6 +103,10 @@ class CallbackProgressTracker:
     def __call__(self, gepa_state: GEPAState) -> bool:
         """Called each iteration. Returns True to stop (cancellation)."""
         try:
+            iteration = getattr(gepa_state, "i", "?")
+            num_candidates = len(gepa_state.program_candidates) if gepa_state.program_candidates else 0
+            print(f"[PROGRESS] Callback invoked at iteration {iteration}, {num_candidates} candidates", flush=True)
+
             if self.debug_max_iterations is not None:
                 # DEBUG: Print GEPAState attributes on first iteration
                 if gepa_state.i == 0:
@@ -144,13 +148,33 @@ class CallbackProgressTracker:
             state_record = GEPAStateRecord.from_gepa_state(gepa_state)
             progress_payload = state_record.create_progress_payload(best_score, best_candidate)
 
+            # Log payload summary before sending
+            payload_keys = list(progress_payload.keys())
+            gepa_state_keys = list((progress_payload.get("gepa_state") or {}).keys())
+            print(
+                f"[PROGRESS] Sending progress: iteration={progress_payload.get('current_iteration')}, "
+                f"best_score={progress_payload.get('best_score')}, "
+                f"num_candidates={progress_payload.get('num_candidates')}, "
+                f"payload_keys={payload_keys}, gepa_state_keys={gepa_state_keys}",
+                flush=True,
+            )
+
             with httpx.Client(timeout=60) as client:
                 # Report progress with full GEPA state
-                client.put(
+                progress_resp = client.put(
                     self._progress_url(),
                     json=progress_payload,
                     headers=self.headers,
                 )
+
+                if progress_resp.status_code != 200:
+                    print(
+                        f"[PROGRESS] ERROR: Progress PUT returned {progress_resp.status_code}: "
+                        f"{progress_resp.text[:500]}",
+                        flush=True,
+                    )
+                else:
+                    print(f"[PROGRESS] Progress saved successfully (iteration {iteration})", flush=True)
 
                 # Check cancellation
                 resp = client.get(self._cancel_url(), headers=self.headers)
@@ -159,7 +183,8 @@ class CallbackProgressTracker:
 
         except Exception as e:
             # Don't crash the optimization if the callback is unavailable
-            print(f"[DEBUG] Callback exception: {e}", flush=True)
-            pass
+            import traceback
+            print(f"[PROGRESS] ERROR: Callback exception at iteration {getattr(gepa_state, 'i', '?')}: {e}", flush=True)
+            print(f"[PROGRESS] Traceback: {traceback.format_exc()}", flush=True)
 
         return False
