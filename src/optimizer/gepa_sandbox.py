@@ -61,6 +61,7 @@ class GEPASandbox(ClientSandbox):
         max_turns: int = 50,
         commit_changes: bool = True,
         push_branch: str | None = None,
+        program_path: str | None = None,
     ) -> dict:
         """Execute coding agent for code mutations.
 
@@ -73,6 +74,8 @@ class GEPASandbox(ClientSandbox):
             max_turns: Maximum conversation turns (prevents runaway agents).
             commit_changes: If True, commit changes after successful mutation.
             push_branch: If provided, push to this branch after committing.
+            program_path: Dotted import path to parent module class. When provided,
+                the change_request is wrapped with the full system prompt.
 
         Returns:
             Dict with 'success', 'error', 'output' keys.
@@ -92,6 +95,7 @@ class GEPASandbox(ClientSandbox):
             change_request=change_request,
             change_location=change_location,
             max_turns=max_turns,
+            program_path=program_path,
         )
         config_json = json.dumps(config)
 
@@ -174,7 +178,7 @@ class GEPASandbox(ClientSandbox):
             "output": result.output,
         }
 
-    def exec_prebuilt(self, command: dict) -> dict:
+    def exec_prebuilt(self, command: dict, timeout: int | None = None) -> dict:
         """Execute a prebuilt DSPy command via master_script.py.
 
         Writes the command to a temp file, executes master_script.py,
@@ -183,6 +187,8 @@ class GEPASandbox(ClientSandbox):
         Args:
             command: Dict with at minimum a "command" key.
                 Supported commands: build_seed_candidate, evaluate, make_reflective_dataset
+            timeout: Optional timeout in seconds. If the process exceeds this,
+                it is killed and a failure result is returned.
 
         Returns:
             Parsed JSON result dict from the handler.
@@ -216,7 +222,30 @@ class GEPASandbox(ClientSandbox):
             f"--workspace {self._workspace} "
             f"--command-file /tmp/prebuilt_command.json",
         )
-        p.wait()
+
+        # Wait with optional timeout
+        timed_out = False
+        if timeout:
+            import time
+            deadline = time.time() + timeout
+            while p.poll() is None:
+                if time.time() > deadline:
+                    timed_out = True
+                    print(f"[SANDBOX] exec_prebuilt timed out after {timeout}s, killing process", flush=True)
+                    try:
+                        p.kill()
+                    except Exception:
+                        pass
+                    break
+                time.sleep(1)
+        else:
+            p.wait()
+
+        if timed_out:
+            return {
+                "success": False,
+                "error": f"Evaluation timed out after {timeout} seconds",
+            }
 
         stdout = p.stdout.read()
         stderr = p.stderr.read()

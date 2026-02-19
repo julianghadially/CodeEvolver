@@ -5,6 +5,8 @@ All writes go through the FastAPI internal endpoints, authenticated
 by a job-scoped JWT.
 """
 
+import time
+
 import httpx
 
 from gepa.core.state import GEPAState
@@ -88,11 +90,16 @@ class CallbackProgressTracker:
         jwt_token: str,
         job_id: str,
         debug_max_iterations: int | None = None,
+        max_runtime_seconds: int | None = None,
+        optimization_start_time: float | None = None,
     ):
         self.base_url = callback_url.rstrip("/")
         self.job_id = job_id
         self.headers = {"Authorization": f"Bearer {jwt_token}"}
         self.debug_max_iterations = debug_max_iterations
+        self.max_runtime_seconds = max_runtime_seconds
+        self.optimization_start_time = optimization_start_time
+        self._grace_period = 600  # 10 minutes
 
     def _progress_url(self) -> str:
         return f"{self.base_url}/internal/job/{self.job_id}/progress"
@@ -101,7 +108,19 @@ class CallbackProgressTracker:
         return f"{self.base_url}/internal/job/{self.job_id}/check-cancelled"
 
     def __call__(self, gepa_state: GEPAState) -> bool:
-        """Called each iteration. Returns True to stop (cancellation)."""
+        """Called each iteration. Returns True to stop (cancellation or timeout)."""
+        # Check graceful timeout before any other logic
+        if self.max_runtime_seconds and self.optimization_start_time:
+            elapsed = time.time() - self.optimization_start_time
+            remaining = self.max_runtime_seconds - elapsed
+            if remaining < self._grace_period:
+                print(
+                    f"[PROGRESS] Approaching timeout ({remaining:.0f}s remaining, "
+                    f"grace={self._grace_period}s). Stopping gracefully.",
+                    flush=True,
+                )
+                return True
+
         try:
             iteration = getattr(gepa_state, "i", "?")
             num_candidates = len(gepa_state.program_candidates) if gepa_state.program_candidates else 0

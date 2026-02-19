@@ -127,6 +127,17 @@ def handle(cmd: dict, workspace: str) -> dict:
     for name, pred in program.named_predictors():
         key = signature_key(pred.signature)
         pred_sig_keys.setdefault(key, []).append(name)
+        log.info(f"Predictor '{name}' sig_key: {key}")
+
+    # Collect all unique signature_keys from traces for diagnostic comparison
+    trace_sig_keys: set[str] = set()
+    for data in trajectories:
+        if data is None:
+            continue
+        for t in data.get("trace", []):
+            if isinstance(t, dict) and "signature_key" in t:
+                trace_sig_keys.add(t["signature_key"])
+    log.info(f"Trace signature_keys: {sorted(trace_sig_keys)}")
 
     rng = random.Random(0)
 
@@ -138,9 +149,11 @@ def handle(cmd: dict, workspace: str) -> dict:
                 module = m
                 break
         if module is None:
+            log.warning(f"Predictor '{pred_name}' not found in program.named_predictors()")
             continue
 
         target_key = signature_key(module.signature)
+        log.info(f"Looking for '{pred_name}' with target_key='{target_key}' in {len(trajectories)} trajectories")
 
         items: list[dict[str, Any]] = []
         for data in trajectories:

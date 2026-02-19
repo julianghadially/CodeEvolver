@@ -306,10 +306,11 @@ def run_optimization(
     decay_rate: int = 25,
     decay_factor: int = 2,
     code_cutoff_step: int | None = None,
-    subsample_size: int = 10,
+    subsample_size: int = 20,
     initial_branch: str = "main",
     max_valset_size: int | None = None,
     debug_max_iterations: int | None = None,
+    subsample_eval_timeout: int = 1200,
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 
@@ -391,6 +392,8 @@ def run_optimization(
             initial_branch=initial_branch,
             max_valset_size=max_valset_size,
             debug_max_iterations=debug_max_iterations,
+            subsample_eval_timeout=subsample_eval_timeout,
+            max_runtime=43200,  # Must match Modal function timeout
         )
         return result
     finally:

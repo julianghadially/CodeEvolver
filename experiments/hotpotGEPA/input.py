@@ -40,7 +40,7 @@ The following external services are available with API keys already configured i
 
 ## Ideas for Optimization
 - Consider increasing the number of k retrieved
-- Consider different context retrieval pipelines, including query + rerankers (pairwise rerankers, list rerankers, score-based reranking, sliding-window rerankers, etc.)
+- Consider different context retrieval pipelines, including query + rerankers (list rerankers, score-based reranking, sliding-window rerankers, etc.)
 - Consider removing question summaries, and providing raw evidence instead (This performed well in a prior GEPA run)
 - Consider replacing Generate Answer with Extract Answer - i.e., extracting the exact short factoid answer from the passages (This performed well in a prior GEPA run)
 """
@@ -48,18 +48,19 @@ The following external services are available with API keys already configured i
 
 OPTIMIZE_CONFIG = {
     "repo_url": "https://github.com/julianghadially/LangProBe-CodeEvolver",
-    "program": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPredictPipeline",
+    "program": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
     "metric": "langProPlus.hotpotGEPA.__init__.exact_match_metric",
     "trainset_path": "data/HotpotQABench_train.json", # data/FacTool_QA_train_normalized.jsonl
     "valset_path": "data/HotpotQABench_val.json", # data/FacTool_QA_train_normalized.jsonl
     "input_keys": ["question"],
     "reflection_lm": "openai/gpt-4.1-mini",
-    "max_metric_calls": 6000, # 150 examples × 40 full evals (with subsampled valset)
+    "max_metric_calls": 7500, # 150 examples × 40 full evals (with subsampled valset)
     "num_threads": 20,
     "max_valset_size": 150, # Subsample validation set to 150 examples (from 300) for faster evaluation
     "seed": 42,
     "additional_instructions": additional_instructions,
-    "initial_branch": "hotpotGEPA"
+    "initial_branch": "hotpotGEPA",
+    "subsample_size": 20,
     # Using default CodeFrequencyComponentSelector (initial=1, decay_rate=25)
     # This does 1:1 code/prompt ratio initially, then increases prompts per code every 25 iterations
 }

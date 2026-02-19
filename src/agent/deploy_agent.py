@@ -82,28 +82,48 @@ def build_agent_config(
     change_request: str,
     change_location: str | None = None,
     max_turns: int = 50,
+    program_path: str | None = None,
 ) -> dict[str, Any]:
     """Build a config dict for the sandbox agent script.
 
     The config is written as JSON to the sandbox and passed to
     agent/mounted/coding_agent.py via --config.
 
+    When program_path is provided, the change_request is wrapped with the
+    full system prompt from get_code_mutation_prompt() (including constraints,
+    instructions about codeevolver.md, etc.).
+
     Args:
         workspace_path: Path to the workspace in the sandbox.
         change_request: Natural language change description.
         change_location: Optional module path hint.
         max_turns: Maximum conversation turns (prevents runaway agents).
+        program_path: Dotted import path to parent module class.
 
     Returns:
         Config dict for JSON serialization.
     """
-    config: dict[str, Any] = {
-        "workspace_path": workspace_path,
-        "change_request": change_request,
-        "max_turns": max_turns,
-    }
-    if change_location:
-        config["change_location"] = change_location
+    # When program_path is provided, wrap with full system prompt
+    if program_path:
+        full_prompt = get_code_mutation_prompt(
+            change_request=change_request,
+            change_location=change_location,
+            workspace_path=workspace_path,
+            program_path=program_path,
+        )
+        config: dict[str, Any] = {
+            "workspace_path": workspace_path,
+            "change_request": full_prompt,
+            "max_turns": max_turns,
+        }
+    else:
+        config = {
+            "workspace_path": workspace_path,
+            "change_request": change_request,
+            "max_turns": max_turns,
+        }
+        if change_location:
+            config["change_location"] = change_location
     return config
 
 

@@ -141,11 +141,13 @@ def run_gepa_optimization(
     decay_factor: int = 2,
     code_cutoff_step: int | None = None,
     code_lm: str = "anthropic/claude-sonnet-4-5-20250929",
-    subsample_size: int = 10,
+    subsample_size: int = 20,
     initial_branch: str = "main",
     max_valset_size: int | None = None,
     debug: bool = False,
     debug_max_iterations: int | None = None,
+    subsample_eval_timeout: int = 1200,
+    max_runtime: int | None = None,
 ) -> dict[str, Any]:
     """Run GEPA optimization. Called from the Modal function.
 
@@ -178,7 +180,7 @@ def run_gepa_optimization(
         decay_factor: Multiplier applied at each decay step (default: 2).
         code_cutoff_step: Stop code mutations after this iteration. Default is None (no cutoff).
         code_lm: Language model for code mutations. Default is Claude Sonnet 4.5.
-        subsample_size: Number of examples per evaluation batch. Default is 10.
+        subsample_size: Number of examples per evaluation batch. Default is 20.
         initial_branch: Git branch to use as starting point for optimization. Default is "main".
         max_valset_size: Maximum size of validation set. If specified, randomly subsamples
             the validation set to this size using the provided seed. The same subsample
@@ -220,6 +222,7 @@ def run_gepa_optimization(
             additional_instructions=additional_instructions,
             code_lm=code_lm,
             initial_branch=initial_branch,
+            subsample_eval_timeout=subsample_eval_timeout,
         )
         print(f"[TIMER] Adapter creation took {time.time() - adapter_start:.2f}s", flush=True)
 
@@ -267,12 +270,18 @@ def run_gepa_optimization(
         validation_trajectories = validation_result.get("trajectories")
         seed_candidate = adapter.filter_seed_candidate(seed_candidate, validation_trajectories)
 
-        # Create callback progress tracker (also handles cancellation)
+        # Store a small set of training examples for trace-based ghost predictor
+        # filtering after code mutations (see _rebuild_candidate_after_code_mutation)
+        adapter.set_filter_examples(trainset[:3])
+
+        # Create callback progress tracker (also handles cancellation and timeout)
         tracker = CallbackProgressTracker(
             callback_url,
             jwt_token,
             job_id,
             debug_max_iterations=debug_max_iterations,
+            max_runtime_seconds=max_runtime,
+            optimization_start_time=optimization_start,
         )
 
         if debug_max_iterations:

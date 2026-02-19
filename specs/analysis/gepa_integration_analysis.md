@@ -1,11 +1,13 @@
 # GEPA Integration Analysis
 
 ## Goal of integration
-We need to be able to integrate with other AI frameworks besides DSPY, so we can optimize AI systems that our clients are already using. The most important AI frameworks we need to integrate with include Langchain, LangGraph, and OpenAI API. 
+We need to be able to integrate with other AI frameworks besides DSPY, so we can optimize the AI systems that our clients are already using. The most important AI frameworks we need to integrate with include Langchain, LangGraph, and OpenAI API. 
 
-To determine how to integrate, we must first identify exactly what information we need. One of the powerful components of GEPA is being able to observe traces for every module, including the tool calls it makes and any sub modules it calls. A lot of simple, rapping methods fall s short – they track inputs and outputs, but they do not track tool calling or subagent calling.
+To determine how to integrate, we must first identify exactly what information we need. One of the powerful components of GEPA is being able to observe traces for every module, including the tool calls it makes and any sub modules it calls. A lot of simple, wrapping methods fall short – they track inputs and outputs, but they do not track tool calling or subagent calling.
 
 Technically, because we have a coding agent, we can embed deep observability tracing inside an AI system. However, there may be a more elegant solution that does not result in providing code back to a user that is heavily tagged, and potentially messy. Especially when a AI framework already handles tracing (which is the case with the DSPy) why would I want to trace twice?
+
+One such solution is to use existing tracing providers such as Langfuse and Langsmith. Another solution is to wrap the open AI client. Thoroughly investigate each option and their advantages and disadvantages before selecting the chosen solution.
 
 When GEPA runs, it requires a prompt candidate JSON and tracing data. The prompts in the candidate JSON are not the final prompt, they are instruction text that is ready to compile alongside any number of variables into a final prompt. DSPy handles this prompt templating strategy. They picked a prompt template strategy so that the input fields always get included no matter how the optimizer edits the prompt.
 

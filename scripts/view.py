@@ -90,7 +90,7 @@ def main():
                 score = rec.get("score")
                 git_branch = rec.get("git_branch", "")
                 change_type = rec.get("change_type", "")
-                change_desc = (rec.get("change_description") or "")[:60]
+                change_desc = (rec.get("change_description") or "")
                 print(f"  [{idx_str}] score={score} branch={git_branch!r} type={change_type} | {change_desc}...")
         elif job.get("program_candidates"):
             # Completed job may have program_candidates at top level
@@ -155,15 +155,11 @@ if __name__ == "__main__":
     if settings.mongodb_url:
         db = get_mongo_db(db_name=settings.database_name, force_prod=False)
         last_five = list(
-            db.jobs.find(
-                {},
-                {"job_id": 1, "status": 1, "created_at": 1},
-                sort=[("created_at", -1)],
-            ).limit(5)
+            db.jobs.find(sort=[("created_at", -1)]).limit(5)
         )
         print("=== Last 5 jobs (temporary) ===")
         for j in last_five:
-            print(f"  {j.get('job_id')}  status={j.get('status')}  created_at={j.get('created_at')}")
+            print(f"  {j}")
         print()
 
     main()

@@ -7,10 +7,14 @@ This module provides state containers for tracking GEPA optimization progress
 and serializing state for callbacks and persistence.
 """
 
-import json
+from __future__ import annotations
 
-from gepa.core.result import GEPAResult
-from gepa.core.state import GEPAState
+import json
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gepa.core.result import GEPAResult
+    from gepa.core.state import GEPAState
 
 
 class GEPAStateRecord:

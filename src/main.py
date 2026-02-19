@@ -182,8 +182,11 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
             decay_rate=request.decay_rate,
             decay_factor=request.decay_factor,
             code_cutoff_step=request.code_cutoff_step,
+            subsample_size=request.subsample_size,
             initial_branch=request.initial_branch,
+            max_valset_size=request.max_valset_size,
             debug_max_iterations=request.debug_max_iterations,
+            subsample_eval_timeout=request.subsample_eval_timeout,
         )
     except ImportError:
         # Not running on Modal — update job status to failed
@@ -510,8 +513,12 @@ async def internal_update_job_progress(
         history = state_record.to_history_dict()
 
         # Find which candidates are new by comparing to previously stored count
-        job = await db.jobs.find_one({"job_id": job_id}, {"num_candidates": 1})
+        job = await db.jobs.find_one({"job_id": job_id}, {"num_candidates": 1, "gepa_state_history": 1})
         prev_num = (job.get("num_candidates") or 0) if job else 0
+
+        # Ensure gepa_state_history exists as a dict (older jobs may have null)
+        if job and job.get("gepa_state_history") is None:
+            await db.jobs.update_one({"job_id": job_id}, {"$set": {"gepa_state_history": {}}})
 
         # Use $set with dotted keys — additive, won't overwrite existing entries
         history_update = {}

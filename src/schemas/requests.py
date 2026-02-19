@@ -159,6 +159,24 @@ class OptimizeRequest(BaseModel):
         description="Stop code mutations after this iteration (None=no cutoff)",
     )
 
+    # Evaluation batch size
+    subsample_size: int = Field(
+        default=20,
+        description="Number of examples per evaluation batch (subsample size)",
+    )
+
+    # Per-evaluation timeout
+    subsample_eval_timeout: int = Field(
+        default=1200,
+        description="Timeout in seconds for subsample evaluation (default 1200s / 20 min)",
+    )
+
+    # Validation set size
+    max_valset_size: int | None = Field(
+        default=None,
+        description="Maximum validation set size. If specified, randomly subsamples the valset to this size.",
+    )
+
     # Git branch configuration
     initial_branch: str = Field(
         default="main",

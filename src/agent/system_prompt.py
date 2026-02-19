@@ -9,6 +9,7 @@ def get_code_mutation_prompt(
     change_request: str,
     change_location: str | None = None,
     workspace_path: str = "/workspace",
+    program_path: str | None = None,
 ) -> str:
     """
     Generate a system prompt for code mutation tasks.
@@ -17,6 +18,7 @@ def get_code_mutation_prompt(
         change_request: Natural language description of the code change
         change_location: Optional hint about which module/file to focus on
         workspace_path: Path to the workspace directory
+        program_path: Dotted import path to the parent module class
 
     Returns:
         Formatted prompt for the Claude agent
@@ -25,12 +27,21 @@ def get_code_mutation_prompt(
     if change_location:
         location_hint = f"\n\nFocus on: {change_location}"
 
+    parent_module_constraint = ""
+    if program_path:
+        parent_module_constraint = f"""
+
+CRITICAL CONSTRAINT:
+All changes must be within the top-most parent module class: `{program_path}`.
+You may create new sub-modules and Signature classes, but they must be used by this parent module's forward() method.
+Do NOT create new pipeline/wrapper classes. The evaluation system calls `{program_path}` directly."""
+
     return f"""You are an autonomous coding agent executing a code modification request.
 
 WORKSPACE: {workspace_path}
 
 CHANGE REQUEST:
-{change_request}{location_hint}
+{change_request}{location_hint}{parent_module_constraint}
 
 AUTONOMOUS EXECUTION CONTEXT:
 You are running in an automated pipeline with a user proxy that auto-approves your plans and answers questions. This means:

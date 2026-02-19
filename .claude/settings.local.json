@@ -14,7 +14,9 @@
       "Bash(python -m py_compile:*)",
       "WebFetch(domain:pypi.org)",
       "Bash(python3:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(pip show:*)",
+      "Bash(pip3 show:*)"
     ]
   }
 }

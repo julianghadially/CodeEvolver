@@ -26,6 +26,7 @@ from .prompts import (
     build_architecture_fallback,
     build_architecture_prompt,
     build_code_reflection_prompt,
+    build_code_reflection_prompt_solution_driven,
 )
 from .utils import (
     CODE_COMPONENT_KEY,
@@ -75,6 +76,7 @@ class CodeEvolverDSPyAdapter:
         reflection_prompt_template: str | None = None,
         additional_instructions: str | None = None,
         code_lm: str = "anthropic/claude-sonnet-4-5-20250514",
+        subsample_eval_timeout: int = 1200,
     ):
         self._sandbox = sandbox_manager
         self.program_path = program
@@ -89,6 +91,7 @@ class CodeEvolverDSPyAdapter:
         self.reflection_prompt_template = reflection_prompt_template
         self.additional_instructions = additional_instructions
         self.code_lm = code_lm
+        self.subsample_eval_timeout = subsample_eval_timeout
         # Track attempted changes per parent branch to avoid repeating the same ideas.
         # Key: parent branch name, Value: list of changes attempted FROM that branch.
         # This allows parallel branches to independently discover the same mutation.
@@ -101,6 +104,10 @@ class CodeEvolverDSPyAdapter:
         self._reflection_lm_callable: Callable[[str], str] | None = None
         # Mapping of predictor name -> signature_key (set during build_seed_candidate)
         self._predictor_sig_keys: dict[str, str] = {}
+        # Small set of training examples for trace-based filtering of ghost predictors
+        self._filter_examples: list[dict] | None = None
+        # Counter for alternating between problem-driven and solution-driven reflections
+        self._code_mutation_count: int = 0
 
     def _get_reflection_lm_callable(self) -> Callable[[str], str]:
         """Get a cached callable function that invokes the reflection LM.
@@ -278,6 +285,74 @@ class CodeEvolverDSPyAdapter:
         print(f"[ADAPTER] Seed candidate has {len(candidate)} keys", flush=True)
         return candidate
 
+    def set_filter_examples(self, examples: list[dict]) -> None:
+        """Store a small set of training examples for trace-based ghost filtering.
+
+        These examples are used in _rebuild_candidate_after_code_mutation to
+        run a quick traced evaluation and identify which predictors are actually
+        invoked by forward().
+
+        Args:
+            examples: A small list of training examples (typically 3).
+        """
+        self._filter_examples = examples
+
+
+    def _filter_candidate_by_traces(
+        self,
+        candidate: dict[str, str],
+        trajectories: list[dict] | None,
+        label: str = "candidate",
+    ) -> dict[str, str]:
+        """Filter candidate to only include predictors active in traces.
+
+        Shared helper used by both filter_seed_candidate (at startup) and
+        _rebuild_candidate_after_code_mutation (after code changes).
+
+        Args:
+            candidate: Full candidate dict (including _code).
+            trajectories: Trajectory data from a traced evaluation.
+            label: Label for log messages (e.g., "seed candidate", "rebuilt candidate").
+
+        Returns:
+            Filtered candidate with only _code + active predictors.
+        """
+        if not trajectories or not self._predictor_sig_keys:
+            return candidate
+
+        # Collect all signature_keys that appeared in any trace entry
+        active_sig_keys: set[str] = set()
+        for traj in trajectories:
+            if traj is None or not isinstance(traj, dict):
+                continue
+            for entry in traj.get("trace", []):
+                if isinstance(entry, dict) and "signature_key" in entry:
+                    active_sig_keys.add(entry["signature_key"])
+
+        if not active_sig_keys:
+            return candidate
+
+        filtered = {}
+        removed = []
+        for key, value in candidate.items():
+            if key == CODE_COMPONENT_KEY:
+                filtered[key] = value
+            elif self._predictor_sig_keys.get(key) in active_sig_keys:
+                filtered[key] = value
+            else:
+                removed.append(key)
+
+        if removed:
+            print(
+                f"[ADAPTER] Filtered {len(removed)} inactive predictors "
+                f"from {label}: {removed}",
+                flush=True,
+            )
+        else:
+            print(f"[ADAPTER] All predictors are active in traces ({label})", flush=True)
+
+        return filtered
+
     def filter_seed_candidate(
         self,
         seed_candidate: dict[str, str],
@@ -297,41 +372,7 @@ class CodeEvolverDSPyAdapter:
         Returns:
             Filtered seed candidate with only _code + active predictors.
         """
-        if not trajectories or not self._predictor_sig_keys:
-            return seed_candidate
-
-        # Collect all signature_keys that appeared in any trace entry
-        active_sig_keys: set[str] = set()
-        for traj in trajectories:
-            if traj is None or not isinstance(traj, dict):
-                continue
-            for entry in traj.get("trace", []):
-                if isinstance(entry, dict) and "signature_key" in entry:
-                    active_sig_keys.add(entry["signature_key"])
-
-        if not active_sig_keys:
-            return seed_candidate
-
-        filtered = {}
-        removed = []
-        for key, value in seed_candidate.items():
-            if key == CODE_COMPONENT_KEY:
-                filtered[key] = value
-            elif self._predictor_sig_keys.get(key) in active_sig_keys:
-                filtered[key] = value
-            else:
-                removed.append(key)
-
-        if removed:
-            print(
-                f"[ADAPTER] Filtered {len(removed)} inactive predictors "
-                f"from seed candidate: {removed}",
-                flush=True,
-            )
-        else:
-            print("[ADAPTER] All predictors are active in traces", flush=True)
-
-        return filtered
+        return self._filter_candidate_by_traces(seed_candidate, trajectories, "seed candidate")
 
     def _create_ce_main_branch(self) -> None:
         """Create the run's main branch from the initial branch.
@@ -448,20 +489,23 @@ class CodeEvolverDSPyAdapter:
             else:
                 batch_json.append(dict(ex))
 
-        result = self._sandbox.exec_prebuilt({
-            "command": "evaluate",
-            "program": program_path,
-            "metric": self.metric_path,
-            "saved_program_json_path": self.saved_program_json_path,
-            "candidate": prompt_texts,
-            "batch": batch_json,
-            "capture_traces": capture_traces,
-            "num_threads": self.num_threads,
-            "input_keys": self.input_keys,
-            "failure_score": self.failure_score,
-            "program_lm": self.program_lm,
-            "git_branch": git_branch,
-        })
+        result = self._sandbox.exec_prebuilt(
+            {
+                "command": "evaluate",
+                "program": program_path,
+                "metric": self.metric_path,
+                "saved_program_json_path": self.saved_program_json_path,
+                "candidate": prompt_texts,
+                "batch": batch_json,
+                "capture_traces": capture_traces,
+                "num_threads": self.num_threads,
+                "input_keys": self.input_keys,
+                "failure_score": self.failure_score,
+                "program_lm": self.program_lm,
+                "git_branch": git_branch,
+            },
+            timeout=self.subsample_eval_timeout,
+        )
 
         print(f"[ADAPTER] evaluate result: success={result.get('success')}, error={result.get('error', 'none')[:200] if result.get('error') else 'none'}", flush=True)
 
@@ -502,9 +546,10 @@ class CodeEvolverDSPyAdapter:
         """
         prompt_texts = self._get_prompt_texts(candidate)
 
+        program_path = self._get_parent_module_path_from_candidate(candidate)
         result = self._sandbox.exec_prebuilt({
             "command": "make_reflective_dataset",
-            "program": self.program_path,
+            "program": program_path,
             "saved_program_json_path": self.saved_program_json_path,
             "candidate": prompt_texts,
             "trajectories": eval_batch.trajectories or [],
@@ -582,6 +627,7 @@ class CodeEvolverDSPyAdapter:
             RuntimeError: If code mutation fails.
         """
         mutation_start_time = time.time()
+        self._code_mutation_count += 1
         print(f"[TIMER] Starting: _propose_code_mutation (full code mutation)", flush=True)
 
         current_code_data = json.loads(candidate.get(CODE_COMPONENT_KEY, "{}"))
@@ -620,6 +666,7 @@ class CodeEvolverDSPyAdapter:
         result = self._sandbox.exec_agent(
             proposed_change,
             push_branch=new_branch,
+            program_path=self.program_path,
         )
         agent_elapsed = time.time() - agent_start
         print(f"[TIMER] Phase 3 - coding agent took {agent_elapsed:.2f}s", flush=True)
@@ -696,6 +743,8 @@ class CodeEvolverDSPyAdapter:
             raise RuntimeError(f"Failed to build seed candidate on new branch: {result.get('error')}")
 
         new_seed = result["candidate"]  # Dict of current module names -> default instructions
+        # Update signature_key mapping from the new code structure
+        self._predictor_sig_keys = result.get("signature_keys", {})
         old_prompts = self._get_prompt_texts(old_candidate)  # Exclude _code
 
         # Build synchronized candidate
@@ -724,6 +773,24 @@ class CodeEvolverDSPyAdapter:
             print(f"[ADAPTER] Removed {removed_count} modules: {removed_modules}", flush=True)
 
         print(f"[ADAPTER] Candidate sync complete: {preserved_count} preserved, {added_count} added, {removed_count} removed", flush=True)
+
+        # Filter ghost predictors: run a small traced evaluation to find which
+        # predictors are actually invoked by forward() in the new code
+        if self._filter_examples and self._predictor_sig_keys:
+            print(f"[ADAPTER] Running trace-based ghost predictor filtering...", flush=True)
+            try:
+                eval_result = self.evaluate(
+                    batch=self._filter_examples,
+                    candidate=synchronized_candidate,
+                    capture_traces=True,
+                )
+                synchronized_candidate = self._filter_candidate_by_traces(
+                    synchronized_candidate,
+                    eval_result.trajectories,
+                    "rebuilt candidate",
+                )
+            except Exception as e:
+                print(f"[ADAPTER] Ghost filtering failed (non-fatal): {e}", flush=True)
 
         return synchronized_candidate
 
@@ -804,6 +871,9 @@ class CodeEvolverDSPyAdapter:
     ) -> str:
         """Build prompt for the reflective LM to analyze and propose a change.
 
+        Alternates between problem-driven (even mutations) and solution-driven
+        (odd mutations) to diversify the search strategy.
+
         Args:
             feedback: List of feedback items from evaluation.
             parent_branch: The branch this mutation will spawn from.
@@ -812,12 +882,28 @@ class CodeEvolverDSPyAdapter:
             Formatted prompt string.
         """
         branch_attempts = self._attempted_changes_by_branch.get(parent_branch, [])
-        return build_code_reflection_prompt(
-            feedback=feedback,
-            parent_branch=parent_branch,
-            additional_instructions=self.additional_instructions,
-            attempted_changes=branch_attempts if branch_attempts else None,
-        )
+        attempted = branch_attempts if branch_attempts else None
+
+        if self._code_mutation_count % 2 == 0:
+            # Even: problem-driven (fix errors, low scores, exceptions)
+            print("[ADAPTER] Code reflection mode: PROBLEM-DRIVEN", flush=True)
+            return build_code_reflection_prompt(
+                feedback=feedback,
+                parent_branch=parent_branch,
+                additional_instructions=self.additional_instructions,
+                attempted_changes=attempted,
+                program_path=self.program_path,
+            )
+        else:
+            # Odd: solution-driven (explore new architectural ideas)
+            print("[ADAPTER] Code reflection mode: SOLUTION-DRIVEN", flush=True)
+            return build_code_reflection_prompt_solution_driven(
+                feedback=feedback,
+                parent_branch=parent_branch,
+                additional_instructions=self.additional_instructions,
+                attempted_changes=attempted,
+                program_path=self.program_path,
+            )
 
     def _propose_prompt_mutation(
         self,

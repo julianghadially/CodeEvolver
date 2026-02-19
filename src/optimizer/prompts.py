@@ -149,23 +149,25 @@ def build_code_reflection_prompt(
     parent_branch: str,
     additional_instructions: str | None = None,
     attempted_changes: list[str] | None = None,
+    max_feedback_items: int = 10,
+    program_path: str | None = None,
 ) -> str:
     """Build prompt for the reflective LM to analyze feedback and propose a change.
 
     Used during code mutation to analyze evaluation results and propose
-    a targeted code change.
+    a targeted code change (problem-driven: fix errors, low scores).
 
     Args:
         feedback: List of feedback items from evaluation.
         parent_branch: The branch this mutation will spawn from.
         additional_instructions: Optional client-provided guidance for optimization.
         attempted_changes: List of changes already tried from this branch (to avoid repeating).
+        max_feedback_items: Maximum number of feedback items to include. Default 10.
 
     Returns:
         Formatted prompt string for the reflection agent.
     """
-    # Limit to 10 examples to avoid token limits
-    feedback_str = json.dumps(feedback[:10], indent=2)
+    feedback_str = json.dumps(feedback[:max_feedback_items], indent=2)
 
     # Build additional instructions section if provided
     additional_section = ""
@@ -186,12 +188,24 @@ The following changes have already been tried. Propose something different:
 {attempted_list}
 """
 
+    # Build parent module constraint section
+    parent_module_section = ""
+    if program_path:
+        parent_module_section = f"""
+## Critical Constraint: Parent Module
+All code changes MUST be made within the top-most parent module class: `{program_path}`.
+- You may create new DSPy Signature classes and sub-modules, but they must be used by the existing parent module's `forward()` method
+- Do NOT create new pipeline or wrapper classes that bypass the parent module
+- Do NOT rename or replace the parent module class
+- The evaluation system calls `{program_path}` directly — any code not reachable from its `forward()` method will never execute
+"""
+
     return f"""You are analyzing the performance of an AI system to propose a single change to the AI system code (not the prompts).
 
-Unless otherwise specified in the additional instructions, the changes should be related to:
+Unless otherwise specified in the additional instructions, the changes should be related to the AI system itself, including:
+- Language model modules, Language model calls, or agents
 - Context pipeline
 - Memory
-- Language model modules
 - Module inputs and outputs
 - AI workflow architecture (e.g., How each module connects to each other)
     - sub-modules
@@ -210,7 +224,7 @@ Change should NOT be related to any of the following:
 2. Analyze the evaluation feedback below
 3. Propose ONE specific code change that would most improve performance
 
-{additional_section}{attempted_section}
+{additional_section}{attempted_section}{parent_module_section}
 
 ## Evaluation Feedback
 Each item shows an example input, the system output, and the score (1.0 = perfect).
@@ -223,6 +237,118 @@ Items may also include exceptions if the code failed.
 - If scores are consistently low for certain input patterns, propose changes to handle those cases
 - Be specific: mention file paths and what to change
 - Do NOT propose changes that have already been attempted (see above)
+- Change can involve significant change to the AI system, as long as it is one concept or feature.
+- Follow DSPy patterns and guidelines, below.
+
+Respond with a specific, actionable change request that a coding agent can execute.
+
+## Additional Guidelines
+
+### DSPy Guidelines
+- DSPy assumes a "compound AI system"
+- A compound AI system can involve one single module, or multiple modules that are wrapped by a parent module for the whole workflow
+- The top-most parent module is the "entry point" to the AI system and dictates the flow all the way to the final output
+"""
+
+
+def build_code_reflection_prompt_solution_driven(
+    feedback: list[dict],
+    parent_branch: str,
+    additional_instructions: str | None = None,
+    attempted_changes: list[str] | None = None,
+    max_feedback_items: int = 10,
+    program_path: str | None = None,
+) -> str:
+    """Build a solution-driven prompt for exploratory code mutations.
+
+    Unlike the problem-driven prompt (which fixes errors and low scores),
+    this prompt encourages the reflective LM to explore new architectural
+    ideas and creative approaches.
+
+    Args:
+        feedback: List of feedback items from evaluation.
+        parent_branch: The branch this mutation will spawn from.
+        additional_instructions: Optional client-provided guidance for optimization.
+        attempted_changes: List of changes already tried from this branch (to avoid repeating).
+        max_feedback_items: Maximum number of feedback items to include. Default 25.
+
+    Returns:
+        Formatted prompt string for the reflection agent.
+    """
+    feedback_str = json.dumps(feedback[:max_feedback_items], indent=2)
+
+    # Build additional instructions section if provided
+    additional_section = ""
+    if additional_instructions:
+        additional_section = f"""
+## Additional Instructions from Client
+{additional_instructions}
+"""
+
+    # Build attempted changes section
+    attempted_section = ""
+    if attempted_changes:
+        attempted_list = "\n".join(f"- {change}" for change in attempted_changes[-10:])
+        attempted_section = f"""
+## Previously Attempted Changes (DO NOT REPEAT)
+The following changes have already been tried. Propose something different:
+{attempted_list}
+"""
+
+    # Build parent module constraint section
+    parent_module_section = ""
+    if program_path:
+        parent_module_section = f"""
+## Critical Constraint: Parent Module
+All code changes MUST be made within the top-most parent module class: `{program_path}`.
+- You may create new DSPy Signature classes and sub-modules, but they must be used by the existing parent module's `forward()` method
+- Do NOT create new pipeline or wrapper classes that bypass the parent module
+- Do NOT rename or replace the parent module class
+- The evaluation system calls `{program_path}` directly — any code not reachable from its `forward()` method will never execute
+"""
+
+    return f"""You are exploring new architectural ideas for an AI system to improve its performance through creative code changes (not prompt changes).
+
+Your goal is NOT to fix specific errors, but to propose a novel architectural improvement that could unlock better performance. Think creatively about:
+
+- **New modules**: Could a single module be split into a pipeline? Could existing modules be simplified? Could the architecture of a given module be changed via  tool calling, chain of thought reasoning, or otherwise?
+- **Workflow restructuring**: Could modules be reordered, parallelized, or composed differently?
+- **Self-verification loops**: Could the system check its own output and retry on low confidence?
+- **Context enrichment**: Could additional context be gathered or synthesized before the main prediction?
+- **Decomposition**: Could complex tasks be broken into simpler sub-tasks?
+– **Research**: does academic research on Google scholar suggest a winning architecture?
+
+Changes should be related to the AI system itself, including:
+- Language model modules, Language model calls, or agents
+- Context pipeline
+- Memory
+- Module inputs and outputs
+- AI workflow architecture (e.g., How each module connects to each other)
+
+Change should NOT be related to any of the following:
+- Prompts
+- DSPy docstrings
+- Logging
+- Client database structure
+- Code that does not pertain to the AI workflow
+- Any Constraints provided by the client in the additional instructions section
+
+## Your Task
+1. First, read codeevolver.md to understand the system architecture
+2. Review the evaluation feedback below for general patterns (not specific errors)
+3. Propose ONE creative architectural change that explores a new approach
+
+{additional_section}{attempted_section}{parent_module_section}
+
+## Evaluation Feedback (for context, not for error-fixing)
+Each item shows an example input, the system output, and the score (1.0 = perfect).
+
+{feedback_str}
+
+## General Guidelines
+- Think big: propose structural changes  
+- Be specific: mention file paths and what to change
+- Avoid changes that have already been attempted (see above)
 - Change can involve significant change to the AI system, as long as it is one concept or feature.
 - Follow DSPy patterns and guidelines, below.
 

@@ -72,17 +72,37 @@ def checkout_branch_if_needed(
 def _clear_workspace_modules(logger: Any) -> None:
     """Clear workspace modules from sys.modules cache.
 
-    Only clears user code modules (src.*), NOT external packages like dspy.
+    Clears all modules whose source file lives under /workspace/ but NOT
+    under /workspace/.venv/, which covers user code (e.g., src.*,
+    langProBe.*) while preserving installed packages (dspy, numpy, etc.).
+
+    The venv site-packages lives at /workspace/.venv/lib/python3.11/site-packages/,
+    so a naive "/workspace/" check would incorrectly match dspy and other
+    installed packages, destroying their configuration state (e.g., dspy.configure).
+
     Note: We intentionally do NOT call importlib.invalidate_caches() as it
     corrupts dspy's module locators over repeated invocations.
 
     Args:
         logger: Logger instance with info() method
     """
-    workspace_modules = [
-        name for name in list(sys.modules.keys())
-        if name.startswith("src.") or name == "src"
-    ]
+    workspace_modules = []
+    for name, mod in list(sys.modules.items()):
+        if mod is None:
+            continue
+        mod_file = getattr(mod, "__file__", None) or ""
+        mod_path = getattr(mod, "__path__", None)
+        # Check if module's source file is under /workspace/ but NOT in the venv
+        if "/workspace/" in mod_file and "/workspace/.venv/" not in mod_file:
+            workspace_modules.append(name)
+        # Also check package __path__ for namespace packages without __file__
+        elif mod_path and any(
+            "/workspace/" in str(p) and "/workspace/.venv/" not in str(p)
+            for p in mod_path
+        ):
+            workspace_modules.append(name)
+
     for mod_name in workspace_modules:
         del sys.modules[mod_name]
-        logger.info(f"Cleared cached module: {mod_name}")
+    if workspace_modules:
+        logger.info(f"Cleared {len(workspace_modules)} cached workspace modules")
