@@ -1,6 +1,6 @@
 '''
 Controls
-- search count this is hard
+- search count
 - final document count
 - reasoning variable controlled by allowing chain of thought reasoning
 - The program is limited to Wikipedia documents.
@@ -47,7 +47,6 @@ The following external services are available with API keys already configured i
 ## Ideas for Optimization
 - Consider increasing the k retrieved, and then reranking the final results to 21 (max 21 documents allowed)
 - Consider different context retrieval pipelines, including query + different kinds of rerankers (list rerankers, score-based reranking, sliding-window rerankers, etc.)
-- Utility-oriented rerankers: https://arxiv.org/abs/2110.09059
 - LLM enhanced rerankers: https://arxiv.org/html/2406.12433v2
 - FIRST Faster Improved Listwise Reranking with Single Token Decoding rerankers: https://arxiv.org/abs/2406.15657
 - Do not attempt pairwise re-ranking as this takes too much time.

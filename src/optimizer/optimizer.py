@@ -146,7 +146,7 @@ def run_gepa_optimization(
     max_valset_size: int | None = None,
     debug: bool = False,
     debug_max_iterations: int | None = None,
-    subsample_eval_timeout: int = 1200,
+    subsample_eval_timeout: int = 3600,
     max_runtime: int | None = None,
 ) -> dict[str, Any]:
     """Run GEPA optimization. Called from the Modal function.

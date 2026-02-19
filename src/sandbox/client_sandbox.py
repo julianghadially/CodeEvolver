@@ -339,6 +339,9 @@ class ClientSandbox(ABC):
         GitHub installation tokens expire after 1 hour. For long-running
         optimizations, call this to get a fresh token before git operations.
 
+        Retries up to 3 times with backoff to handle transient timeouts
+        (e.g., Modal cold starts on the FastAPI container).
+
         Returns:
             Fresh token string, or None if refresh failed.
         """
@@ -348,30 +351,38 @@ class ClientSandbox(ABC):
 
         url = f"{self._callback_url}/internal/job/{self._job_id}/github-token"
 
-        try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {self._jwt_token}"},
-                )
-                response.raise_for_status()
-                data = response.json()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=60.0) as client:
+                    response = client.get(
+                        url,
+                        headers={"Authorization": f"Bearer {self._jwt_token}"},
+                    )
+                    response.raise_for_status()
+                    data = response.json()
 
-                if data.get("error"):
-                    logger.warning(f"Token refresh failed: {data['error']}")
+                    if data.get("error"):
+                        logger.warning(f"Token refresh failed: {data['error']}")
+                        return None
+
+                    new_token = data.get("token")
+                    if new_token:
+                        self.github_token = new_token
+                        logger.info("GitHub token refreshed successfully")
+                        return new_token
+
                     return None
 
-                new_token = data.get("token")
-                if new_token:
-                    self.github_token = new_token
-                    logger.info("GitHub token refreshed successfully")
-                    return new_token
-
+            except httpx.HTTPStatusError as e:
+                logger.warning(f"Token refresh HTTP error: {e.response.status_code}")
                 return None
-
-        except httpx.HTTPStatusError as e:
-            logger.warning(f"Token refresh HTTP error: {e.response.status_code}")
-            return None
-        except Exception as e:
-            logger.warning(f"Token refresh failed: {e}")
-            return None
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    import time
+                    wait = 5 * (attempt + 1)
+                    logger.warning(f"Token refresh attempt {attempt + 1} failed: {e}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    logger.warning(f"Token refresh failed after {max_retries} attempts: {e}")
+                    return None

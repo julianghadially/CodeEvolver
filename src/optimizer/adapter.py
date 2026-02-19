@@ -76,7 +76,7 @@ class CodeEvolverDSPyAdapter:
         reflection_prompt_template: str | None = None,
         additional_instructions: str | None = None,
         code_lm: str = "anthropic/claude-sonnet-4-5-20250514",
-        subsample_eval_timeout: int = 1200,
+        subsample_eval_timeout: int = 3600,
     ):
         self._sandbox = sandbox_manager
         self.program_path = program

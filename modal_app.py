@@ -265,6 +265,68 @@ def test_build_seed_candidate(
     )
 
 
+@app.function(
+    image=gepa_image,
+    volumes={"/workspaces": workspaces_volume},
+    secrets=[modal.Secret.from_name("codeevolver-worker-secrets")],
+    env={"APP_MODE": APP_MODE},
+    timeout=1800,  # 30 min — evaluate is much faster than full optimization
+    cpu=4,
+    memory=8192,
+)
+def test_evaluate(
+    repo_url: str,
+    program: str,
+    metric: str,
+    batch: list[dict] | None = None,
+    batch_path: str | None = None,
+    candidate: dict[str, str] | None = None,
+    git_branch: str = "main",
+    saved_program_json_path: str | None = None,
+    program_lm: str = "openai/gpt-5-mini",
+    num_threads: int = 1,
+    input_keys: list[str] | None = None,
+    max_rows: int = 20,
+    installation_id: int | None = None,
+    capture_traces: bool = False,
+) -> dict:
+    """Test evaluation using GEPASandbox (production-like environment).
+
+    Runs exec_prebuilt(evaluate) on a dataset batch, optionally building
+    the seed candidate first if no explicit candidate is provided.
+
+    Returns:
+        Dict with 'success', 'scores', 'mean_score', 'outputs',
+        'num_examples', 'error', 'error_details', 'logs'.
+    """
+    import os
+    import sys
+
+    if "/app" not in sys.path:
+        sys.path.append("/app")
+    os.chdir("/app")
+
+    from src.test_functions import test_evaluate_impl
+
+    return test_evaluate_impl(
+        repo_url=repo_url,
+        program=program,
+        metric=metric,
+        batch=batch,
+        batch_path=batch_path,
+        candidate=candidate,
+        git_branch=git_branch,
+        saved_program_json_path=saved_program_json_path,
+        program_lm=program_lm,
+        num_threads=num_threads,
+        input_keys=input_keys,
+        max_rows=max_rows,
+        installation_id=installation_id,
+        capture_traces=capture_traces,
+        app_for_sandbox=app,
+    )
+
+
 # ---------------------------------------------------------------------------
 # GEPA Optimization
 # ---------------------------------------------------------------------------
@@ -310,7 +372,7 @@ def run_optimization(
     initial_branch: str = "main",
     max_valset_size: int | None = None,
     debug_max_iterations: int | None = None,
-    subsample_eval_timeout: int = 1200,
+    subsample_eval_timeout: int = 3600,
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 

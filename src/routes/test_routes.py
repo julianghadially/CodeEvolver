@@ -8,6 +8,7 @@ These endpoints allow testing individual components like:
 
 Usage:
     POST /test/build-seed - Test build_seed_candidate with a repo
+    POST /test/evaluate - Run evaluation on a dataset batch
     POST /test/gepa-state - Test GEPA state structure validation
     POST /test/git-ops - Test git branch operations
     GET /test/list - List available test operations
@@ -24,10 +25,11 @@ from pydantic import BaseModel, Field
 # Import Modal test functions from modal_app
 # These are defined in modal_app.py but delegate to src/test_functions.py for implementation
 try:
-    from modal_app import test_build_seed_candidate
+    from modal_app import test_build_seed_candidate, test_evaluate
 except ImportError:
     # If running locally without Modal, functions won't be available
     test_build_seed_candidate = None
+    test_evaluate = None
 
 router = APIRouter(prefix="/test", tags=["testing"])
 
@@ -90,6 +92,35 @@ class GitOpsTestResponse(BaseModel):
     error: str | None = None
 
 
+class EvaluateTestRequest(BaseModel):
+    """Request to test evaluation on a dataset batch."""
+    repo_url: str = Field(..., description="Git repository URL")
+    program: str = Field(..., description="Dotted import path to DSPy module")
+    metric: str = Field(..., description="Dotted import path to metric function")
+    batch: list[dict] | None = Field(default=None, description="Inline dataset (list of dicts)")
+    batch_path: str | None = Field(default=None, description="Path to data file in repo (JSON/JSONL/CSV)")
+    candidate: dict[str, str] | None = Field(default=None, description="Explicit prompt texts (if None, uses program defaults)")
+    git_branch: str = Field(default="main", description="Branch to evaluate")
+    saved_program_json_path: str | None = Field(default=None, description="Optional path to program.json")
+    program_lm: str = Field(default="openai/gpt-5-mini", description="LM for evaluation")
+    num_threads: int = Field(default=1, description="Parallelism for evaluation")
+    input_keys: list[str] | None = Field(default=None, description="Explicit input field names")
+    max_rows: int = Field(default=20, description="Cap on dataset size")
+    installation_id: int | None = Field(default=None, description="GitHub App installation ID for private repos")
+    capture_traces: bool = Field(default=False, description="Whether to capture DSPy traces")
+
+
+class EvaluateTestResponse(BaseModel):
+    """Response from evaluation test."""
+    success: bool
+    mean_score: float | None = None
+    scores: list[float] | None = None
+    num_examples: int | None = None
+    outputs: list | None = None
+    error: str | None = None
+    logs: list[str] | None = None
+
+
 @router.get("/list")
 async def list_test_operations():
     """List available test operations."""
@@ -123,6 +154,16 @@ async def list_test_operations():
                     "Test branch naming conventions",
                     "Verify git diff parsing",
                     "Test branch creation"
+                ]
+            },
+            {
+                "endpoint": "/test/evaluate",
+                "method": "POST",
+                "description": "Run evaluation on a dataset batch without full optimization",
+                "use_cases": [
+                    "Quick evaluation of a DSPy program on a small batch",
+                    "Test that metric + program work together",
+                    "Get baseline scores before running optimization"
                 ]
             }
         ]
@@ -311,4 +352,63 @@ async def test_git_operations(request: GitOpsTestRequest) -> GitOpsTestResponse:
         return GitOpsTestResponse(
             success=False,
             error=str(e)
+        )
+
+
+@router.post("/evaluate", response_model=EvaluateTestResponse)
+async def test_evaluate_endpoint(request: EvaluateTestRequest) -> EvaluateTestResponse:
+    """Run evaluation on a dataset batch without full optimization.
+
+    This endpoint:
+    1. Clones the repository and sets up the sandbox
+    2. Optionally builds the seed candidate (if no explicit candidate provided)
+    3. Runs exec_prebuilt(evaluate) on the batch
+    4. Returns scores, outputs, and summary stats
+
+    Use this to quickly test that a program + metric work together,
+    or to get baseline scores before running a full optimization.
+    """
+    if test_evaluate is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Modal not available. Run with 'modal serve modal_app.py'."
+        )
+
+    try:
+        result = await test_evaluate.remote.aio(
+            repo_url=request.repo_url,
+            program=request.program,
+            metric=request.metric,
+            batch=request.batch,
+            batch_path=request.batch_path,
+            candidate=request.candidate,
+            git_branch=request.git_branch,
+            saved_program_json_path=request.saved_program_json_path,
+            program_lm=request.program_lm,
+            num_threads=request.num_threads,
+            input_keys=request.input_keys,
+            max_rows=request.max_rows,
+            installation_id=request.installation_id,
+            capture_traces=request.capture_traces,
+        )
+
+        return EvaluateTestResponse(
+            success=result.get("success", False),
+            mean_score=result.get("mean_score"),
+            scores=result.get("scores"),
+            num_examples=result.get("num_examples"),
+            outputs=result.get("outputs"),
+            error=result.get("error"),
+            logs=result.get("logs"),
+        )
+
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Modal not available. Run with 'modal serve modal_app.py'."
+        )
+    except Exception as e:
+        return EvaluateTestResponse(
+            success=False,
+            error=f"Test failed: {e}"
         )

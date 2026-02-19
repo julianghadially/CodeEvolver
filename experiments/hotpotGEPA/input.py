@@ -1,9 +1,9 @@
 '''
 Controls
 - search count
-- final document count
+- Limited to existing Wikipedia web service
 - reasoning variable controlled by allowing chain of thought reasoning
-- The program is limited to Wikipedia documents.
+
 Not controlled
 - module creation, removal, and modification
 - # of database documents retrieved per search (same cost)

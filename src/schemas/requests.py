@@ -167,8 +167,8 @@ class OptimizeRequest(BaseModel):
 
     # Per-evaluation timeout
     subsample_eval_timeout: int = Field(
-        default=1200,
-        description="Timeout in seconds for subsample evaluation (default 1200s / 20 min)",
+        default=3600,
+        description="Timeout in seconds for subsample evaluation (default 3600s / 60 min)",
     )
 
     # Validation set size

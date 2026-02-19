@@ -145,3 +145,203 @@ def test_build_seed_candidate_impl(
                 logs.append("✓ Sandbox stopped")
             except Exception as e:
                 logs.append(f"⚠ Error stopping sandbox: {e}")
+
+
+def test_evaluate_impl(
+    repo_url: str,
+    program: str,
+    metric: str,
+    batch: list[dict] | None = None,
+    batch_path: str | None = None,
+    candidate: dict[str, str] | None = None,
+    git_branch: str = "main",
+    saved_program_json_path: str | None = None,
+    program_lm: str = "openai/gpt-5-mini",
+    num_threads: int = 1,
+    input_keys: list[str] | None = None,
+    max_rows: int = 20,
+    installation_id: int | None = None,
+    capture_traces: bool = False,
+    app_for_sandbox: Any | None = None,
+) -> dict:
+    """Implementation for test_evaluate Modal function.
+
+    Runs evaluation on a dataset batch using exec_prebuilt, exactly like
+    production. If no candidate is provided, builds the seed candidate first
+    to extract default prompts.
+
+    Args:
+        repo_url: Git repository URL.
+        program: Dotted import path to DSPy module.
+        metric: Dotted import path to metric function.
+        batch: Inline dataset (list of dicts). Either this or batch_path required.
+        batch_path: Path to a data file in the repo (JSON/JSONL/CSV).
+        candidate: Explicit prompt texts. If None, seed candidate is built.
+        git_branch: Branch to evaluate (default "main").
+        saved_program_json_path: Optional path to program.json.
+        program_lm: LM for evaluation (default "openai/gpt-5-mini").
+        num_threads: Parallelism (default 1).
+        input_keys: Explicit input field names.
+        max_rows: Cap on dataset size (default 20).
+        installation_id: GitHub App installation ID for private repos.
+        capture_traces: Whether to capture DSPy traces (default False).
+        app_for_sandbox: Modal app instance for sandbox creation.
+
+    Returns:
+        Dict with 'success', 'scores', 'mean_score', 'outputs',
+        'num_examples', 'error', 'error_details', 'logs'.
+    """
+    import json as json_mod
+    import os
+    sys.path.insert(0, "/app")
+    os.chdir("/app")
+
+    from src.optimizer.gepa_sandbox import GEPASandbox
+    from src.services.github_app import GitHubAppService
+
+    logs: list[str] = ["Using GEPASandbox for evaluate test"]
+    sandbox = None
+
+    try:
+        # --- Validate inputs ---
+        if batch is None and batch_path is None:
+            return {
+                "success": False,
+                "error": "Either 'batch' or 'batch_path' must be provided.",
+                "logs": logs,
+            }
+
+        # --- GitHub auth ---
+        github_token = None
+        if installation_id:
+            github_token = GitHubAppService.get_installation_token(installation_id)
+            logs.append("GitHub authentication successful")
+
+        # --- Create and start sandbox ---
+        sandbox = GEPASandbox(
+            app=app_for_sandbox,
+            repo_url=repo_url,
+            github_token=github_token,
+            timeout=1500,
+        )
+        logs.append(f"Created GEPASandbox for {repo_url}")
+
+        sandbox.start(use_venv=True, branch=git_branch)
+        logs.append(f"Sandbox started (branch: {git_branch})")
+
+        # --- Load dataset ---
+        if batch is not None:
+            dataset = batch
+            logs.append(f"Using inline batch ({len(dataset)} rows)")
+        else:
+            logs.append(f"Loading dataset from {batch_path}...")
+            cat_result = sandbox.exec_bash(f"cat {batch_path}")
+            raw = cat_result.get("stdout", "")
+            if not raw.strip():
+                return {
+                    "success": False,
+                    "error": f"batch_path '{batch_path}' is empty or not found.",
+                    "logs": logs,
+                }
+
+            # Detect format and parse
+            stripped = raw.strip()
+            if stripped.startswith("["):
+                # JSON array
+                dataset = json_mod.loads(stripped)
+            elif stripped.startswith("{"):
+                # JSONL (one JSON object per line)
+                dataset = [json_mod.loads(line) for line in stripped.splitlines() if line.strip()]
+            else:
+                # CSV – parse with csv module
+                import csv
+                import io
+                reader = csv.DictReader(io.StringIO(raw))
+                dataset = [dict(row) for row in reader]
+
+            logs.append(f"Loaded {len(dataset)} rows from {batch_path}")
+
+        # Apply max_rows cap
+        if len(dataset) > max_rows:
+            dataset = dataset[:max_rows]
+            logs.append(f"Capped dataset to {max_rows} rows")
+
+        # --- Optionally build seed candidate ---
+        if candidate is None:
+            logs.append("No candidate provided; building seed candidate...")
+            seed_result = sandbox.exec_prebuilt({
+                "command": "build_seed_candidate",
+                "program": program,
+                "saved_program_json_path": saved_program_json_path,
+            })
+            if not seed_result.get("success"):
+                return {
+                    "success": False,
+                    "error": f"build_seed_candidate failed: {seed_result.get('error', 'unknown')}",
+                    "logs": logs + seed_result.get("logs", []),
+                }
+            candidate = seed_result.get("candidate", {})
+            logs.append(f"Seed candidate built ({len(candidate)} predictors)")
+
+        # --- Run evaluation ---
+        logs.append(f"Running evaluation on {len(dataset)} examples...")
+        eval_result = sandbox.exec_prebuilt({
+            "command": "evaluate",
+            "program": program,
+            "metric": metric,
+            "saved_program_json_path": saved_program_json_path,
+            "candidate": candidate,
+            "batch": dataset,
+            "capture_traces": capture_traces,
+            "num_threads": num_threads,
+            "input_keys": input_keys or [],
+            "failure_score": 0.0,
+            "program_lm": program_lm,
+            "git_branch": git_branch,
+        })
+
+        if not eval_result.get("success", False):
+            error_msg = eval_result.get("error", "evaluate failed")
+            if eval_result.get("traceback"):
+                error_msg += f"\n\nTraceback:\n{eval_result['traceback']}"
+            return {
+                "success": False,
+                "error": error_msg,
+                "logs": logs + eval_result.get("logs", []),
+            }
+
+        # --- Compute summary stats ---
+        scores = eval_result.get("scores", [])
+        outputs = eval_result.get("outputs", [])
+        mean_score = sum(scores) / len(scores) if scores else None
+        error_count = sum(1 for s in scores if s == 0.0)
+
+        logs.append(
+            f"Evaluation complete: mean_score={mean_score:.4f}, "
+            f"{error_count}/{len(scores)} zero-score examples"
+        )
+
+        return {
+            "success": True,
+            "scores": scores,
+            "mean_score": mean_score,
+            "outputs": outputs,
+            "num_examples": len(scores),
+            "error_details": None,
+            "logs": logs,
+        }
+
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": f"Test failed: {e}",
+            "logs": logs + [traceback.format_exc()],
+        }
+    finally:
+        if sandbox:
+            try:
+                sandbox.stop()
+                logs.append("Sandbox stopped")
+            except Exception as e:
+                logs.append(f"Error stopping sandbox: {e}")
