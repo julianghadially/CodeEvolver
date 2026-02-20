@@ -7,6 +7,8 @@ Copyright notice for GEPA-derived patterns:
 Copyright (c) 2025 Lakshya A Agrawal and the GEPA contributors
 """
 
+import random
+
 from gepa.core.adapter import Trajectory
 from gepa.core.state import GEPAState
 from gepa.proposer.reflective_mutation.base import ReflectionComponentSelector
@@ -119,27 +121,19 @@ class CodeFrequencyComponentSelector(ReflectionComponentSelector):
                 return [CODE_COMPONENT_KEY]
             return []
 
-        # Round-robin on prompt components
+        # Round-robin directly on the candidate's prompt components.
+        # Avoids dependence on state.list_of_named_predictors which can become
+        # stale after code mutations rename/add/remove predictors.
         pid = state.named_predictor_id_to_update_next_for_program_candidate[candidate_idx]
 
-        prompt_idx = 0
-        current_idx = 0
-        for name in state.list_of_named_predictors:
-            if name == CODE_COMPONENT_KEY:
-                if current_idx == pid:
-                    pid = (pid + 1) % len(state.list_of_named_predictors)
-                current_idx += 1
-                continue
-            if current_idx == pid:
-                break
-            prompt_idx += 1
-            current_idx += 1
+        if pid >= len(prompt_components):
+            # pid is out of range — candidate structure changed (code mutation).
+            # Randomize to distribute prompt mutations evenly across new predictors.
+            pid = random.randint(0, len(prompt_components) - 1)
 
-        component_name = prompt_components[prompt_idx % len(prompt_components)]
+        component_name = prompt_components[pid]
 
-        next_pid = (pid + 1) % len(state.list_of_named_predictors)
-        if state.list_of_named_predictors[next_pid] == CODE_COMPONENT_KEY:
-            next_pid = (next_pid + 1) % len(state.list_of_named_predictors)
+        next_pid = (pid + 1) % len(prompt_components)
         state.named_predictor_id_to_update_next_for_program_candidate[candidate_idx] = next_pid
         print(f"[COMPONENT SELECTOR] selected {component_name} for candidate {candidate_idx}", flush=True)
         return [component_name]

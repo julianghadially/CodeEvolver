@@ -16,7 +16,8 @@
       "Bash(python3:*)",
       "Bash(find:*)",
       "Bash(pip show:*)",
-      "Bash(pip3 show:*)"
+      "Bash(pip3 show:*)",
+      "WebFetch(domain:dspy.ai)"
     ]
   }
 }
