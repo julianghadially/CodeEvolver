@@ -55,7 +55,7 @@ OPTIMIZE_CONFIG = {
     "input_keys": ["question"],
     "reflection_lm": "openai/gpt-4.1-mini",
     "max_metric_calls": 7500, # 150 examples × 40 full evals (with subsampled valset)
-    "num_threads": 5,
+    "num_threads": 8,
     "max_valset_size": 150, # Subsample validation set to 150 examples (from 300) for faster evaluation
     "seed": 42,
     "additional_instructions": additional_instructions,

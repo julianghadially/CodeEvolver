@@ -76,7 +76,9 @@ class CodeEvolverDSPyAdapter:
         reflection_prompt_template: str | None = None,
         additional_instructions: str | None = None,
         code_lm: str = "anthropic/claude-sonnet-4-5-20250514",
-        subsample_eval_timeout: int = 3600,
+        subsample_eval_timeout: int = 2400,
+        valset_eval_timeout: int = 14400,
+        subsample_size: int = 20,
     ):
         self._sandbox = sandbox_manager
         self.program_path = program
@@ -92,6 +94,8 @@ class CodeEvolverDSPyAdapter:
         self.additional_instructions = additional_instructions
         self.code_lm = code_lm
         self.subsample_eval_timeout = subsample_eval_timeout
+        self.valset_eval_timeout = valset_eval_timeout
+        self.subsample_size = subsample_size
         # Track attempted changes per parent branch to avoid repeating the same ideas.
         # Key: parent branch name, Value: list of changes attempted FROM that branch.
         # This allows parallel branches to independently discover the same mutation.
@@ -489,6 +493,14 @@ class CodeEvolverDSPyAdapter:
             else:
                 batch_json.append(dict(ex))
 
+        # Choose timeout based on batch size: subsample-sized batches get the
+        # shorter timeout; larger batches (full valset) get the longer one.
+        timeout = (
+            self.subsample_eval_timeout
+            if len(batch) <= self.subsample_size
+            else self.valset_eval_timeout
+        )
+
         result = self._sandbox.exec_prebuilt(
             {
                 "command": "evaluate",
@@ -504,7 +516,7 @@ class CodeEvolverDSPyAdapter:
                 "program_lm": self.program_lm,
                 "git_branch": git_branch,
             },
-            timeout=self.subsample_eval_timeout,
+            timeout=timeout,
         )
 
         print(f"[ADAPTER] evaluate result: success={result.get('success')}, error={result.get('error', 'none')[:200] if result.get('error') else 'none'}", flush=True)

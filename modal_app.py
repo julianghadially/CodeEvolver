@@ -191,8 +191,11 @@ gepa_image = (
         "httpx>=0.27.0",
         "pyjwt[cryptography]>=2.8.0",
         "tqdm>=4.66.1",
+    )
+    .pip_install(
         # Install custom GEPA with CodeEvolver modifications from GitHub
         "git+https://github.com/julianghadially/GEPA-CodeEvolver.git@main",
+        force_build=False,
     )
     .add_local_dir(".", remote_path="/app", ignore=FilePatternMatcher.from_file(".modalignore"),)
 )
@@ -209,7 +212,7 @@ gepa_image = (
     volumes={"/workspaces": workspaces_volume},
     secrets=[modal.Secret.from_name("codeevolver-worker-secrets")],
     env={"APP_MODE": APP_MODE},  # Set environment mode (dev/prod)
-    timeout=43200,  # 12 hours - KEEP IN SYNC with src/config.py gepa_job_timeout
+    timeout=86400,  # 24 hours - KEEP IN SYNC with src/config.py gepa_job_timeout
     cpu=4,
     memory=8192,
     nonpreemptible=False,  # Prevent mid-optimization restarts (3x CPU/memory cost)
@@ -338,7 +341,7 @@ def test_evaluate(
     volumes={"/workspaces": workspaces_volume},
     secrets=[modal.Secret.from_name("codeevolver-worker-secrets")],
     env={"APP_MODE": APP_MODE},  # Set environment mode (dev/prod)
-    timeout=43200,  # 12 hours - KEEP IN SYNC with src/config.py gepa_job_timeout
+    timeout=86400,  # 24 hours - KEEP IN SYNC with src/config.py gepa_job_timeout
     cpu=4,
     memory=8192,
     nonpreemptible=True,  # Prevent mid-optimization restarts (3x CPU/memory cost)
@@ -372,7 +375,8 @@ def run_optimization(
     initial_branch: str = "main",
     max_valset_size: int | None = None,
     debug_max_iterations: int | None = None,
-    subsample_eval_timeout: int = 3600,
+    subsample_eval_timeout: int = 2400,
+    valset_eval_timeout: int = 14400,
 ) -> dict:
     """Run GEPA optimization in a dedicated Modal function.
 
@@ -455,7 +459,8 @@ def run_optimization(
             max_valset_size=max_valset_size,
             debug_max_iterations=debug_max_iterations,
             subsample_eval_timeout=subsample_eval_timeout,
-            max_runtime=43200,  # Must match Modal function timeout
+            valset_eval_timeout=valset_eval_timeout,
+            max_runtime=settings.gepa_job_timeout,  # Uses global config
         )
         return result
     finally:

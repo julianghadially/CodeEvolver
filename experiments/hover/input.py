@@ -62,13 +62,15 @@ OPTIMIZE_CONFIG = {
     "input_keys": ["claim"],
     "reflection_lm": "openai/gpt-4.1-mini",
     "max_metric_calls": 7500,  # 150 examples × 50 full evals (with subsampled valset)
-    "num_threads": 5,  # Increased from 5 to 20 for better parallelization
+    "num_threads": 8,  # Increased from 5 to 20 for better parallelization
     "max_valset_size": 150,  # Subsample validation set to 150 examples (from 300) for faster evaluation
     "seed": 42,
     "additional_instructions": additional_instructions,
     "initial_branch": "hover",
     "decay_rate": 30,
     "subsample_size": 20,
+    "subsample_eval_timeout": 2400,  # 40 min (in seconds) - subsample evals
+    "valset_eval_timeout": 14400,  # 4 hours (in seconds) - reranker architectures need more time for full valset
     # Using default CodeFrequencyComponentSelector (initial=1, decay_rate=25)
     # This does 1:1 code/prompt ratio initially, then increases prompts per code every 25 iterations
 }

@@ -87,6 +87,14 @@ class CancelCheckResponse(BaseModel):
     cancelled: bool
 
 
+class CleanupBranchesResponse(BaseModel):
+    """Response payload for POST /cleanup-branches."""
+
+    deleted: list[str] = Field(default_factory=list, description="Branch names that were deleted")
+    skipped: list[str] = Field(default_factory=list, description="Branch names that were skipped (in except_branches)")
+    errors: list[str] = Field(default_factory=list, description="Branches that failed to delete, with error details")
+
+
 class JobDetailedStateResponse(BaseModel):
     """Response payload for GET /job/{job_id}/state with full GEPA state."""
 

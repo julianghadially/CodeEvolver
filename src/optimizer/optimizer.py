@@ -146,7 +146,8 @@ def run_gepa_optimization(
     max_valset_size: int | None = None,
     debug: bool = False,
     debug_max_iterations: int | None = None,
-    subsample_eval_timeout: int = 3600,
+    subsample_eval_timeout: int = 2400,
+    valset_eval_timeout: int = 14400,
     max_runtime: int | None = None,
 ) -> dict[str, Any]:
     """Run GEPA optimization. Called from the Modal function.
@@ -223,6 +224,8 @@ def run_gepa_optimization(
             code_lm=code_lm,
             initial_branch=initial_branch,
             subsample_eval_timeout=subsample_eval_timeout,
+            valset_eval_timeout=valset_eval_timeout,
+            subsample_size=subsample_size,
         )
         print(f"[TIMER] Adapter creation took {time.time() - adapter_start:.2f}s", flush=True)
 

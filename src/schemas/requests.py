@@ -165,10 +165,14 @@ class OptimizeRequest(BaseModel):
         description="Number of examples per evaluation batch (subsample size)",
     )
 
-    # Per-evaluation timeout
+    # Per-evaluation timeouts
     subsample_eval_timeout: int = Field(
-        default=3600,
-        description="Timeout in seconds for subsample evaluation (default 3600s / 60 min)",
+        default=2400,
+        description="Timeout in seconds for subsample evaluation (default 2400s / 40 min)",
+    )
+    valset_eval_timeout: int = Field(
+        default=14400,
+        description="Timeout in seconds for full validation set evaluation (default 14400s / 4 hours)",
     )
 
     # Validation set size
@@ -226,3 +230,30 @@ class GitHubTokenResponse(BaseModel):
 
     token: str | None = None
     error: str | None = None
+
+
+class CleanupBranchesRequest(BaseModel):
+    """Request payload for POST /cleanup-branches endpoint.
+
+    Deletes all remote git branches matching 'codeevolver-{timestamp}*' pattern,
+    except those explicitly listed.
+    """
+
+    repo_url: str = Field(
+        ...,
+        description="GitHub repository URL (e.g., 'https://github.com/user/repo')",
+    )
+    date: str = Field(
+        ...,
+        description="Date-time scope for branch cleanup in YYYYMMDDHHmmss format (e.g., '20260221191443'). Only branches matching 'codeevolver-{date}*' will be deleted.",
+    )
+    except_branches: list[str] = Field(
+        ...,
+        description="List of branch names to keep (exceptions). These branches will NOT be deleted even if they match the date pattern.",
+    )
+
+    @model_validator(mode="after")
+    def validate_date_format(self) -> "CleanupBranchesRequest":
+        if len(self.date) != 14 or not self.date.isdigit():
+            raise ValueError("date must be in YYYYMMDDHHmmss format (e.g., '20260221191443')")
+        return self

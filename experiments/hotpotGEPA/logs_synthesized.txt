@@ -1,0 +1,86 @@
+(env) (base) CodeEvolver ~ % python -m experiments.run --program hotpotGEPA
+Starting optimization run
+Iteration 0: Base program full valset score: 0.5666666666666667 over 150 / 150 examples
+Iteration 1: Selected program 0 score: 0.5666666666666667
+Iteration 1: Proposed new text for program.create_query_hop2.predict: Task Description:
+Iteration 1: New subsample score 9.0 is not better than old score 10.0, skipping
+Iteration 2: Selected program 0 score: 0.5666666666666667
+Iteration 2: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-47df20", "change_request": "{'change_request': 'Replace the current summarize-then-generate architecture with a retrieve-rerank-extract pipeline in the HotpotMultiHopPipeline.forward() method. (1) Keep the 2-hop retrieval but in..."}
+Iteration 2: New subsample score 15.0 is better than old score 11.0. Continue to full eval and add to candidate pool.
+Iteration 2: Found a better program on the valset with score 0.6466666666666666.
+Iteration 2: Best valset aggregate score so far: 0.6466666666666666
+Iteration 3: Selected program 1 score: 0.6466666666666666
+Iteration 3: Proposed new text for create_query_hop2.predict: Given two input fields, `question` and `context`, your task is to produce a precise, concise `query` that will efficiently retrieve or confirm the specific answer to the question by focusing on key en...
+Iteration 3: New subsample score 17.0 is not better than old score 17.0, skipping
+Iteration 4: Selected program 0 score: 0.5666666666666667
+Iteration 4: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-b47572", "change_request": "{'change_request': 'In HotpotMultiHopPipeline.forward(), replace the entire summarize-then-generate workflow with a direct extraction approach. Remove the HotpotMultiHop sub-module entirely. Instead, ..."}
+Iteration 4: New subsample score 15.0 is better than old score 9.0. Continue to full eval and add to candidate pool.
+Iteration 4: Found a better program on the valset with score 0.72.
+Iteration 4: Best valset aggregate score so far: 0.72
+Iteration 5: Selected program 0 score: 0.5666666666666667
+Iteration 5: Proposed new text for program.summarize1.predict: Task Description:
+Iteration 5: New subsample score 14.0 is not better than old score 14.0, skipping
+Iteration 6: Selected program 0 score: 0.5666666666666667
+Iteration 6: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-30a444", "change_request": "{'change_request': 'Implement a candidate generation + self-verification architecture in HotpotMultiHopPipeline.forward(). (1) Perform 2-hop retrieval as before (keep k=7 for both hops), but concatena..."}
+Iteration 6: New subsample score 6.0 is not better than old score 12.0, skipping
+Iteration 7: Selected program 2 score: 0.72
+Iteration 7: Proposed new text for extract_answer.predict: Task: Extract the exact short factoid answer to the given question from the provided passages.
+Iteration 7: New subsample score 15.0 is not better than old score 15.0, skipping
+Iteration 8: Selected program 0 score: 0.5666666666666667
+Iteration 8: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-ecf36d", "change_request": "{'change_request': 'In HotpotMultiHopPipeline.forward(), implement a two-stage answer generation architecture: (1) Increase k from 7 to 15 for both retrieval hops to get more comprehensive evidence, (..."}
+Iteration 8: New subsample score 16.0 is better than old score 14.0. Continue to full eval and add to candidate pool.
+Iteration 8: Best valset aggregate score so far: 0.72
+Iteration 9: Selected program 2 score: 0.72
+Iteration 9: Proposed new text for create_query_hop2.predict: Given input fields:
+Iteration 9: New subsample score 16.0 is not better than old score 16.0, skipping
+Iteration 10: Selected program 3 score: 0.7
+Iteration 10: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-6b8321", "change_request": "{'change_request': 'Transform the HotpotMultiHopPipeline to use a Dual-Path Answer Generation with Cross-Verification architecture: (1) Remove the summarization steps (summarize1, summarize2) and inst..."}
+Iteration 10: New subsample score 15.0 is better than old score 14.0. Continue to full eval and add to candidate pool.
+Iteration 10: Best valset aggregate score so far: 0.72
+Iteration 11: Selected program 4 score: 0.72
+Iteration 11: Proposed new text for answer_path_b: You will be given a question along with one or more sets of raw passages containing relevant factual information. Your task is to generate a concise, accurate answer to the question by directly extrac...
+Iteration 11: New subsample score 15.0 is not better than old score 16.0, skipping
+Iteration 12: Selected program 0 score: 0.5666666666666667
+Iteration 12: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-1da0e4", "change_request": "{'change_request': 'In HotpotMultiHopPipeline.forward(), implement a 2-hop retrieve-then-extract architecture that preserves exact factoid answers. (1) Perform hop 1 retrieval with k=10, (2) generate ..."}
+Iteration 12: New subsample score 14.0 is better than old score 10.0. Continue to full eval and add to candidate pool.
+Iteration 12: Found a better program on the valset with score 0.7466666666666667.
+Iteration 12: Best valset aggregate score so far: 0.7466666666666667
+Iteration 13: Selected program 5 score: 0.7466666666666667
+Iteration 13: Proposed new text for extract_answer: Given a question and a set of passages, extract the shortest, most precise, and exact factoid answer that directly responds to the question, using only information contained in the passages. The answe...
+Iteration 13: New subsample score 17.0 is better than old score 15.0. Continue to full eval and add to candidate pool.
+Iteration 13: Found a better program on the valset with score 0.76.
+Iteration 13: Best valset aggregate score so far: 0.76
+Iteration 14: Selected program 1 score: 0.6466666666666666
+Iteration 14: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-b177d7", "change_request": "Add a self-verification and answer normalization architecture to HotpotMultiHopPipeline in /workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py:  1. Create a new DSPy signature class `VerifyAndNormali..."}
+Iteration 14: New subsample score 17.0 is not better than old score 17.0, skipping
+Iteration 15: Selected program 1 score: 0.6466666666666666
+Iteration 15: Proposed new text for extract_answer.predict: Given a question along with a set of passages, your task is to extract the precise, concise factual answer that directly addresses the question from the information provided in the passages.
+Iteration 15: New subsample score 13.0 is not better than old score 15.0, skipping
+Iteration 16: Selected program 1 score: 0.6466666666666666
+Iteration 16: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-80c9a9", "change_request": "{'change_request': 'Replace the single-stage ExtractAnswer module with a two-stage answer extraction and normalization architecture in HotpotMultiHopPipeline. Create a new DSPy signature `NormalizeAns..."}
+Iteration 16: New subsample score 14.0 is not better than old score 15.0, skipping
+Iteration 17: Selected program 2 score: 0.72
+Iteration 17: Proposed new text for extract_answer.predict: Task Description:
+Iteration 17: New subsample score 18.0 is better than old score 16.0. Continue to full eval and add to candidate pool.
+Iteration 17: Best valset aggregate score so far: 0.76
+Iteration 18: Selected program 2 score: 0.72
+Iteration 18: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-219290", "change_request": "{'change_request': 'Implement a two-stage answer extraction architecture in `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py` within the `HotpotMultiHopPipeline.forward()` method: (1) Create a ne..."}
+Iteration 18: New subsample score 5.0 is not better than old score 14.0, skipping
+Iteration 19: Selected program 7 score: 0.72
+Iteration 19: Proposed new text for create_query_hop2.predict: Given two input fields:
+Iteration 19: New subsample score 15.0 is not better than old score 16.0, skipping
+Iteration 20: Selected program 7 score: 0.72
+Iteration 20: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-b7d7ef", "change_request": "Implement a reranking-based answer extraction pipeline in `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`: (1) After retrieving passages from both hops, create a new `dspy.ChainOfThought` modul..."}
+Iteration 20: New subsample score 2.0 is not better than old score 15.0, skipping
+Iteration 21: Selected program 1 score: 0.6466666666666666
+Iteration 21: Proposed new text for rerank.predict: Given a question and a passage, determine how relevant the passage is for answering the question. The passage may or may not contain information that directly answers the question; it may be partially...
+Iteration 21: New subsample score 16.0 is better than old score 15.0. Continue to full eval and add to candidate pool.
+Iteration 21: Best valset aggregate score so far: 0.76
+Iteration 22: Selected program 8 score: 0.68
+Iteration 22: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-c0e8ee", "change_request": "Implement a hierarchical two-stage answer extraction pipeline in HotpotMultiHopPipeline that replaces the single ExtractAnswer module: (1) Create a new DSPy signature `IdentifyAnswerEntities` that tak..."}
+Iteration 22: New subsample score 14.0 is not better than old score 15.0, skipping
+Iteration 23: Selected program 3 score: 0.7
+Iteration 23: Proposed new text for summarize2.predict: Task Description:
+Iteration 23: New subsample score 15.0 is not better than old score 15.0, skipping
+Iteration 24: Selected program 8 score: 0.68
+Iteration 24: Proposed new text for _code: {"git_branch": "codeevolver-20260221191443-13d669", "change_request": "{'change_request': 'Increase retrieval k from 20 to 100 passages per hop and replace the individual passage reranking with a sliding-window ensemble reranking strategy in HotpotMultiHopPipeline. Creat..."}

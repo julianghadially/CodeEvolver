@@ -24,6 +24,8 @@ from .schemas import (
     JobStatusUpdateRequest,
     JobProgressUpdateRequest,
     CancelCheckResponse,
+    CleanupBranchesRequest,
+    CleanupBranchesResponse,
     JobRecord,
     JobStatus,
 )
@@ -187,6 +189,7 @@ async def optimize(request: OptimizeRequest) -> OptimizeResponse:
             max_valset_size=request.max_valset_size,
             debug_max_iterations=request.debug_max_iterations,
             subsample_eval_timeout=request.subsample_eval_timeout,
+            valset_eval_timeout=request.valset_eval_timeout,
         )
     except ImportError:
         # Not running on Modal — update job status to failed
@@ -382,6 +385,102 @@ async def change_request(request: ChangeRequest) -> ChangeResponse:
             success=False,
             error=f"Change request failed: {e}",
         )
+
+
+@app.post("/cleanup-branches", response_model=CleanupBranchesResponse)
+async def cleanup_branches(request: CleanupBranchesRequest) -> CleanupBranchesResponse:
+    """Delete all remote 'codeevolver-{timestamp}-*' branches for a given run timestamp.
+
+    Uses the GitHub API to list and delete branches. Branches listed in
+    except_branches are preserved. Authentication uses the GitHub App
+    credentials from environment secrets.
+    """
+    import httpx
+
+    # Parse owner/repo from the URL
+    stripped = request.repo_url.replace("https://github.com/", "").rstrip("/").replace(".git", "")
+    parts = stripped.split("/")
+    if len(parts) < 2:
+        raise HTTPException(status_code=400, detail=f"Cannot parse owner/repo from URL: {request.repo_url}")
+    owner, repo = parts[0], parts[1]
+
+    # Get installation token via GitHub App credentials in env
+    installation_id = None
+    env_installation_id = os.getenv("GITHUB_TEST_INSTALLATION_ID")
+    if env_installation_id:
+        try:
+            installation_id = int(env_installation_id)
+        except ValueError:
+            pass
+
+    if not installation_id:
+        raise HTTPException(status_code=400, detail="No GitHub installation ID configured. Set GITHUB_TEST_INSTALLATION_ID.")
+
+    try:
+        token = GitHubAppService.get_installation_token(installation_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"GitHub authentication failed: {e}")
+
+    if not token:
+        raise HTTPException(status_code=500, detail="Failed to obtain GitHub installation token")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    prefix = f"codeevolver-{request.date}"
+    deleted: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    # Paginate through all branches to find matches
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        page = 1
+        matching_branches: list[str] = []
+        while True:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/branches",
+                headers=headers,
+                params={"per_page": 100, "page": page},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(
+                    status_code=resp.status_code,
+                    detail=f"GitHub API error listing branches: {resp.text}",
+                )
+            branches = resp.json()
+            if not branches:
+                break
+            for b in branches:
+                name = b["name"]
+                if name.startswith(prefix):
+                    matching_branches.append(name)
+            page += 1
+
+        # Delete matching branches, respecting exceptions
+        for branch_name in matching_branches:
+            # Safety: never delete a branch that doesn't start with "codeevolver-"
+            if not branch_name.startswith("codeevolver-"):
+                errors.append(f"{branch_name}: SAFETY - refused to delete non-codeevolver branch")
+                continue
+
+            if branch_name in request.except_branches:
+                skipped.append(branch_name)
+                continue
+
+            ref = f"heads/{branch_name}"
+            del_resp = await client.delete(
+                f"https://api.github.com/repos/{owner}/{repo}/git/refs/{ref}",
+                headers=headers,
+            )
+            if del_resp.status_code in (204, 200):
+                deleted.append(branch_name)
+            else:
+                errors.append(f"{branch_name}: HTTP {del_resp.status_code} - {del_resp.text}")
+
+    return CleanupBranchesResponse(deleted=deleted, skipped=skipped, errors=errors)
 
 
 # Keep /execute_sandbox as deprecated alias (redirects to new implementation)

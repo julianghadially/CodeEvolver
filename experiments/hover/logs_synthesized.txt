@@ -1,0 +1,51 @@
+(env) (base) CodeEvolver ~ % python -m experiments.run --program hover
+Starting optimization run
+Iteration 0: Base program full valset score: 0.4266666666666667 over 150 / 150 examples
+Iteration 1: Selected program 0 score: 0.4266666666666667
+Iteration 1: Proposed new text for program.create_query_hop2.predict: Given input fields `claim` and `summary_1` (where `summary_1` is an evidence-based evaluation or factual assessment of the claim), generate a detailed `query` field designed to retrieve or verify supp...
+Iteration 1: New subsample score 4.0 is better than old score 3.0. Continue to full eval and add to candidate pool.
+Iteration 1: Best valset aggregate score so far: 0.4266666666666667
+Iteration 2: Selected program 0 score: 0.4266666666666667
+Iteration 2: Proposed new text for _code: {"git_branch": "codeevolver-20260220211311-7350f9", "change_request": "Implement a Gap Analysis + Adaptive Retrieval architecture with score-based reranking in the HoverMultiHop module (langProBe/hover/hover_program.py). Create three new DSPy Signature classes: (1) GapAn..."}
+Iteration 2: New subsample score 12.0 is better than old score 11.0. Continue to full eval and add to candidate pool.
+Iteration 2: Best valset aggregate score so far: 0.4266666666666667
+Iteration 3: Selected program 2 score: 0.4266666666666667
+Iteration 3: Proposed new text for program.adaptive_query_gen.predict: You are given a claim along with an analysis of information gaps that need to be filled to verify or refute the claim, plus optionally prior summaries of evidence availability. Your task is to generat...
+Iteration 3: New subsample score 7.0 is not better than old score 9.0, skipping
+Iteration 4: Selected program 2 score: 0.4266666666666667
+Iteration 4: Proposed new text for _code: {"git_branch": "codeevolver-20260220211311-435004", "change_request": "Implement a two-stage retrieval strategy in HoverMultiHopPipeline: (1) Initial retrieval with k=100 documents using the original claim query, (2) Extract key entities (people, places, works) from the ..."}
+Iteration 4: New subsample score 18.0 is better than old score 11.0. Continue to full eval and add to candidate pool.
+Iteration 4: Found a better program on the valset with score 0.7333333333333333.
+Iteration 4: Best valset aggregate score so far: 0.7333333333333333
+Iteration 5: Selected program 2 score: 0.4266666666666667
+Iteration 5: Proposed new text for program.document_scorer.predict: You will be provided with a claim and one or more documents. Your task is to assess and score the relevance of each document in verifying the given claim. The relevance score should reflect how much t...
+Iteration 5: New subsample score 7.0 is not better than old score 8.0, skipping
+Iteration 6: Selected program 0 score: 0.4266666666666667
+Iteration 6: Proposed new text for _code: {"git_branch": "codeevolver-20260220211311-ed1b95", "change_request": "Implement a Diversity-Aware Iterative Retrieval architecture in the HoverMultiHopPipeline (langProBe/hover/hover_pipeline.py). Create four new DSPy Signature classes: (1) ClaimDecomposer that decompos..."}
+Iteration 6: New subsample score 12.0 is better than old score 7.0. Continue to full eval and add to candidate pool.
+Iteration 6: Best valset aggregate score so far: 0.7333333333333333
+Iteration 7: Selected program 4 score: 0.5133333333333333
+Iteration 7: Proposed new text for coverage_analyzer.predict: Task: Given a claim along with a set of retrieved documents relevant to that claim, your goal is to identify which entities, concepts, or specific factual pieces of information are missing from the re...
+Iteration 7: New subsample score 12.0 is not better than old score 15.0, skipping
+Iteration 8: Selected program 0 score: 0.4266666666666667
+Iteration 8: Proposed new text for _code: {"git_branch": "codeevolver-20260220211311-2e80a7", "change_request": "Implement a Named Entity Extraction + Entity-Based Multi-Query Retrieval architecture in HoverMultiHopPipeline.forward(). Create three new DSPy Signature classes: (1) EntityExtractor that extracts up ..."}
+Iteration 8: New subsample score 0.0 is not better than old score 6.0, skipping
+Iteration 9: Selected program 4 score: 0.5133333333333333
+Iteration 9: Proposed new text for gap_query_generator.predict: Your task is to generate highly targeted, precise, and comprehensive search queries to retrieve authoritative and authoritative-leaning documents or web pages that fill all significant gaps identified...
+Iteration 9: New subsample score 11.0 is not better than old score 13.0, skipping
+Iteration 10: Selected program 4 score: 0.5133333333333333
+Iteration 10: Proposed new text for _code: {"git_branch": "codeevolver-20260220211311-854d6e", "change_request": "{'change_request': 'Replace the current Diversity-Aware Iterative Retrieval architecture in langProBe/hover/hover_pipeline.py with a Recursive Query Expansion system. Create new DSPy signatures: Initi..."}
+Iteration 10: New subsample score 5.0 is not better than old score 12.0, skipping
+Iteration 11: Selected program 1 score: 0.35333333333333333
+Iteration 11: Proposed new text for program.create_query_hop3.predict: Given the input fields `claim`, `summary_1`, and `summary_2`, produce the field `query`.
+Iteration 11: New subsample score 4.0 is not better than old score 7.0, skipping
+Iteration 12: Selected program 3 score: 0.7333333333333333
+Iteration 12: Proposed new text for _code: {"git_branch": "codeevolver-20260220211311-1f95d6", "change_request": "Add a gap analysis module to HoverMultiHopPipeline.forward() that: (1) extracts key named entities (people, places, organizations) from the claim using an LLM, (2) performs initial retrieval with k=50..."}
+Iteration 12: New subsample score 9.0 is not better than old score 13.0, skipping
+Iteration 13: Selected program 0 score: 0.4266666666666667
+Iteration 13: Proposed new text for program.create_query_hop3.predict: Task Description:
+Iteration 13: New subsample score 4.0 is not better than old score 6.0, skipping
+Iteration 14: Selected program 3 score: 0.7333333333333333
+Iteration 14: Proposed new text for _code: {"git_branch": "codeevolver-20260220211311-85240c", "change_request": "Implement a **'Iterative Query Decomposition with Bridge Entity Recognition'** architecture in `langProBe/hover/hover_pipeline.py:HoverMultiHopPipeline.forward()`:  1. **Stage 1 - Claim Decomposition*..."}
+Iteration 14: New subsample score 14.0 is better than old score 13.0. Continue to full eval and add to candidate pool.
+Iteration 14: Best valset aggregate score so far: 0.7333333333333333

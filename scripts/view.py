@@ -12,6 +12,39 @@ from src.db.mongo import get_mongo_db
 from src.config import settings
 
 
+def print_best_candidate_json(best_candidate: object) -> None:
+    """Pretty-print best_candidate as JSON for easy copy-paste, if it's a dict."""
+    if not isinstance(best_candidate, dict):
+        # Keep the existing "no progress" messaging in the caller instead
+        return
+
+    # Work on a shallow copy so we don't mutate the Mongo record
+    bc = dict(best_candidate)
+
+    # Decode the nested _code JSON string if present
+    code_str = bc.get("_code")
+    if isinstance(code_str, str):
+        try:
+            code_obj = json.loads(code_str)
+
+            # Decode nested change_request JSON if it's a JSON string
+            cr_str = code_obj.get("change_request")
+            if isinstance(cr_str, str):
+                try:
+                    code_obj["change_request"] = json.loads(cr_str)
+                except Exception:
+                    # Leave as-is if it's not valid JSON
+                    pass
+
+            bc["_code"] = code_obj
+        except Exception:
+            # If _code isn't valid JSON, leave it as-is
+            pass
+
+    print("\n=== Best candidate (JSON, copy-paste friendly) ===")
+    print(json.dumps(bc, indent=2, ensure_ascii=False))
+
+
 def main():
     """Connect to MongoDB and print a job record (by ID or most recent)."""
     parser = argparse.ArgumentParser(description="View job record(s) from MongoDB.")
@@ -52,7 +85,8 @@ def main():
 
     # Query jobs collection: by job_id if given, else most recent
     if args.job:
-        job = db.jobs.find_one({"job_id": args.job}, job_projection)
+        job_id = args.job
+        job = db.jobs.find_one({"job_id": job_id}, job_projection)
         if not job:
             print(f"No job found with job_id: {args.job}")
             return
@@ -73,11 +107,43 @@ def main():
         print(f"Client ID: {client_id}")
         print(f"Status: {status}")
         print(f"Created at: {created_at}")
-        print(f"Best candidate: {job.get('best_candidate') or 'None (no progress callbacks received yet)'}")
+        best_candidate = job.get("best_candidate")
+        if best_candidate is None:
+            print("Best candidate: None (no progress callbacks received yet)")
+        else:
+            print_best_candidate_json(best_candidate)
         print(f"Best score: {job.get('best_score')}")
         print(f"Current iteration: {job.get('current_iteration')}")
         print(f"Num candidates: {job.get('num_candidates')}")
         print(f"Total metric calls: {job.get('total_metric_calls')}")
+
+        # Pretty-print best_candidate as JSON for easy copy-paste
+        if isinstance(best_candidate, dict):
+            # Work on a shallow copy so we don't mutate the Mongo record
+            bc = dict(best_candidate)
+
+            # Decode the nested _code JSON string if present
+            code_str = bc.get("_code")
+            if isinstance(code_str, str):
+                try:
+                    code_obj = json.loads(code_str)
+
+                    # Decode nested change_request JSON if it's a JSON string
+                    cr_str = code_obj.get("change_request")
+                    if isinstance(cr_str, str):
+                        try:
+                            code_obj["change_request"] = json.loads(cr_str)
+                        except Exception:
+                            # Leave as-is if it's not valid JSON
+                            pass
+
+                    bc["_code"] = code_obj
+                except Exception:
+                    # If _code isn't valid JSON, leave it as-is
+                    pass
+
+            print("\n=== Best candidate (JSON, copy-paste friendly) ===")
+            print(json.dumps(bc, indent=2, ensure_ascii=False))
 
         # GEPA candidates: stored on the job (gepa_state_history from progress callbacks)
         history = job.get("gepa_state_history") or {}

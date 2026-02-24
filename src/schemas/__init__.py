@@ -12,6 +12,7 @@ from .requests import (
     OptimizeRequest,
     JobStatusUpdateRequest,
     JobProgressUpdateRequest,
+    CleanupBranchesRequest,
 )
 from .responses import (
     ConnectGitResponse,
@@ -21,6 +22,7 @@ from .responses import (
     JobStatusResponse,
     JobDetailedStateResponse,
     CancelCheckResponse,
+    CleanupBranchesResponse,
 )
 from .db_schemas import (
     ClientRecord,
@@ -50,5 +52,7 @@ __all__ = [
     "JobStatusUpdateRequest",
     "JobProgressUpdateRequest",
     "CancelCheckResponse",
+    "CleanupBranchesRequest",
+    "CleanupBranchesResponse",
     "JobRecord",
 ]
