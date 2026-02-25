@@ -25,69 +25,10 @@ from .adapter import CodeEvolverDSPyAdapter
 from .callback import CallbackJobUpdater, CallbackProgressTracker
 from .component_selector import CodeFrequencyComponentSelector
 from .utils import (
-    extract_run_timestamp_from_branch,
-    get_git_branch_from_candidate,
+    build_and_save_dspy_program,
     load_dataset_from_file,
-    save_file_to_sandbox,
     subsample_validation_set,
 )
-
-
-def _save_best_candidate_artifact(
-    sandbox_manager: Any,
-    best_candidate: dict[str, str],
-) -> None:
-    """Save the best candidate JSON to the winning branch.
-
-    Creates codeevolver/results/best_program_{timestamp}.json on the winning
-    branch. The timestamp is extracted from the branch name for consistency
-    across the run.
-
-    Args:
-        sandbox_manager: GEPASandbox instance (already started).
-        best_candidate: The winning candidate dict.
-    """
-    try:
-        import json
-
-        # Get winning branch and run timestamp
-        winning_branch = get_git_branch_from_candidate(best_candidate)
-        run_timestamp = extract_run_timestamp_from_branch(winning_branch)
-
-        if not run_timestamp:
-            print(f"[OPTIMIZER] Warning: Could not extract timestamp from {winning_branch}", flush=True)
-            run_timestamp = "unknown"
-
-        # Checkout winning branch
-        checkout_result = sandbox_manager.exec_bash(f"git checkout {winning_branch}")
-        if checkout_result.get("returncode") != 0:
-            print(
-                f"[OPTIMIZER] Warning: Failed to checkout {winning_branch}: "
-                f"{checkout_result.get('stderr')}",
-                flush=True,
-            )
-            return
-
-        # Create results directory
-        sandbox_manager.exec_bash("mkdir -p codeevolver/results")
-
-        # Format candidate as pretty JSON
-        candidate_json = json.dumps(best_candidate, indent=2)
-
-        # Save to file
-        artifact_path = f"codeevolver/results/best_program_{run_timestamp}.json"
-        
-        save_file_to_sandbox(
-            sandbox=sandbox_manager,
-            content=candidate_json,
-            path=artifact_path,
-            push=True,
-            commit_message=f"Save best candidate (score: optimized)",
-            branch=winning_branch,
-        )
-        print(f"[OPTIMIZER] Saved best candidate to {artifact_path}", flush=True)
-    except Exception as e:
-        print(f"[OPTIMIZER] Warning: Failed to save artifact: {e}", flush=True)
 
 
 def _resolve_dataset_raw(
@@ -371,10 +312,12 @@ def run_gepa_optimization(
                         print(f"      {key}: {preview}...", flush=True)
             print("="*80 + "\n", flush=True)
 
-        # Save best candidate artifact to winning branch
-        _save_best_candidate_artifact(
+        # Build DSPy program from best candidate and save to winning branch
+        build_and_save_dspy_program(
             sandbox_manager=sandbox_manager,
             best_candidate=result.best_candidate,
+            program=program,
+            saved_program_json_path=saved_program_json_path,
         )
 
         # Create a serializable state record from the final result

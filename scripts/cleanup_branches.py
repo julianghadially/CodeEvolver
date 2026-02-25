@@ -22,7 +22,7 @@ def main():
     )
     parser.add_argument(
         "date",
-        help="Run timestamp in YYYYMMDDHHmmss format (e.g., 20260221191443)",
+        help="Run timestamp in YYYYMMDDHHmmss format (e.g., 20260221191443), or 'none' to match all codeevolver branches",
     )
     parser.add_argument(
         "--except",
@@ -44,30 +44,35 @@ def main():
     args = parser.parse_args()
 
     # Validate date format locally before making the request
-    if len(args.date) != 14 or not args.date.isdigit():
-        print(f"Error: date must be in YYYYMMDDHHmmss format (14 digits). Got: {args.date!r}")
+    is_none = args.date.lower() == "none"
+    if not is_none and (len(args.date) != 14 or not args.date.isdigit()):
+        print(f"Error: date must be in YYYYMMDDHHmmss format (14 digits) or 'none' for all dates. Got: {args.date!r}")
         sys.exit(1)
+
+    # Normalize for the API
+    date_value = "none" if is_none else args.date
+    prefix = "codeevolver-" if is_none else f"codeevolver-{args.date}"
 
     base_url = args.url or determine_api_url()
     endpoint = f"{base_url}/cleanup-branches"
 
     payload = {
         "repo_url": args.repo_url,
-        "date": args.date,
+        "date": date_value,
         "except_branches": args.except_branches,
     }
 
     if args.dry_run:
         print(f"[DRY RUN] Would call POST {endpoint}")
         print(f"  repo_url: {args.repo_url}")
-        print(f"  date:     {args.date}")
-        print(f"  prefix:   codeevolver-{args.date}")
+        print(f"  date:     {date_value}")
+        print(f"  prefix:   {prefix}")
         print(f"  except:   {args.except_branches}")
         print("\nTo execute, run again without --dry-run.")
         return
 
     print(f"Calling POST {endpoint}")
-    print(f"  Deleting branches matching: codeevolver-{args.date}*")
+    print(f"  Deleting branches matching: {prefix}*")
     if args.except_branches:
         print(f"  Keeping: {args.except_branches}")
 

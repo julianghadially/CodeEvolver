@@ -430,7 +430,11 @@ async def cleanup_branches(request: CleanupBranchesRequest) -> CleanupBranchesRe
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
-    prefix = f"codeevolver-{request.date}"
+    # "none" means match all codeevolver- branches regardless of timestamp
+    if request.date == "none":
+        prefix = "codeevolver-"
+    else:
+        prefix = f"codeevolver-{request.date}"
     deleted: list[str] = []
     skipped: list[str] = []
     errors: list[str] = []

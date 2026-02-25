@@ -29,6 +29,7 @@ import httpx
 import pytest
 
 from src.services.git_service import GitService
+from tests.conftest import get_modal_app_url
 
 
 # Test configuration
@@ -40,15 +41,6 @@ Specifically:
 1. Remove the `evidence_stance: str` field from the EvidenceSummarizerSignature class
 2. Remove any references to evidence_stance in the EvidenceSummarizer module
 3. Update any code that depends on this field"""
-
-# Modal app URL - set via environment variable or use default for modal serve
-# Format: https://<username>--<app-name>-<function-name>-dev.modal.run
-DEFAULT_MODAL_URL = "https://julianghadially--codeevolver-fastapi-app-dev.modal.run"
-
-
-def get_modal_app_url() -> str:
-    """Get the Modal app URL from environment or use default."""
-    return os.getenv("MODAL_APP_URL", DEFAULT_MODAL_URL)
 
 
 def generate_test_branch_name() -> str:

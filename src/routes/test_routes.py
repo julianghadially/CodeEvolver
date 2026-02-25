@@ -25,11 +25,12 @@ from pydantic import BaseModel, Field
 # Import Modal test functions from modal_app
 # These are defined in modal_app.py but delegate to src/test_functions.py for implementation
 try:
-    from modal_app import test_build_seed_candidate, test_evaluate
+    from modal_app import test_build_seed_candidate, test_evaluate, test_dspy_save_program
 except ImportError:
     # If running locally without Modal, functions won't be available
     test_build_seed_candidate = None
     test_evaluate = None
+    test_dspy_save_program = None
 
 router = APIRouter(prefix="/test", tags=["testing"])
 
@@ -121,6 +122,30 @@ class EvaluateTestResponse(BaseModel):
     logs: list[str] | None = None
 
 
+class DspySaveProgramTestRequest(BaseModel):
+    """Request to test dspy_save_program (reconstruct DSPy program from candidate)."""
+    repo_url: str = Field(..., description="Git repository URL")
+    program: str = Field(..., description="Dotted import path to DSPy module class")
+    candidate: dict[str, str] = Field(..., description="Predictor name -> instruction text")
+    git_branch: str = Field(default="main", description="Branch to checkout")
+    saved_program_json_path: str | None = Field(default=None, description="Optional path to program.json")
+    output_path: str = Field(
+        default="codeevolver/results/optimized_program_test.json",
+        description="Where to save the DSPy program (relative to workspace)",
+    )
+    push_to_remote: bool = Field(default=True, description="Commit and push to remote branch")
+    installation_id: int | None = Field(default=None, description="GitHub App installation ID for private repos")
+
+
+class DspySaveProgramTestResponse(BaseModel):
+    """Response from dspy_save_program test."""
+    success: bool
+    output_path: str | None = None
+    predictor_count: int | None = None
+    error: str | None = None
+    logs: list[str] | None = None
+
+
 @router.get("/list")
 async def list_test_operations():
     """List available test operations."""
@@ -164,6 +189,16 @@ async def list_test_operations():
                     "Quick evaluation of a DSPy program on a small batch",
                     "Test that metric + program work together",
                     "Get baseline scores before running optimization"
+                ]
+            },
+            {
+                "endpoint": "/test/dspy-save-program",
+                "method": "POST",
+                "description": "Reconstruct a DSPy program from a GEPA candidate and save in DSPy-native format",
+                "use_cases": [
+                    "Verify a candidate can be reconstructed into a loadable DSPy program",
+                    "Save optimized program to a branch after optimization",
+                    "Test the dspy_save_program pipeline end-to-end"
                 ]
             }
         ]
@@ -409,6 +444,56 @@ async def test_evaluate_endpoint(request: EvaluateTestRequest) -> EvaluateTestRe
         )
     except Exception as e:
         return EvaluateTestResponse(
+            success=False,
+            error=f"Test failed: {e}"
+        )
+
+
+@router.post("/dspy-save-program", response_model=DspySaveProgramTestResponse)
+async def test_dspy_save_program_endpoint(request: DspySaveProgramTestRequest) -> DspySaveProgramTestResponse:
+    """Reconstruct a DSPy program from a GEPA candidate and save in DSPy-native format.
+
+    This endpoint:
+    1. Clones the repository and sets up the sandbox
+    2. Builds a DSPy Module from the candidate instructions
+    3. Saves it via program.save() in DSPy-native format
+    4. Optionally commits and pushes to the branch
+
+    The saved file is loadable via program.load() in client code.
+    """
+    if test_dspy_save_program is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Modal not available. Run with 'modal serve modal_app.py'."
+        )
+
+    try:
+        result = await test_dspy_save_program.remote.aio(
+            repo_url=request.repo_url,
+            program=request.program,
+            candidate=request.candidate,
+            git_branch=request.git_branch,
+            saved_program_json_path=request.saved_program_json_path,
+            output_path=request.output_path,
+            push_to_remote=request.push_to_remote,
+            installation_id=request.installation_id,
+        )
+
+        return DspySaveProgramTestResponse(
+            success=result.get("success", False),
+            output_path=result.get("output_path"),
+            predictor_count=result.get("predictor_count"),
+            error=result.get("error"),
+            logs=result.get("logs"),
+        )
+
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Modal not available. Run with 'modal serve modal_app.py'."
+        )
+    except Exception as e:
+        return DspySaveProgramTestResponse(
             success=False,
             error=f"Test failed: {e}"
         )

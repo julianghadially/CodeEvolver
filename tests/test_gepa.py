@@ -17,7 +17,6 @@ Target repository: https://github.com/julianghadially/FactChecker
 """
 
 import json
-import os
 import subprocess
 import tempfile
 import time
@@ -30,17 +29,11 @@ import pytest
 from src.schemas.job_schemas import OptimizationResult
 from experiments.FactChecker.input import OPTIMIZE_CONFIG
 from experiments.run import run_optimization
-
-# Modal app URL
-DEFAULT_MODAL_URL = "https://julianghadially--codeevolver-fastapi-app-dev.modal.run"
+from tests.conftest import get_modal_app_url
 
 POLL_INTERVAL_SECONDS = 30
 MAX_POLL_DURATION_SECONDS = 3600  # 60 minutes (increased for 5 iterations)
 REQUIRED_ITERATIONS = 5
-
-
-def get_modal_app_url() -> str:
-    return os.getenv("MODAL_APP_URL", DEFAULT_MODAL_URL)
 
 async def run_optimization_test(modal_url: str) -> OptimizationResult:
     import asyncio

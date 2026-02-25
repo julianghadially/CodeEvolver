@@ -190,6 +190,7 @@ gepa_image = (
         "litellm>=1.64.0",
         "httpx>=0.27.0",
         "pyjwt[cryptography]>=2.8.0",
+        "cryptography>=41.0.0",
         "tqdm>=4.66.1",
     )
     .pip_install(
@@ -326,6 +327,65 @@ def test_evaluate(
         max_rows=max_rows,
         installation_id=installation_id,
         capture_traces=capture_traces,
+        app_for_sandbox=app,
+    )
+
+
+@app.function(
+    image=gepa_image,
+    volumes={"/workspaces": workspaces_volume},
+    secrets=[modal.Secret.from_name("codeevolver-worker-secrets")],
+    env={"APP_MODE": APP_MODE},
+    timeout=1800,
+    cpu=4,
+    memory=8192,
+)
+def test_dspy_save_program(
+    repo_url: str,
+    program: str,
+    candidate: dict[str, str],
+    git_branch: str = "main",
+    saved_program_json_path: str | None = None,
+    output_path: str = "codeevolver/results/optimized_program_test.json",
+    push_to_remote: bool = False,
+    installation_id: int | None = None,
+) -> dict:
+    """Test dspy_save_program: reconstruct a DSPy program from a GEPA candidate.
+
+    Builds a DSPy Module from a candidate dict (predictor_name -> instruction text),
+    saves it in DSPy-native format, and optionally pushes to the remote branch.
+
+    Args:
+        repo_url: Git repository URL
+        program: Dotted import path to DSPy module class
+        candidate: Dict of predictor_name -> instruction text
+        git_branch: Branch to checkout (default "main")
+        saved_program_json_path: Optional path to program.json
+        output_path: Where to save the program (relative to workspace)
+        push_to_remote: If True, commit and push to remote
+        installation_id: GitHub App installation ID for private repos
+
+    Returns:
+        Dict with 'success', 'output_path', 'predictor_count', 'error', 'logs'
+    """
+    import os
+    import sys
+
+    if "/app" not in sys.path:
+        sys.path.append("/app")
+    os.chdir("/app")
+
+    from src.test_functions import test_dspy_save_program_impl
+
+    return test_dspy_save_program_impl(
+        repo_url=repo_url,
+        program=program,
+        candidate=candidate,
+        git_branch=git_branch,
+        saved_program_json_path=saved_program_json_path,
+        output_path=output_path,
+        push_to_remote=push_to_remote,
+        installation_id=installation_id,
         app_for_sandbox=app,
     )
 

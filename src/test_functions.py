@@ -345,3 +345,122 @@ def test_evaluate_impl(
                 logs.append("Sandbox stopped")
             except Exception as e:
                 logs.append(f"Error stopping sandbox: {e}")
+
+
+def test_dspy_save_program_impl(
+    repo_url: str,
+    program: str,
+    candidate: dict[str, str],
+    git_branch: str = "main",
+    saved_program_json_path: str | None = None,
+    output_path: str = "codeevolver/results/optimized_program_test.json",
+    push_to_remote: bool = False,
+    installation_id: int | None = None,
+    app_for_sandbox: Any | None = None,
+) -> dict:
+    """Implementation for test_dspy_save_program Modal function.
+
+    Builds a DSPy program from a candidate dict and saves it in DSPy-native
+    format using the build_program sandbox handler.
+
+    Args:
+        repo_url: Git repository URL.
+        program: Dotted import path to DSPy module class.
+        candidate: Dict of predictor_name -> instruction text.
+        git_branch: Branch to checkout (default "main").
+        saved_program_json_path: Optional path to program.json.
+        output_path: Where to save the DSPy program (relative to workspace).
+        push_to_remote: If True, commit and push the saved program to remote.
+        installation_id: GitHub App installation ID for private repos.
+        app_for_sandbox: Modal app instance for sandbox creation.
+
+    Returns:
+        Dict with 'success', 'output_path', 'predictor_count', 'error', 'logs'.
+    """
+    import os
+    sys.path.insert(0, "/app")
+    os.chdir("/app")
+
+    from src.optimizer.gepa_sandbox import GEPASandbox
+    from src.services.github_app import GitHubAppService
+
+    logs: list[str] = ["Using GEPASandbox for build_program test"]
+    sandbox = None
+
+    try:
+        # --- GitHub auth ---
+        github_token = None
+        if installation_id:
+            github_token = GitHubAppService.get_installation_token(installation_id)
+            logs.append("GitHub authentication successful")
+
+        # --- Create and start sandbox ---
+        sandbox = GEPASandbox(
+            app=app_for_sandbox,
+            repo_url=repo_url,
+            github_token=github_token,
+            timeout=600,
+        )
+        logs.append(f"Created GEPASandbox for {repo_url}")
+
+        sandbox.start(use_venv=True, branch=git_branch)
+        logs.append(f"Sandbox started (branch: {git_branch})")
+
+        # --- Build program via sandbox ---
+        logs.append(f"Building DSPy program for {program} with {len(candidate)} predictor instructions...")
+        build_result = sandbox.exec_prebuilt({
+            "command": "build_program",
+            "program": program,
+            "saved_program_json_path": saved_program_json_path,
+            "candidate": candidate,
+            "output_path": output_path,
+            "git_branch": git_branch,
+        })
+
+        if not build_result.get("success"):
+            return {
+                "success": False,
+                "error": f"build_program failed: {build_result.get('error', 'unknown')}",
+                "logs": logs + build_result.get("logs", []),
+            }
+
+        predictor_count = build_result.get("predictor_count", 0)
+        logs.append(f"Built program with {predictor_count} predictors, saved to {output_path}")
+
+        # --- Optionally commit and push ---
+        if push_to_remote:
+            from src.optimizer.utils import commit_existing_file
+
+            commit_ok = commit_existing_file(
+                sandbox=sandbox,
+                path=output_path,
+                branch=git_branch,
+                commit_message=f"Save optimized DSPy program ({predictor_count} predictors)",
+                push=True,
+            )
+            if commit_ok:
+                logs.append(f"Committed and pushed {output_path} to {git_branch}")
+            else:
+                logs.append(f"Warning: failed to commit/push {output_path}")
+
+        return {
+            "success": True,
+            "output_path": output_path,
+            "predictor_count": predictor_count,
+            "logs": logs,
+        }
+
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": f"Test failed: {e}",
+            "logs": logs + [traceback.format_exc()],
+        }
+    finally:
+        if sandbox:
+            try:
+                sandbox.stop()
+                logs.append("Sandbox stopped")
+            except Exception as e:
+                logs.append(f"Error stopping sandbox: {e}")

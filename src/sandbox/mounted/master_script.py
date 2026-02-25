@@ -37,10 +37,12 @@ def _register_dspy_handlers():
         from ai_frameworks.mounted.dspy import build_seed_candidate
         from ai_frameworks.mounted.dspy import evaluate
         from ai_frameworks.mounted.dspy import make_reflective_dataset
+        from ai_frameworks.mounted.dspy import build_program_handler
 
         HANDLERS["build_seed_candidate"] = build_seed_candidate.handle
         HANDLERS["evaluate"] = evaluate.handle
         HANDLERS["make_reflective_dataset"] = make_reflective_dataset.handle
+        HANDLERS["build_program"] = build_program_handler.handle
     except ImportError as e:
         log.exception(f"Failed to import DSPy handlers: {e}")
         # Re-raise with more context

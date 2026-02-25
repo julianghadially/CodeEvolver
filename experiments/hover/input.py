@@ -61,9 +61,9 @@ OPTIMIZE_CONFIG = {
     "valset_path": "data/hoverBench_val.json", # data/FacTool_QA_train_normalized.jsonl
     "input_keys": ["claim"],
     "reflection_lm": "openai/gpt-4.1-mini",
-    "max_metric_calls": 7500,  # 150 examples × 50 full evals (with subsampled valset)
+    "max_metric_calls": 6000,  # 150 examples × 50 full evals (with subsampled valset)
     "num_threads": 8,  # Increased from 5 to 20 for better parallelization
-    "max_valset_size": 150,  # Subsample validation set to 150 examples (from 300) for faster evaluation
+    "max_valset_size": 60,  # Subsample validation set to 150 examples (from 300) for faster evaluation
     "seed": 42,
     "additional_instructions": additional_instructions,
     "initial_branch": "hover",

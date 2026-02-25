@@ -12,6 +12,23 @@ from httpx import ASGITransport, AsyncClient
 from src.main import app
 from src.config import settings
 
+# ---------------------------------------------------------------------------
+# Modal app URL — single source of truth for all integration tests
+# Override with MODAL_APP_URL env var when pointing at a different deployment.
+# ---------------------------------------------------------------------------
+DEFAULT_MODAL_URL = "https://julianghadially--codeevolver-fastapi-app-dev.modal.run"
+
+
+def get_modal_app_url() -> str:
+    """Return the Modal app URL from env or the default."""
+    return os.getenv("MODAL_APP_URL", DEFAULT_MODAL_URL)
+
+
+@pytest.fixture
+def modal_url() -> str:
+    """Fixture that provides the Modal app URL for integration tests."""
+    return get_modal_app_url()
+
 
 @pytest.fixture
 def temp_workspace(tmp_path):

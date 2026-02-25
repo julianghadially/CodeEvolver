@@ -245,7 +245,7 @@ class CleanupBranchesRequest(BaseModel):
     )
     date: str = Field(
         ...,
-        description="Date-time scope for branch cleanup in YYYYMMDDHHmmss format (e.g., '20260221191443'). Only branches matching 'codeevolver-{date}*' will be deleted.",
+        description="Date-time scope for branch cleanup in YYYYMMDDHHmmss format (e.g., '20260221191443'). Pass 'none' (case-insensitive) to match all codeevolver branches regardless of date.",
     )
     except_branches: list[str] = Field(
         ...,
@@ -254,6 +254,10 @@ class CleanupBranchesRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_date_format(self) -> "CleanupBranchesRequest":
+        # Normalize "none"/"None"/"NONE" etc. to lowercase
+        if self.date.lower() == "none":
+            self.date = "none"
+            return self
         if len(self.date) != 14 or not self.date.isdigit():
-            raise ValueError("date must be in YYYYMMDDHHmmss format (e.g., '20260221191443')")
+            raise ValueError("date must be in YYYYMMDDHHmmss format (e.g., '20260221191443') or 'none' for all dates")
         return self

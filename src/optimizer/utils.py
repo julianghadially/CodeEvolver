@@ -310,6 +310,136 @@ def ensure_gitignore_committed(
     return True
 
 
+def commit_existing_file(
+    sandbox: Any,
+    path: str,
+    branch: str,
+    commit_message: str,
+    push: bool = True,
+) -> bool:
+    """Git add, commit, and push a file that already exists in the sandbox workspace.
+
+    Unlike save_file_to_sandbox, this does NOT write content — the file must
+    already exist (e.g. written by DSPy's program.save() inside the sandbox).
+
+    Args:
+        sandbox: GEPASandbox instance with exec_bash and push_authenticated methods.
+        path: Relative path within workspace to commit (e.g. "codeevolver/results/optimized_program.json").
+        branch: Branch to push to.
+        commit_message: Git commit message.
+        push: If True (default), push to remote after committing.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    sandbox.exec_bash("git config user.email 'codeevolver@codeevolver.ai'")
+    sandbox.exec_bash("git config user.name 'CodeEvolver'")
+    sandbox.exec_bash(f"git add {path}")
+
+    commit_result = sandbox.exec_bash(f'git commit -m "{commit_message}"')
+    if commit_result.get("returncode") != 0:
+        print(f"[UTILS] Warning: Failed to commit {path}: {commit_result.get('stderr')}", flush=True)
+        return False
+
+    print(f"[UTILS] Committed {path}", flush=True)
+
+    if push:
+        push_result = sandbox.push_authenticated(branch)
+        if not push_result.get("success"):
+            print(f"[UTILS] Warning: Failed to push {branch}: {push_result.get('stderr')}", flush=True)
+            return False
+        print(f"[UTILS] Pushed {branch} to origin", flush=True)
+
+    return True
+
+
+def build_and_save_dspy_program(
+    sandbox_manager: Any,
+    best_candidate: dict[str, str],
+    program: str,
+    saved_program_json_path: str | None = None,
+) -> None:
+    """Build a DSPy program from the best candidate and save to the winning branch.
+
+    Replaces the old _save_best_candidate_artifact which saved raw candidate JSON.
+    This saves a DSPy-native format loadable via program.load().
+
+    The raw candidate dict continues to be saved in MongoDB via the callback.
+
+    Args:
+        sandbox_manager: GEPASandbox instance (already started).
+        best_candidate: The winning candidate dict (may include _code key).
+        program: Dotted import path to DSPy module class.
+        saved_program_json_path: Optional path to program.json for loading state.
+    """
+    try:
+        # Get winning branch and run timestamp
+        winning_branch = get_git_branch_from_candidate(best_candidate)
+        run_timestamp = extract_run_timestamp_from_branch(winning_branch)
+
+        if not run_timestamp:
+            print(f"[UTILS] Warning: Could not extract timestamp from {winning_branch}", flush=True)
+            run_timestamp = "unknown"
+
+        # Checkout winning branch
+        checkout_result = sandbox_manager.exec_bash(f"git checkout {winning_branch}")
+        if checkout_result.get("returncode") != 0:
+            print(
+                f"[UTILS] Warning: Failed to checkout {winning_branch}: "
+                f"{checkout_result.get('stderr')}",
+                flush=True,
+            )
+            return
+
+        # Strip _code from candidate — only pass prompt instructions to build_program
+        prompt_candidate = {k: v for k, v in best_candidate.items() if k != CODE_COMPONENT_KEY}
+
+        # Check if _code contains an updated parent_module_path
+        code_data = json.loads(best_candidate.get(CODE_COMPONENT_KEY, "{}"))
+        effective_program = code_data.get("parent_module_path", program)
+
+        # Output path for DSPy-native format
+        output_path = f"codeevolver/results/optimized_program_{run_timestamp}.json"
+
+        # Build and save program via sandbox (DSPy is only available there)
+        build_result = sandbox_manager.exec_prebuilt({
+            "command": "build_program",
+            "program": effective_program,
+            "saved_program_json_path": saved_program_json_path,
+            "candidate": prompt_candidate,
+            "output_path": output_path,
+            "git_branch": winning_branch,
+        })
+
+        if not build_result.get("success"):
+            print(
+                f"[UTILS] Warning: build_program failed: {build_result.get('error')}",
+                flush=True,
+            )
+            return
+
+        predictor_count = build_result.get("predictor_count", "?")
+        print(
+            f"[UTILS] Built DSPy program with {predictor_count} predictors",
+            flush=True,
+        )
+
+        # Commit and push the saved program file
+        commit_existing_file(
+            sandbox=sandbox_manager,
+            path=output_path,
+            branch=winning_branch,
+            commit_message=f"Save optimized DSPy program ({predictor_count} predictors)",
+            push=True,
+        )
+
+        print(f"[UTILS] Saved optimized program to {output_path} on {winning_branch}", flush=True)
+
+    except Exception as e:
+        # Non-fatal: candidate dict is still saved to MongoDB via the callback
+        print(f"[UTILS] Warning: Failed to build/save DSPy program: {e}", flush=True)
+
+
 def parse_codeevolver_md(content: str) -> dict[str, str | None]:
     """Parse PARENT_MODULE_PATH and METRIC_MODULE_PATH from codeevolver.md content.
 

@@ -12,13 +12,8 @@ To run this test:
 Target repository: https://github.com/julianghadially/FactChecker
 """
 
-import os
-
 import httpx
 import pytest
-
-# Modal app URL
-DEFAULT_MODAL_URL = "https://julianghadially--codeevolver-fastapi-app-dev.modal.run"
 
 # Small inline batch for quick evaluation (~3-5 examples)
 FACTCHECKER_BATCH = [
@@ -41,15 +36,9 @@ EVALUATE_CONFIG = {
 }
 
 
-def get_modal_app_url() -> str:
-    return os.getenv("MODAL_APP_URL", DEFAULT_MODAL_URL)
-
-
 @pytest.mark.integration
-def test_evaluate_endpoint():
+def test_evaluate_endpoint(modal_url):
     """Test /test/evaluate with FactChecker on a small inline batch."""
-    modal_url = get_modal_app_url()
-
     with httpx.Client(timeout=600) as client:
         print(f"\nPOST {modal_url}/test/evaluate")
         print(f"Config: {EVALUATE_CONFIG}")

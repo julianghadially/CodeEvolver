@@ -36,10 +36,9 @@ class TestBuildSeedCandidate:
         This is a FAST unit test that doesn't run the full optimization pipeline.
         """
         import httpx
-        import os
+        from tests.conftest import get_modal_app_url
 
-        # Get Modal app URL (same pattern as integration tests)
-        modal_url = os.getenv("MODAL_APP_URL", "https://julianghadially--codeevolver-fastapi-app-dev.modal.run")
+        modal_url = get_modal_app_url()
 
         # Define the refactoring to test
         refactor_files = {
