@@ -21,6 +21,8 @@ from typing import Any, Callable
 
 from gepa.core.adapter import EvaluationBatch
 
+from src.agent.constraint_checker import check_constraints
+
 from .prompts import (
     append_dspy_guidelines,
     build_architecture_fallback,
@@ -665,6 +667,29 @@ class CodeEvolverDSPyAdapter:
                 "change_request": "",
                 "last_change_summary": "No change proposed"
             })
+
+        # Phase 1.5: Constraint checker validates proposed change
+        if self.additional_instructions:
+            try:
+                lm_callable = self._get_reflection_lm_callable()
+                constraint_result = check_constraints(
+                    additional_instructions=self.additional_instructions,
+                    change_request=proposed_change,
+                    lm_callable=lm_callable,
+                )
+
+                if constraint_result.status == "fail":
+                    print(
+                        f"[ADAPTER] Constraint violation: {constraint_result.reason} (violated: {constraint_result.violated_constraint})",
+                        flush=True,
+                    )
+                    return json.dumps({
+                        "git_branch": parent_branch,
+                        "change_request": "",
+                        "last_change_summary": f"Constraint violation: {constraint_result.reason}",
+                    })
+            except Exception as e:
+                print(f"[ADAPTER] Warning: Constraint check failed unexpectedly, proceeding to coding agent: {e}",flush=True)
 
         # Phase 2: Create new branch from parent and execute mutation
         print(f"[ADAPTER] Phase 2: Creating mutation branch...", flush=True)

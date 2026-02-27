@@ -1,0 +1,60 @@
+================================================================================
+  TRAJECTORY #1  |  Best Score: 0.7600  |  Candidate: [6]  |  Steps: 3
+================================================================================
+  [  0]  Score: 0.5667  |  Type: SEED
+         Branch: codeevolver-20260221191443-main
+         Change: Initial seed candidate
+       |
+       v
+  [  5]  Score: 0.7467  |  Type: CODE
+         Branch: codeevolver-20260221191443-1da0e4
+         Change: {
+                   "change_request": "In HotpotMultiHopPipeline.forward(), implement a 2-hop retrieve-then-extract architecture that preserves exact factoid answers. (1) Perform hop 1 retrieval with k=10, (2) generate focused hop 2 query using dspy.ChainOfThought(\"question,passages->query\") directly from hop 1 passages (no summarization), (3) perform hop 2 retrieval with k=10, (4) concatenate ALL passages from both hops into a single context string, (5) create a new ExtractShortAnswer signature with fields: question (InputField), passages (InputField), answer (OutputField with desc=\"Extract the shortest exact factoid answer from the passages - just the answer itself, no extra words or explanation\"), and (6) use dspy.Predict(ExtractShortAnswer) to extract the minimal answer. Remove all summarization steps and the HotpotMultiHop sub-module. This direct passage-to-answer approach avoids information loss from summarization layers."
+                 }
+       |
+       v
+  [  6]  Score: 0.7600  |  Type: PROMPT
+         Branch: codeevolver-20260221191443-1da0e4
+         Change: Prompt change at extract_answer
+
+
+================================================================================
+  TRAJECTORY #2  |  Best Score: 0.7200  |  Candidate: [7]  |  Steps: 3
+================================================================================
+  [  0]  Score: 0.5667  |  Type: SEED
+         Branch: codeevolver-20260221191443-main
+         Change: Initial seed candidate
+       |
+       v
+  [  2]  Score: 0.7200  |  Type: CODE
+         Branch: codeevolver-20260221191443-b47572
+         Change: {
+                   "change_request": "In HotpotMultiHopPipeline.forward(), replace the entire summarize-then-generate workflow with a direct extraction approach. Remove the HotpotMultiHop sub-module entirely. Instead, in the forward() method: (1) Perform 2-hop retrieval directly (first retrieve with question, generate hop2 query using dspy.ChainOfThought('question,passages->query'), then retrieve again), (2) Concatenate all raw passages from both hops into a single context string, (3) Create a new ExtractShortAnswer signature with inputs (question: str, passages: str) and output (answer: str with desc='Extract only the exact short factoid answer from the passages, with no extra words or explanation'), (4) Use dspy.ChainOfThought(ExtractShortAnswer) to extract the answer from the combined raw evidence. This eliminates information loss from summarization and forces the model to extract exact answers rather than generate verbose responses."
+                 }
+       |
+       v
+  [  7]  Score: 0.7200  |  Type: PROMPT
+         Branch: codeevolver-20260221191443-b47572
+         Change: Prompt change at extract_answer.predict
+
+
+================================================================================
+  TRAJECTORY #3  |  Best Score: 0.7200  |  Candidate: [4]  |  Steps: 3
+================================================================================
+  [  0]  Score: 0.5667  |  Type: SEED
+         Branch: codeevolver-20260221191443-main
+         Change: Initial seed candidate
+       |
+       v
+  [  3]  Score: 0.7000  |  Type: CODE
+         Branch: codeevolver-20260221191443-ecf36d
+         Change: {
+                   "change_request": "In HotpotMultiHopPipeline.forward(), implement a two-stage answer generation architecture: (1) Increase k from 7 to 15 for both retrieval hops to get more comprehensive evidence, (2) After the current generate_answer call, add a second DSPy module with signature 'question, long_answer -> short_answer' that extracts only the exact factoid entity from the verbose answer, with output field description 'Extract only the minimal answer entity - a single name, date, number, or yes/no - with no explanation or punctuation'. This normalization step will ensure exact match compatibility while keeping the existing summarization workflow intact."
+                 }
+       |
+       v
+  [  4]  Score: 0.7200  |  Type: CODE
+         Branch: codeevolver-20260221191443-6b8321
+         Change: {
+                   "change_request": "Transform the HotpotMultiHopPipeline to use a Dual-Path Answer Generation with Cross-Verification architecture: (1) Remove the summarization steps (summarize1, summarize2) and instead pass raw passages directly to answer generation modules. (2) Create two parallel answer extraction paths: Path A uses dspy.ChainOfThought with a signature 'question,hop1_passages,hop2_passages->answer' for reasoning-based extraction, and Path B uses dspy.Predict with a signature 'question,hop1_passages,hop2_passages->answer' for direct extraction. (3) Add a new AnswerVerification signature and module using dspy.ChainOfThought with inputs 'question,hop1_passages,hop2_passages,candidate_answer_a,candidate_answer_b->verified_answer,confidence' that cross-checks both candidate answers against the raw passages and selects the most factually supported answer. (4) Update the forward() method to: retrieve k=15 passages for hop1, generate hop2 query directly from question and hop1 passages (no summary), retrieve k=15 passages for hop2, generate both candidate answers in parallel, run verification to select final answer, and apply ExtractFactoidAnswer only to the verified answer. This eliminates information loss from summarization and adds self-verification to catch extraction errors."
+                 }

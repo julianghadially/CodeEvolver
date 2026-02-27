@@ -1,0 +1,111 @@
+additional_instructions,change_request,expected_status
+"## Hover
+Hover is designed to retrieve information from 2017 Wikipedia Abstracts (5.9M).
+
+#### Task Type: Document Retrieval
+This is a document retrieval task. The metric measures whether the correct supporting documents are retrieved — it does NOT measure claim verification or fact-checking accuracy. Do not add claim verification, fact-checking, or classification modules. Focus on improving retrieval recall and precision through better queries, re-ranking, or retrieval strategies.
+
+#### What's Allowed
+- The program is allowed to create or remove modules
+- The program is allowed to create or remove dynamic prompts
+- The program is allowed to add rerankers, provided the final document count remains the same - 21 total documents
+- There is no limit on the number of search results to retrieve per query (same cost)
+- Available services: wikipedia colbert-server (Via dspy.Retrieve)
+
+#### Constraints:
+- Do NOT search more than three queries per claim. This is a hard requirement.
+- Do NOT return more than 21 documents in the final output. This is a hard requirement.
+- Do NOT use the hover dataset as context.
+- Do NOT use any external websearch services.
+
+
+### Available Services
+
+The following external services are available with API keys already configured in the environment:
+
+### Wikipedia colbert-server (Via dspy.Retrieve)
+- **Documentation**: https://github.com/julianghadially/colbert-server
+- **Use cases**:
+  - Retrieve information from Wikipedia abstracts
+  - Useful for fact-checking and information retrieval
+- **Python usage**: `from dspy import Retrieve`
+
+## Ideas for Optimization
+- Consider increasing the k retrieved, and then reranking the final results to 21 (max 21 documents allowed)
+- Consider different context retrieval pipelines, including query + different kinds of rerankers (list rerankers, score-based reranking, sliding-window rerankers, etc.)
+- LLM enhanced rerankers: https://arxiv.org/html/2406.12433v2
+- FIRST Faster Improved Listwise Reranking with Single Token Decoding rerankers: https://arxiv.org/abs/2406.15657
+- Do not attempt pairwise re-ranking as this takes too much time.
+- Consider a gap analysis before generating queries. This worked in a past GEPA optimization run.
+
+Additional notes:
+- increasing K greater than 35 is not recommended as it will overload the Colbert server.","Implement a ""Query Decomposition with Iterative Entity Discovery"" architecture in HoverMultiHopPipeline.forward() that transforms the multi-hop retrieval from similarity search to structured reasoning:
+
+**Core Change**: Replace the current linear 3-hop retrieval with an iterative entity-driven approach:
+
+1. **Create new DSPy Signature classes** (in hover_pipeline.py):
+   - `ClaimDecomposition`: Takes claim → outputs list of sub-questions
+   - `EntityExtractor`: Takes claim + retrieved documents → outputs structured list of key entities and relationships discovered
+   - `GapAnalysis`: Takes claim + entities_found + documents_retrieved → outputs what critical information is still missing
+
+2. **Modify HoverMultiHopPipeline.forward()** to implement iterative discovery loop (max 3 iterations to satisfy constraint):
+   - **Iteration 1**: Decompose claim into 2-3 sub-questions using ClaimDecomposition signature. For each sub-question, retrieve k=5 documents (total 10-15 docs). Extract entities and relationships from retrieved docs using EntityExtractor.
+   - **Iteration 2**: Use GapAnalysis to identify missing entities/relationships. Generate targeted queries for each missing entity. Retrieve k=5 docs per missing entity (up to 3 entities = 15 docs max). Update entity/relationship store.
+   - **Iteration 3**: Final gap analysis. Generate specific queries for any remaining missing pieces. Retrieve k=5 docs per query (up to 3 queries = 15 docs max).
+   - **After iterations**: Pool all retrieved documents (~40 total), deduplicate, score with DocumentRelevanceScorer, return top 21.
+
+3. **Key architectural benefits**:
+   - Explicitly discovers implicit entities through decomposition
+   - Each iteration builds structured knowledge (entities + relationships)
+   - GapAnalysis provides self-correction by identifying what's missing
+   - Sub-questions break complex claims into retrievable units
+   - Still respects 3-search constraint (3 iterations, each potentially doing 1 batch retrieval operation)",fail
+"#### Constraints:
+- Do NOT search more than three queries per claim. This is a hard requirement.
+- Do NOT return more than 21 documents in the final output. This is a hard requirement.
+- Do NOT use the hover dataset as context.
+- Do NOT use any external websearch services.
+","Add the following change request to the constraint checker examples inside tests/test data with the same instructions
+
+"" implement a **Dual-Query Architecture with Entity-Title Extraction** within `HoverMultiHopPipeline.forward()`. Add a new DSPy signature `EntityTitleExtractor` that explicitly identifies potential Wikipedia article titles (proper nouns: people, places, events, works) from the claim and retrieved context. For each iteration, generate TWO types of queries in parallel: (1) semantic queries (current GapAnalysis approach) for contextual retrieval, and (2) entity-focused queries that are literal entity names extracted from documents (e.g., ""Pat Ashton"", ""SM Megamall"", ""Planes Trains and Automobiles""). Retrieve k=5 documents for each semantic query (max 3 semantic queries per iteration) AND k=3 documents for each entity-title query (max 5 entity names per iteration), ensuring total retrieval stays within 3 iterations. After each iteration, deduplicate by title. This architecture addresses the evaluation pattern where semantically relevant documents are found but specific entity article titles are missed. The entity-title queries act as lexical anchors while semantic queries provide context.""",fail
+"## Hover
+Hover is designed to retrieve information from 2017 Wikipedia Abstracts (5.9M).
+
+#### Task Type: Document Retrieval
+This is a document retrieval task. The metric measures whether the correct supporting documents are retrieved — it does NOT measure claim verification or fact-checking accuracy. Do not add claim verification, fact-checking, or classification modules. Focus on improving retrieval recall and precision through better queries, re-ranking, or retrieval strategies.
+
+#### What's Allowed
+- The program is allowed to create or remove modules
+- The program is allowed to create or remove dynamic prompts
+- The program is allowed to add rerankers, provided the final document count remains the same - 21 total documents
+- There is no limit on the number of search results to retrieve per query (same cost)
+- Available services: wikipedia colbert-server (Via dspy.Retrieve)
+
+#### Constraints:
+- Do NOT search more than three queries per claim. This is a hard requirement.
+- Do NOT return more than 21 documents in the final output. This is a hard requirement.
+- Do NOT use the hover dataset as context.
+- Do NOT use any external websearch services.
+
+
+### Available Services
+
+The following external services are available with API keys already configured in the environment:
+
+### Wikipedia colbert-server (Via dspy.Retrieve)
+- **Documentation**: https://github.com/julianghadially/colbert-server
+- **Use cases**:
+  - Retrieve information from Wikipedia abstracts
+  - Useful for fact-checking and information retrieval
+- **Python usage**: `from dspy import Retrieve`
+
+## Ideas for Optimization
+- Consider increasing the k retrieved, and then reranking the final results to 21 (max 21 documents allowed)
+- Consider different context retrieval pipelines, including query + different kinds of rerankers (list rerankers, score-based reranking, sliding-window rerankers, etc.)
+- LLM enhanced rerankers: https://arxiv.org/html/2406.12433v2
+- FIRST Faster Improved Listwise Reranking with Single Token Decoding rerankers: https://arxiv.org/abs/2406.15657
+- Do not attempt pairwise re-ranking as this takes too much time.
+- Consider a gap analysis before generating queries. This worked in a past GEPA optimization run.
+
+Additional notes:
+- increasing K greater than 35 is not recommended as it will overload the Colbert server.","Implement a two-phase ""retrieve-then-score"" architecture in `langProBe/hover/hover_pipeline.py`: (1) Increase retrieval to k=11-12 per hop (totaling ~35 documents across 3 hops) to maximize recall, (2) Create a new DSPy ChainOfThought module `DocumentRelevanceScorer` that takes the claim and each document, outputs a relevance score (1-10) with reasoning, (3) Within `HoverMultiHopPipeline.forward()`, after calling `self.program()` to get all retrieved documents, deduplicate them, then score each unique document using the scorer module, (4) Select the top 21 highest-scored documents as the final output. This approach exploits the ""no limit on search results per query"" while staying within the 3-query and 21-document constraints, and uses LLM reasoning to identify the most relevant supporting documents rather than relying solely on ColBERT ranking.",pass

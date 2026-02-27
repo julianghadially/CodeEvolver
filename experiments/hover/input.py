@@ -27,7 +27,7 @@ This is a document retrieval task. The metric measures whether the correct suppo
 - Available services: wikipedia colbert-server (Via dspy.Retrieve)
 
 #### Constraints:
-- Do NOT search more than three times per question. This is a hard requirement.
+- Do NOT search more than three queries per claim. This is a hard requirement.
 - Do NOT return more than 21 documents in the final output. This is a hard requirement.
 - Do NOT use the hover dataset as context. 
 - Do NOT use any external websearch services.
@@ -51,6 +51,9 @@ The following external services are available with API keys already configured i
 - FIRST Faster Improved Listwise Reranking with Single Token Decoding rerankers: https://arxiv.org/abs/2406.15657
 - Do not attempt pairwise re-ranking as this takes too much time.
 - Consider a gap analysis before generating queries. This worked in a past GEPA optimization run.
+
+Additional notes:
+- increasing K greater than 35 is not recommended as it will overload the Colbert server.
 """
 
 OPTIMIZE_CONFIG = {
@@ -61,7 +64,7 @@ OPTIMIZE_CONFIG = {
     "valset_path": "data/hoverBench_val.json", # data/FacTool_QA_train_normalized.jsonl
     "input_keys": ["claim"],
     "reflection_lm": "openai/gpt-4.1-mini",
-    "max_metric_calls": 6000,  # 150 examples × 50 full evals (with subsampled valset)
+    "max_metric_calls": 2000,  # 60 examples × 30 full evals = 1800 (with subsampled valset)
     "num_threads": 8,  # Increased from 5 to 20 for better parallelization
     "max_valset_size": 60,  # Subsample validation set to 150 examples (from 300) for faster evaluation
     "seed": 42,
