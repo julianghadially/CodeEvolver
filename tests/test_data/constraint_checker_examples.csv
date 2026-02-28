@@ -60,14 +60,53 @@ Additional notes:
    - GapAnalysis provides self-correction by identifying what's missing
    - Sub-questions break complex claims into retrievable units
    - Still respects 3-search constraint (3 iterations, each potentially doing 1 batch retrieval operation)",fail
+"## Hover
+Hover is designed to retrieve information from 2017 Wikipedia Abstracts (5.9M).
+
+#### Task Type: Document Retrieval
+This is a document retrieval task. The metric measures whether the correct supporting documents are retrieved — it does NOT measure claim verification or fact-checking accuracy. Do not add claim verification, fact-checking, or classification modules. Focus on improving retrieval recall and precision through better queries, re-ranking, or retrieval strategies.
+
+#### What's Allowed
+- The program is allowed to create or remove modules
+- The program is allowed to create or remove dynamic prompts
+- The program is allowed to add rerankers, provided the final document count remains the same - 21 total documents
+- There is no limit on the number of search results to retrieve per query (same cost)
+- Available services: wikipedia colbert-server (Via dspy.Retrieve)
+
+#### Constraints:
+- Do NOT search more than three queries per claim. This is a hard requirement.
+- The final output of the system CANNOT return more than 21 documents. This is a hard requirement.
+- Do NOT use the hover dataset as context.
+- Do NOT use any external websearch services.
+
+
+### Available Services
+
+The following external services are available with API keys already configured in the environment:
+
+### Wikipedia colbert-server (Via dspy.Retrieve)
+- **Documentation**: https://github.com/julianghadially/colbert-server
+- **Use cases**:
+  - Retrieve information from Wikipedia abstracts
+  - Useful for fact-checking and information retrieval
+- **Python usage**: `from dspy import Retrieve`
+
+## Ideas for Optimization
+- Consider increasing the k retrieved, and then reranking the final results to 21 (max 21 documents allowed)
+- Consider different context retrieval pipelines, including query + different kinds of rerankers (list rerankers, score-based reranking, sliding-window rerankers, etc.)
+- LLM enhanced rerankers: https://arxiv.org/html/2406.12433v2
+- FIRST Faster Improved Listwise Reranking with Single Token Decoding rerankers: https://arxiv.org/abs/2406.15657
+- Do not attempt pairwise re-ranking as this takes too much time.
+- Consider a gap analysis before generating queries. This worked in a past GEPA optimization run.
+
+Additional notes:
+- increasing K greater than 35 is not recommended as it will overload the Colbert server.","Implement a query diversification architecture in HoverMultiHopPipeline.forward(): (1) Create a QueryDiversification DSPy signature that generates 3 diverse search queries from a single claim, each targeting different entities or aspects (e.g., subject entities, related concepts, negation checking); (2) Create a dspy.Predict module using this signature; (3) Retrieve k=11 documents per query (3 queries \u00d7 11 = 33 total); (4) Create a RelevanceScorer DSPy signature with ChainOfThought that scores each retrieved document's relevance to the claim on a 0-10 scale with reasoning; (5) Sort all 33 documents by relevance score and select top 21; (6) Remove the multi-hop architecture entirely - replace with this single-stage diversified retrieval + scoring approach. This addresses the core issue where sequential summarization loses entity information, and ensures broader entity coverage through query diversification while maintaining the 21-document constraint.",pass
 "#### Constraints:
 - Do NOT search more than three queries per claim. This is a hard requirement.
 - Do NOT return more than 21 documents in the final output. This is a hard requirement.
 - Do NOT use the hover dataset as context.
 - Do NOT use any external websearch services.
-","Add the following change request to the constraint checker examples inside tests/test data with the same instructions
-
-"" implement a **Dual-Query Architecture with Entity-Title Extraction** within `HoverMultiHopPipeline.forward()`. Add a new DSPy signature `EntityTitleExtractor` that explicitly identifies potential Wikipedia article titles (proper nouns: people, places, events, works) from the claim and retrieved context. For each iteration, generate TWO types of queries in parallel: (1) semantic queries (current GapAnalysis approach) for contextual retrieval, and (2) entity-focused queries that are literal entity names extracted from documents (e.g., ""Pat Ashton"", ""SM Megamall"", ""Planes Trains and Automobiles""). Retrieve k=5 documents for each semantic query (max 3 semantic queries per iteration) AND k=3 documents for each entity-title query (max 5 entity names per iteration), ensuring total retrieval stays within 3 iterations. After each iteration, deduplicate by title. This architecture addresses the evaluation pattern where semantically relevant documents are found but specific entity article titles are missed. The entity-title queries act as lexical anchors while semantic queries provide context.""",fail
+","implement a **Dual-Query Architecture with Entity-Title Extraction** within `HoverMultiHopPipeline.forward()`. Add a new DSPy signature `EntityTitleExtractor` that explicitly identifies potential Wikipedia article titles (proper nouns: people, places, events, works) from the claim and retrieved context. For each iteration, generate TWO types of queries in parallel: (1) semantic queries (current GapAnalysis approach) for contextual retrieval, and (2) entity-focused queries that are literal entity names extracted from documents (e.g., ""Pat Ashton"", ""SM Megamall"", ""Planes Trains and Automobiles""). Retrieve k=5 documents for each semantic query (max 3 semantic queries per iteration) AND k=3 documents for each entity-title query (max 5 entity names per iteration), ensuring total retrieval stays within 3 iterations. After each iteration, deduplicate by title. This architecture addresses the evaluation pattern where semantically relevant documents are found but specific entity article titles are missed. The entity-title queries act as lexical anchors while semantic queries provide context.""",fail
 "## Hover
 Hover is designed to retrieve information from 2017 Wikipedia Abstracts (5.9M).
 

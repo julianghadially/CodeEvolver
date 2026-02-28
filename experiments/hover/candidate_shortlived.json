@@ -9,4 +9,3 @@
     "entity_query_gen.predict": "Generate a focused search query for a specific entity in the context of the claim.",
     "reranker.predict": "Score and rank documents based on their relevance to the multi-hop reasoning chain needed to verify the claim. Consider how documents connect to support multi-hop reasoning."
   }
-  
