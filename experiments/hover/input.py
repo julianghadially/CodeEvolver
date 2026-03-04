@@ -28,8 +28,8 @@ This is a document retrieval task. The metric measures whether the correct suppo
 
 #### Constraints:
 - Do NOT search more than three queries per claim. This is a hard requirement.
+- Again, do not search more than three queries per claim. This is a hard requirement
 - The final output of the system CANNOT return more than 21 documents. This is a hard requirement.
-- Do NOT use the hover dataset as context.
 - Do NOT use any external websearch services.
 
 
@@ -46,10 +46,8 @@ The following external services are available with API keys already configured i
 
 ## Ideas for Optimization
 - Consider increasing the k retrieved per query, and then reranking the final results to 21 (final output limited to 21 documents)
-- Consider different context retrieval pipelines, including different kinds of rerankers (list rerankers, score-based reranking, sliding-window rerankers, etc.)
-- LLM enhanced rerankers: https://arxiv.org/html/2406.12433v2
-- FIRST Faster Improved Listwise Reranking with Single Token Decoding rerankers: https://arxiv.org/abs/2406.15657
-- Consider a gap analysis before generating queries. This worked in a past optimization run.
+- Consider different context retrieval pipelines, including different kinds of rerankers (list rerankers, score-based reranking, pairwise rerankers, etc.)
+- Consider a gap analysis before generating queries
 
 Additional notes:
 - If you increase k retrieved per query, do not increase it greater than 25 per query as it may overload the Colbert server.

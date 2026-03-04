@@ -9,7 +9,7 @@ Tests that dspy_save_program can:
 To run:
 1. Deploy or serve the Modal app:  modal serve modal_app.py
 2. Set env:  export GITHUB_TEST_INSTALLATION_ID=104592180
-3. Run:  pytest tests/test_dspy_save_program.py -v -s -m integration
+3. Run:  python -m pytest tests/test_dspy_save_program.py -v -s -m integration
 
 Target repository: https://github.com/julianghadially/LangProBe-CodeEvolver
 """
@@ -31,7 +31,7 @@ GIT_BRANCH = "codeevolver-20260220211311-435004"
 PROGRAM = "langProBe.hover.hover_pipeline.HoverMultiHopPipeline"
 CANDIDATE_PATH = Path(__file__).parent.parent / "experiments" / "hover" / "candidate_shortlived.json"
 #temp test
-GIT_BRANCH = "codeevolver-20260221191443-1da0e4"
+GIT_BRANCH = "codeevolver-20260303031536-d01394"
 PROGRAM = "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline"
 CANDIDATE_PATH = Path(__file__).parent.parent / "experiments" / "hotpotGEPA" / "candidate.json"
 

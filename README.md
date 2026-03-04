@@ -1,19 +1,23 @@
 # CodeEvolver
-CodeEvolver offers autonomous coding agents for high reliability AI systems. 
+CodeEvolver is a coding agent that reflects on the errors in your AI application, and makes changes to the prompts and code to improve your system. 
 
 AI engineering with LLMs is a messy cycle of writing 1,000 word prompts, manually inspecting them, and continously tweaking them every time you have a new customer, new AI model, or new use case.
 
 CodeEvolver replaces 90% of that manual work. Given a dataset, CodeEvolver optimizes the codebase against a reward function. Code changes include the prompts, context pipeline, tools, and AI system architecture. 
 
-This repo is opening for beta testing very soon. Contact us on Linkedin at /in/julianghadially.
+## Status: Early Access
 
-## Pick a service
+**THIS CODEBASE IS NOT READY FOR SELF-SERVICE USE**
+
+We are currently serving researchers and AI-native companies through an early access program. To use this codebase, please request access via codeevolver.ai, and we will contact you.
+
+## Service Options
 
 Optimizing code requires making many mutations to your code base, tracking each with git branches, and evaluating (running) each one on an objective function. 
 
 To do this safely, you need a secure, sandboxed environment to run AI generated code. This environment also needs to run your code, which means it needs access to whatever secrets and databases are required for running your AI system.
 
-You can use our secure, sandboxed environments, or host on your own private cloud \- coming soon with our enterprise plans.  We do NOT recommend running 100s of AI-generated code mutations on your own machine without the security protections in this repo.
+For now, you can use our secure, sandboxed environments.  We do NOT recommend running 100s of AI-generated code mutations on your own machine without security protections. 
 
 ## Fully-hosted optimization
 
@@ -22,20 +26,18 @@ In our hosted solution, we orchestrate coding agents, git branching, optimizatio
 ### We handle security for you: 
 
 1. **Sandboxed execution environments:**  AI-generated code executes in an isolated environment, protecting your files.  
-2. **Network protection:** No data can leave the sandbox, except to white-listed domains.  
-3. **Secrets management via infisical:** Secrets stored securely and accessed by the sandbox at runtime.  
-4. **Zero persistent storage:** program tracking is stored for three months with jwt token for access control. Code is cloned at runtime and dies after the worker is finished.
-5. **Transparent Third Parties:** Modal for cloud services and sandboxes, Anthropic for Claude Agents SDK, Mongodb Atlas service, and infisical for keys
+2. **Network protection:** No data can leave the sandbox, except to white-listed domains - *coming soon*.
+3. **Secrets management:** Secrets stored securely and accessed by the sandbox at runtime - *coming soon*.
+4. **Zero persistent storage:** program tracking such as optimization improvement trajectories are stored for three months. Access is controlled via jwt tokens. Your AI program is cloned at runtime in a modal sandbox and dies after the worker is finished.
+5. **Transparent Third Parties:** Modal for cloud services and sandboxes, Anthropic for Claude Agents SDK, Mongodb Atlas service, and infisical for keys.
 
 ### How to get started
 
-**Step 1: Create account**
-
-1. Connect coding agent to your Github repository  
-2. Connect to a secrets manager (powered by infisical or link to your own)
+**Step 1: Join Early Access Program**
+Visit codeevolver.ai to join our early access program, as this repository is not yet ready for self-service.
 
 **Step 2: Prepare your project**   
-You will need the following (See guide):
+You will need the following:
 
 1. *Training dataset*, including inputs and any fields used by your objective metric (e.g.,  ground truth label)   
 2. *Objective metric*  
@@ -48,7 +50,7 @@ You will need the following (See guide):
 
 ## Private Cloud
 
-Please contact us on linkedin: /in/julianghadially
+Please visit codeevolver.ai.
 
 
 ## Gratitude and References
