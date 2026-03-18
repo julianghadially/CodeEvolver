@@ -54,10 +54,13 @@ web_image = (
 # to be installed. The Python SDK is just a wrapper that spawns the CLI.
 sandbox_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git", "curl", "build-essential", "nodejs", "npm")
+    .apt_install("git", "curl", "unzip", "build-essential", "nodejs", "npm")
     .run_commands(
         # Install Claude Code CLI globally - required for claude-agent-sdk
         "npm install -g @anthropic-ai/claude-code",
+        # Install Deno — required for DSPy ReAct/RLM programs
+        "curl -fsSL https://deno.land/install.sh | sh",
+        "ln -s /root/.deno/bin/deno /usr/local/bin/deno",
     )
     .pip_install(
         "gitpython>=3.1.0",

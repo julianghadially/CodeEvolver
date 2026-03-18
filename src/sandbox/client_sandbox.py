@@ -23,12 +23,19 @@ logger = logging.getLogger(__name__)
 def _get_base_sandbox_image(python_version: str = "3.11") -> modal.Image:
     """Build the minimal sandbox image.
 
-    Only includes git and Python. Client dependencies are installed
-    at sandbox start time from their requirements.txt.
+    Includes git, Python, and Deno (required by DSPy RLMs).
+    Client dependencies are installed at sandbox start time from their
+    requirements.txt; runtime dependencies from runtime_requirements.txt.
     """
     return (
         modal.Image.debian_slim(python_version=python_version)
-        .apt_install("git")
+        .apt_install("git", "curl", "unzip")
+        .run_commands(
+            # Install Deno — required for DSPy ReAct/RLM programs
+            "curl -fsSL https://deno.land/install.sh | sh",
+            # Make deno available system-wide (installer puts it in /root/.deno/bin)
+            "ln -s /root/.deno/bin/deno /usr/local/bin/deno",
+        )
         .add_local_dir("src/sandbox/mounted", remote_path="/app/sandbox/mounted")
         .add_local_dir("src/agent/mounted", remote_path="/app/agent/mounted")
         .add_local_dir("src/ai_frameworks/mounted", remote_path="/app/ai_frameworks/mounted")
@@ -39,13 +46,18 @@ def _get_agent_capable_sandbox_image(python_version: str = "3.11") -> modal.Imag
     """Build sandbox image with coding agent capabilities.
 
     System Python: claude-agent-sdk, anyio (for agent execution)
-    System: Node.js, npm, Claude Code CLI
+    System: Node.js, npm, Claude Code CLI, Deno
     Client deps: installed at runtime into /workspace/.venv
     """
     return (
         modal.Image.debian_slim(python_version=python_version)
-        .apt_install("git", "curl", "nodejs", "npm")
-        .run_commands("npm install -g @anthropic-ai/claude-code")
+        .apt_install("git", "curl", "unzip", "nodejs", "npm")
+        .run_commands(
+            "npm install -g @anthropic-ai/claude-code",
+            # Install Deno — required for DSPy ReAct/RLM programs
+            "curl -fsSL https://deno.land/install.sh | sh",
+            "ln -s /root/.deno/bin/deno /usr/local/bin/deno",
+        )
         .pip_install("claude-agent-sdk>=0.1.21", "anyio>=4.0.0")
         .add_local_dir("src/sandbox/mounted", remote_path="/app/sandbox/mounted")
         .add_local_dir("src/agent/mounted", remote_path="/app/agent/mounted")
@@ -156,6 +168,9 @@ class ClientSandbox(ABC):
         if env_vars:
             self._inject_env_vars(env_vars)
 
+        # Install runtime dependencies (e.g., deno, bun) from runtime_requirements.txt
+        self._install_runtime_deps()
+
         # Install client's requirements.txt
         logger.info("Installing client dependencies...")
 
@@ -230,6 +245,56 @@ class ClientSandbox(ABC):
             "-c",
             f"cat > {self._workspace}/.env << 'EOFENV'\n{env_content}\nEOFENV",
         ).wait()
+
+    def _install_runtime_deps(self) -> None:
+        """Install system-level runtime dependencies from runtime_requirements.txt.
+
+        Analogous to requirements.txt for Python packages, runtime_requirements.txt
+        lists shell commands to install non-Python runtimes. Each non-comment line
+        is executed as a bash command inside the sandbox.
+
+        Example runtime_requirements.txt:
+            # Install Bun JS runtime
+            curl -fsSL https://bun.sh/install | bash && ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+        """
+        if self._sandbox is None:
+            return
+
+        runtime_file = f"{self._workspace}/runtime_requirements.txt"
+
+        # Check if the file exists and read it
+        check_p = self._sandbox.exec(
+            "bash", "-c",
+            f"if [ -f {runtime_file} ]; then cat {runtime_file}; else echo '__NOT_FOUND__'; fi",
+        )
+        check_p.wait()
+        output = check_p.stdout.read().strip()
+
+        if output == "__NOT_FOUND__":
+            logger.info("No runtime_requirements.txt found (optional)")
+            return
+
+        # Parse commands (strip comments and blank lines)
+        commands = []
+        for line in output.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                commands.append(line)
+
+        if not commands:
+            return
+
+        logger.info(f"Installing {len(commands)} runtime dependencies...")
+
+        for cmd in commands:
+            logger.info(f"Running: {cmd}")
+            p = self._sandbox.exec("bash", "-c", cmd)
+            p.wait()
+            if p.returncode != 0:
+                stderr = p.stderr.read()
+                logger.warning(f"Runtime install command failed: {cmd}\n{stderr}")
+            else:
+                logger.info(f"Runtime install completed: {cmd}")
 
     def _ensure_gitignore_entries(self, entries: list[str]) -> None:
         """Ensure specified entries are in .gitignore.

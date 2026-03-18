@@ -40,11 +40,18 @@ Meanwhile, The optimizer process is a long-running process that manages the code
 Our modal function controls for security risks. We are downloading and reading code from clients, and a coding agent is writing code to the client repo. This Function should be scoped to the client data only and not to other clients - i.e., we take away CodeEvolver database access. Instead, it is restricted to pre-defined CodeEvolver mongodb endpoints. That is, it cannot access other clients data. (Uses JWT tokens).
 
 #### ClientSandbox class is a base class for optimizer sandboxes. It provides:
-- `start()` — Create Modal sandbox, clone repo, install client's `requirements.txt`
+- `start()` — Create Modal sandbox, clone repo, install client's `requirements.txt` and `runtime_requirements.txt`
 - `stop()` — Terminate sandbox
 - `reinstall_deps()` — Re-run pip install if requirements change
 - `exec_bash(command)` — Execute arbitrary bash commands
 - `exec_prebuilt(command)` — Abstract method for subclasses to implement prebuilt script executions for each optimizer
+
+#### Sandbox Dependency Conventions
+Client repositories declare dependencies via two files:
+- **`requirements.txt`** — Python packages (pip installed into venv)
+- **`runtime_requirements.txt`** — Shell commands to install non-Python system runtimes. Each non-comment line is executed as a bash command inside the sandbox. This is the system-level equivalent of `requirements.txt`.
+
+Common runtimes like Deno are pre-installed in the sandbox image. The `runtime_requirements.txt` file is for anything else the client needs that isn't a Python package (e.g., Bun, custom tools).
 
 Subclasses (e.g., `GEPASandbox`) implements `exec_prebuilt()` to run domain-specific scripts inside the sandbox. This enables process-level isolation — the orchestrator (Modal Function) can run without client dependencies installed.
 
