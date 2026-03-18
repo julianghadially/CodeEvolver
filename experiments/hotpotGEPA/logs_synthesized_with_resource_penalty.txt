@@ -1,0 +1,1563 @@
+(env) (base) CodeEvolver ~ % python -m experiments.run --program hotpotGEPA
+Starting optimization run
+Iteration 0: Base program full valset score: 0.56 over 150 / 150 examples
+Iteration 1: Selected program 0 score: 0.56
+Iteration 1: Proposed new text for program.create_query_hop2.predict: Task Description:
+You will be provided with two fields as input:
+- `question`: a natural language question, often asking for a fact, a name, a date, a location, or a classification.
+- `summary_1`: a short passage or phrase that contains some factual information related to the question, typically an answer or partial answer extracted from a knowledge source.
+
+Your task is to generate a field called `query` that represents an optimized, clear, concise, and relevant search query in natural language or keyword form. The purpose of this `query` is to retrieve or verify the accurate answer to the question using the evidence provided in `summary_1` or to disambiguate between options provided in the question.
+
+Key points and domain-specific details to consider:
+
+1. **Answer-Oriented Queries**
+   The intended answer to the question is often contained or strongly implied in the summary_1.
+   When summary_1 gives a direct factual answer (e.g., a name, date, place), the query should focus on that entity or fact.
+   Avoid rewriting summary_1 verbatim as a declarative sentence; instead, express it as a short, focused search or question query that would quickly confirm or retrieve the answer if searched in a knowledge base or search engine.
+
+2. **Avoid Simple Affirmations or Full Sentences**
+   Queries should not be full explanatory or narrative sentences (e.g., “No — Chad Kroeger is Canadian and Brian Molko is British...”) or direct Yes/No answers or summaries.
+   Instead, formulate queries as keywords, entity names, or short interrogative phrases that effectively target relevant documents or entries.
+   For example:
+   - Use entity names combined with context keywords: `"Joe Tracini" Boomerang "launched 2000"`
+   - Use short questions targeting the facts: `What nationality are David Nixon and Arthur Berthelet?` → query: `David Nixon Arthur Berthelet nationality`
+   - For clear answers, simply use the answer term: e.g., `Linux Magazine`
+
+3. **Include Contextual Keywords When Relevant**
+   Use keywords from the question to add context to the entities or facts found in summary_1.
+   For example, if the question involves a date, include it:
+   `"The Simpsons" episode January 21, 1990 Homer promoted position`
+   This helps surface precise information and avoids ambiguous hits.
+
+4. **Handling Ambiguity or Comparisons**
+   When the question compares two or more entities or options, the query should clearly represent the comparison or choice, especially if the summary_1 resolves it by giving the answer to the option asked:
+   E.g., question: "Which game was invented in 1952, Stratego or Blockhead!?" summary_1: "Blockhead! was invented in 1952."
+   Query: `Blockhead!`
+
+5. **Preference for Entities, Titles, or Proper Nouns**
+   When summary_1 provides entity names, titles, or keywords, it is usually best to include these as the main focus of the query.
+   For example, when the answer is a TV show, a book, an individual, or a place, include their proper names exactly as in summary_1 or as known canonical forms.
+
+6. **Dates and Numbers**
+   Prefer dates and numbers expressed in a canonical and unambiguous format (e.g., "October 1, 1935" → `October 1, 1935` or `1 October 1935`) but use only if it helps disambiguate or specify the answer in the query. Otherwise, including them verbatim, as in summary_1, works. Queries should not be just the date alone unless that is the specific answer sought.
+
+7. **Avoid Overly Long Queries**
+   Long, verbose queries that restate the entire question and summary_1 are discouraged. The query should be succinct yet sufficient to find the answer.
+
+8. **When Summary_1 Contains Insufficient Information**
+   If summary_1 does not fully answer or confirm the question (e.g., lacks data about one of multiple entities), the query should be designed to find the missing information, specifically targeting entities or claims requiring verification. For example, phrasing a query to explicitly confirm or deny the point:
+   `Is Pelle Almqvist a singer and songwriter?`
+
+9. **Reasoning Field Is Optional**
+   The reasoning field (if generated) should explain the logic behind the query. It is not strictly necessary but can guide query construction.
+
+Summary:
+Generate a concise and focused search query using keywords, phrases, and entity names from `question` and `summary_1` that would effectively retrieve or confirm the accurate answer implied in the summary. Avoid narrative answers or duplicating the summary verbatim. Tailor queries to the question type and context, referencing essential entities, dates, or terms. Use queries as if they are inputs to a search engine or knowledge base to verify or find the answer.
+
+---
+
+Example Template for Query Generation:
+- **Factual Answer (Entity/Name):** just the entity name or title, e.g., `Linux Magazine`
+- **Fact with Context (Date, Event):** keywords + contextual terms, e.g., `"Joe Tracini" Boomerang "launched 2000"`
+- **Comparisons/Choices:** entity confirming answer, e.g., `Blockhead!`
+- **For verification questions where summary lacks info:** a targeted interrogative or keyword query focusing on missing info, e.g., `Pelle Almqvist singer songwriter`
+Iteration 1: New subsample score 12.0 is better than old score 11.0. Continue to full eval and add to candidate pool.
+Iteration 1: Found a better program on the valset with score 0.5733333333333334.
+Iteration 1: Val aggregate for new program: 0.5733333333333334
+Iteration 2: Selected program 1 score: 0.5733333333333334
+Iteration 2: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-4ba29d",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, modify the `HotpotMultiHopPipeline.forward()` method to implement an extract-then-verify architecture with adaptive retrieval: (1) Create a new `ExtractAnswer` signature that takes question + raw passages (not summaries) and extracts the exact short factoid answer from the text, (2) Create an `AnswerConfidence` signature that scores confidence (0-1) based on whether the answer is well-supported by the passages, (3) Create an `AdaptiveRetrievalQuery` signature that generates a targeted follow-up query if confidence < 0.7, (4) Replace the current summarize-then-answer pipeline with: Hop1 retrieve → Hop2 query generation → Hop2 retrieve → ExtractAnswer from combined passages → ConfidenceCheck → if low confidence: generate targeted query → Hop3 retrieve → re-extract answer from all passages. Pass raw passage text (not summaries) directly to extraction modules to avoid information loss. Increase k from 7 to 15 to ensure enough raw context for extraction. This architectural change shifts from generative to extractive answering with self-verification, improving exact match accuracy while using adaptive retrieval only when needed."
+}
+Iteration 2: Proposed new text for create_query_hop2.predict: Given the fields `question`, `passages`, produce the fields `query`.
+Iteration 2: Proposed new text for extract_answer: Extract the exact short factoid answer directly from the provided passages.
+Iteration 2: Proposed new text for answer_confidence: Score confidence (0-1) based on whether the answer is well-supported by the passages.
+Iteration 2: New subsample score 14.98 is better than old score 9.0. Continue to full eval and add to candidate pool.
+Iteration 2: Found a better program on the valset with score 0.6664.
+Iteration 2: Val aggregate for new program: 0.6664
+Iteration 3: Selected program 0 score: 0.56
+Iteration 3: Proposed new text for program.summarize1.predict: Given a `question` and a list of textual `passages` relevant to the question, produce a concise and accurate `summary` that directly answers the question. Your summary should:
+
+1. Identify and extract the specific factual answer(s) from the provided passages. Use exact names, titles, years, or other precise information as required.
+2. When the answer involves a named entity (person, place, work, event), include the entity’s full proper name as it appears in the passages.
+3. Avoid including extraneous details or unrelated context; focus solely on information needed to answer the question clearly and directly.
+4. If multiple passages provide overlapping information, synthesize them coherently to produce a unified answer.
+5. When the question requires identifying relationships or connections (e.g., who starred with whom, who directed what, who was drafted by which team), confirm the link explicitly using information found in the passages.
+6. If the passages only partially address the question or fail to provide the necessary factual detail (e.g., a missing birth year, or name change date), indicate clearly that the information is not available from the supplied data rather than guessing or introducing external knowledge.
+7. Do not respond with single words or phrases that are incomplete; the summary should contain a stand-alone factual answer that would be understandable without needing to reference the question or passages.
+8. When a date or numeric detail is expected, provide it in the standard form given in the passages without speculative alterations.
+9. For answers involving named works such as films, music albums, TV shows, or awards, use the full official title as given, including the year if provided.
+10. Use text evidence from the passages to support your extracted answer in your reasoning step, but ensure the final summary remains brief and directly addresses the question.
+
+Example strategies demonstrated in the examples:
+- Identify entities mentioned in the question within the passages and find relevant detailed information about them.
+- Confirm that the passages link entities or events explicitly (e.g., actor with film, director with movie).
+- Disambiguate similar or related entities by verifying specifics such as dates or roles.
+- Prefer the most precise passage(s) that address the core of the question.
+- Summarize succinctly using the key factual data extracted.
+
+The final response should contain a "summary" field with your factual answer and may optionally include a "reasoning" field justifying how you derived it from the passages. The "summary" should always be formatted as a direct answer to the question that a reader can understand independently.
+Iteration 3: New subsample score 12.0 is not better than old score 12.0, skipping
+Iteration 4: Selected program 2 score: 0.6664
+Iteration 4: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-ca8ac2",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In the HotpotMultiHopPipeline class in /workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py, replace the adaptive retrieval mechanism (confidence-based hop 3) with a fixed 3-hop retrieval pipeline. Remove the AnswerConfidence and AdaptiveRetrievalQuery signatures and their corresponding dspy.Predict modules. Modify the forward() method to always perform 3 retrieval hops: (1) retrieve based on the original question, (2) generate a refined query from hop 1 passages using create_query_hop2 and retrieve, (3) generate a second refined query from combined hop1+hop2 passages and retrieve, then extract the final answer from all combined passages (hop1+hop2+hop3). This ensures consistent multi-hop coverage for complex questions while staying within reasonable resource constraints (3 queries vs current 2, adding only 2% penalty but likely improving accuracy significantly). Keep k=15 for each retrieval call."
+}
+Iteration 4: Proposed new text for create_query_hop2.predict: Given the fields `question`, `passages`, produce the fields `query`.
+Iteration 4: Proposed new text for create_query_hop3.predict: Given the fields `question`, `passages`, produce the fields `query`.
+Iteration 4: Proposed new text for extract_answer: Extract the exact short factoid answer directly from the provided passages.
+Iteration 4: New subsample score 11.760000000000003 is not better than old score 12.0, skipping
+Iteration 5: Selected program 1 score: 0.5733333333333334
+Iteration 5: Proposed new text for program.summarize1.predict: Given an input containing the fields `question` and `passages`, generate the field `summary` as a concise and direct answer to the question based strictly on factual information found within the provided passages.
+
+Task details and guidelines:
+
+1. **Input Format**:
+   - `question`: A natural language question seeking a specific fact, name, date, or term.
+   - `passages`: A list of text passages, each typically including a title or entity name and a body of factual information related to that entity.
+
+2. **Output Format**:
+   - `summary`: A precise, standalone answer to the question derived solely from the information in the provided passages. The summary should contain only the answer itself, without explanation or reasoning, unless a short clarifying phrase improves clarity.
+
+3. **Task Goal**:
+   - Identify and extract the factually correct and relevant answer to the question using the evidence in the passages.
+   - Use the titles and content of passages to ensure alignment with expected answer entities (e.g., person names, film titles, song titles).
+   - When the question asks for a specific value (year, name, place, role, etc.), provide that exact value as the answer.
+
+4. **Factual and Domain-Specific Nuances**:
+   - The questions often focus on domain-specific entities such as:
+       - People (including full names, roles, professions)
+       - Titles of songs, films, operas, TV shows, magazines
+       - Dates (birth years, founding years, release dates)
+       - Specific terms (names of stadiums, awards, roles played)
+       - Relationships and comparisons (e.g., “Did both X and Y do Z?”, “Which person shares record with another?”)
+   - Recognize domain-specific terminology and equivalences (e.g., “cosmonaut” and “astronaut” are equivalent roles).
+   - Some answers require identifying entities mentioned only implicitly or through known associations (for example, matching a song to its film director or identifying the role played by an actor).
+   - When multiple passages mention related facts, reconcile them carefully (e.g., Pomone has a prologue plus five acts; still the number of acts is five).
+   - Avoid providing information not substantiated by the provided passages, even if it might be common knowledge.
+   - If the answer is not present or passages are contradictory, indicate that no conclusive answer is found based on the input.
+
+5. **Reasoning and Answer Extraction Strategy**:
+   - Scan passages for explicit, direct statements answering the question.
+   - Use titles or entity names to confirm interpretive matches.
+   - For questions involving comparison or verification ("Do both X and Y...?", "Who shares a record with...?", etc.), verify each entity’s relevant attribute or fact from the passages.
+   - When a passage includes intertwined information (e.g., lists multiple professions or roles), extract specifically the part answering the question directly.
+   - Avoid including full reasoning or background in the final summary. Reasoning may be used internally to confirm the answer.
+
+6. **Formatting and Style**:
+   - Provide the answer as clearly and succinctly as possible.
+   - Use proper capitalization and punctuation as appropriate to the answer (e.g., proper names, titles in quotes).
+   - If the answer is a name or title, provide just the name/title.
+   - If the answer is a date or number, provide just the date/number.
+   - In yes/no questions, answer “yes” or “no” unless otherwise indicated.
+
+Overall, the task is a text-based fact extraction and summarization task requiring domain-aware comprehension of passages to produce a precise factual answer to the input question.
+Iteration 5: New subsample score 14.0 is not better than old score 15.0, skipping
+Iteration 6: Selected program 1 score: 0.5733333333333334
+Iteration 6: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-58a072",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, completely rewrite the `HotpotMultiHopPipeline.forward()` method to implement a **parallel multi-query decomposition architecture with passage-level extraction**:\n\n1. Create a new `DecomposeQuestion` signature that breaks the input question into 3-4 focused sub-queries for parallel retrieval (e.g., for \"The sponsor of X award is based in which neighborhood?\", generate sub-queries like \"What company sponsors the X award?\" and \"Where is [company] headquartered?\")\n\n2. Create a new `ExtractFactoid` signature that takes the original question and a list of raw passages, then extracts the exact short factoid answer by scanning through passages (NOT generating or summarizing)\n\n3. Create a new `ConfidenceCheck` signature that evaluates answer confidence (high/medium/low) and suggests a follow-up query if confidence is low\n\n4. In the `forward()` method: (a) decompose the question into 3 sub-queries using `dspy.Predict(DecomposeQuestion)`, (b) retrieve k=25 passages for each sub-query in parallel (3 retrievals total), (c) combine all raw passages (75 total) and pass directly to `dspy.ChainOfThought(ExtractFactoid)` without any summarization, (d) check confidence with `dspy.Predict(ConfidenceCheck)`, (e) if confidence is low, generate one follow-up query, retrieve k=25 more passages, and re-extract with the augmented passage set (4 total retrievals), (f) return the extracted factoid answer.\n\nThis eliminates the summarization bottleneck, increases retrieval recall, uses raw evidence for extraction, and adds adaptive retrieval when needed."
+}
+Iteration 6: Proposed new text for decompose: Break the input question into 3 focused sub-queries for parallel retrieval.
+
+Each sub-query should target a specific aspect of the multi-hop question.
+Generate exactly 3 distinct sub-queries that together cover the information needed.
+Iteration 6: Proposed new text for extract.predict: Extract the exact short factoid answer by scanning through passages.
+
+Read through the provided passages to find the exact answer to the question.
+Do NOT generate or summarize - extract the precise factoid from the text.
+Iteration 6: Proposed new text for check_confidence: Evaluate answer confidence and suggest a follow-up query if confidence is low.
+
+Assess whether the answer is well-supported by the available evidence.
+Return high/medium/low confidence level. If low, suggest a follow-up query.
+Iteration 6: New subsample score 10.760000000000002 is better than old score 8.0. Continue to full eval and add to candidate pool.
+Iteration 6: Val aggregate for new program: 0.5674666666666666
+Iteration 7: Selected program 1 score: 0.5733333333333334
+Iteration 7: Proposed new text for program.summarize2.predict: You will be given three fields as input:
+- `question`: a question that requires a concise factual answer.
+- `context`: a short text snippet that provides the expected or known answer to the question.
+- `passages`: an array of reference passages that may provide further details or evidence related to the question and answer.
+
+Your task is to produce the field `summary`: a brief, clear, and accurate final answer to the question that reflects the information contained in the `context` and supported by the relevant information in the `passages`. The summary should:
+- Provide a direct, concise answer to the question without unnecessary elaboration.
+- Use information from the context and passages to verify or clarify the answer. If the context provides an explicit answer, prefer it, supported by passages.
+- Use precise names, titles, dates, or other factual specifics as provided (e.g., full names, titles of works, dates, locations). When selecting a person’s name, use their full or commonly accepted form.
+- Avoid vague or generic answers. For example, if the answer involves a location, give the most specific accurate location supported by passages.
+- When the question expects a "yes" or "no" answer (binary), respond succinctly with "yes" or "no" unless a more explicit phrasing is needed to preserve clarity.
+- For answers involving awards, use the commonly known award name (e.g., "BAFTA TV Award" rather than a long description).
+- When the context provides an alternate phrasing or clarifying information (e.g., a date range or alternative name), it may be included succinctly without redundant verbosity.
+- If multiple passages contribute to verifying or clarifying the answer, integrate their information into a single concise statement.
+
+Your reasoning should include:
+- Identification of the relevant passage(s) that directly answer the question.
+- Explanation of how the context and passages support or clarify the answer, including cross-referencing named entities and facts.
+- Clarification of any ambiguous or conflicting information.
+
+Your `summary` output must be:
+- A clean, precise final answer to the question, suitable for use as a stand-alone factual response.
+- Free from unnecessary background information, citations, or speculative elements.
+
+Note: The task requires synthesizing and verifying factual information from multiple provided passages to confirm or refine the context’s answer. The goal is to produce an authoritative, concise factual summary that directly answers the question based on the input evidence.
+Iteration 7: New subsample score 9.0 is not better than old score 9.0, skipping
+Iteration 8: Selected program 0 score: 0.56
+Iteration 8: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-344ccb",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, modify the `HotpotMultiHopPipeline.forward()` method to implement a raw-evidence extraction architecture: (1) Increase k from 7 to 20 per retrieval query to gather more comprehensive evidence, (2) Create an `ExtractAnswer` signature that takes the question and raw passages (not summaries) as input and outputs a short factoid answer extracted directly from the passages, (3) Replace the summarize1/summarize2/generate_answer pipeline with a single extraction step that receives all raw passages from both hops concatenated together, (4) Use dspy.ChainOfThought(ExtractAnswer) to extract the exact answer from the combined raw passages. This aligns with the client's optimization note that \"removing question summaries and providing raw evidence\" and \"replacing Generate Answer with Extract Answer\" performed well in prior GEPA runs, while addressing the current 0% accuracy by preserving complete information and extracting precise factoid answers."
+}
+Iteration 8: Proposed new text for create_query_hop2.predict: Given the fields `question`, `context`, produce the fields `query`.
+Iteration 8: Proposed new text for extract_answer.predict: Extract a short factoid answer directly from the provided passages.
+Iteration 8: New subsample score 14.0 is better than old score 12.0. Continue to full eval and add to candidate pool.
+Iteration 8: Val aggregate for new program: 0.5466666666666666
+Iteration 9: Selected program 1 score: 0.5733333333333334
+Iteration 9: Proposed new text for program.generate_answer.predict: You will be given a question along with two supporting text summaries that contain relevant information potentially answering the question. Your task is to provide a concise, factual, short answer directly addressing the question, based solely on the information in the provided summaries.
+
+Requirements and guidelines:
+- Always answer with a brief factoid — typically a name, date, place, or a single phrase that directly answers the question.
+- Do not include extra explanations, reasoning steps, or qualifiers in the final answer. Your reasoning can stay internal.
+- Use information only from the two given summaries; if both contain the answer, confirm consistency, if they disagree, carefully choose the most factual, direct, and relevant detail supported by the summaries.
+- Avoid copying entire sentences unnecessarily; distill key facts for brevity and precision.
+- Retain exact proper nouns, dates, titles, or terms as they appear in the summaries — for example, if the answer is a person's full birth name, include the full name, not just a partial name or description.
+- For yes/no questions, respond simply with "yes" or "no".
+- For questions about identity, birthplace, dates, roles, relationships, works, or affiliations, extract the exact term or name specified in the summaries.
+- For multiple entities or things implied in the answer (e.g., nationality of two individuals), summarize concisely (e.g., "American" rather than "Both are American").
+- If the question references a title, event, or fact that might be ambiguous, use the exact form from the summary closest to the gold answer.
+- Do not add additional context that isn't explicitly supported by the summaries.
+- Your answer should be formatted as a single line or phrase, fully sufficient to answer the question in isolation.
+
+By following these detailed instructions, you ensure your responses are concise, consistent, and precise factoid answers, matching expected responses for evaluation and practical use.
+Iteration 9: New subsample score 13.0 is better than old score 11.0. Continue to full eval and add to candidate pool.
+Iteration 9: Val aggregate for new program: 0.5933333333333334
+Iteration 10: Selected program 1 score: 0.5733333333333334
+Iteration 10: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-e791ca",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, completely rewrite the `HotpotMultiHopPipeline.forward()` method to implement a **cascading candidate extraction architecture with confidence-based adaptive retrieval**: (1) Create new signatures `ExtractCandidateAnswers` (extract 3-5 candidate short factoid answers from passages with confidence scores) and `SelectBestAnswer` (select the single best answer from candidates based on question alignment); (2) Replace the existing `self.program` workflow entirely within the parent module's forward method; (3) Implement a 3-stage cascade: Stage 1 performs initial retrieval (k=15) → extract candidates with confidence; Stage 2 checks if max confidence > 0.8 threshold—if yes, select best answer and return; if no, generate refined query + retrieve (k=15) again → merge all passages → re-extract candidates; Stage 3 selects best answer from all candidates; (4) This eliminates summarization bottleneck, preserves exact factoid phrasing from Wikipedia, uses confidence as self-verification signal for adaptive retrieval (avoiding unnecessary 3rd query when confident), and naturally handles both yes/no and entity/date factoid answers by extracting directly from source text rather than generating paraphrases."
+}
+Iteration 10: Proposed new text for extract_candidates.predict: Extract 3-5 candidate short factoid answers directly from the passages with confidence scores.
+
+For each candidate, extract the exact phrasing from the passages (do not paraphrase).
+Assign a confidence score (0.0-1.0) based on how well the passage supports this as the answer.
+Iteration 10: Proposed new text for select_best.predict: Select the single best answer from candidates based on question alignment.
+
+Choose the candidate that best answers the question considering both the answer content
+and the confidence scores.
+Iteration 10: Proposed new text for generate_refined_query.predict: Generate a refined search query to find additional information.
+Iteration 10: New subsample score 4.0 is not better than old score 7.0, skipping
+Iteration 11: Selected program 5 score: 0.5933333333333334
+Iteration 11: Proposed new text for program.create_query_hop2.predict: Task Description:
+You will be provided with two input fields:
+- `question`: A natural language question that asks for a factual piece of information such as a name, date, place, classification, or choice between options.
+- `summary_1`: A short text passage extracted from a knowledge source that often contains the direct or partial answer to the question, or information that helps disambiguate or verify the answer.
+
+Your task is to generate a concise, focused search query called `query` that can be used to retrieve or verify the accurate answer to the question by leveraging the evidence or key entities provided in `summary_1`. The query should be carefully constructed to optimize retrieval accuracy and disambiguate among alternatives when necessary.
+
+Key Points and Domain-Specific Details:
+
+1. **Answer-Centric Query Construction:**
+   - If `summary_1` provides a clear factual answer (e.g., an entity name, date, place), the query should focus on that specific entity or fact without transforming it into a full sentence.
+   - If `summary_1` partially answers or supports the question, include the relevant entities with context keywords to create a focused search query that confirms or refines the answer.
+
+2. **Avoid Narrative, Affirmations, or Full Sentences:**
+   - Queries are *not* full declarative sentences or narrative summaries; they are succinct keyword phrases or short interrogatives, e.g., `"Entity Name" attribute context` or `Entity attribute` or simply the entity name if that suffices.
+   - Do not write queries as yes/no questions or paraphrase the summary verbatim. The query must prompt retrieval of confirming evidence.
+
+3. **Incorporate Contextual Keywords From the Question:**
+   - Include important context terms from the `question`, such as dates, event names, role descriptions, or relationships, to sharpen the query and avoid ambiguity.
+   - For example, if the question references a date, show it in the query to help pinpoint exact facts or differentiate among similar entities.
+
+4. **For Comparison or Choice Questions:**
+   - If the question compares two or more entities or options and `summary_1` confirms one as the answer, construct a query focusing exclusively on that entity/fact to resolve the choice efficiently.
+   - Include keywords that highlight the comparison context if helpful.
+
+5. **Prefer Proper Nouns, Titles, and Canonical Entity Names:**
+   - Use canonical names and exact titles as found in `summary_1` or as commonly known in relevant knowledge domains.
+   - For example, use full show titles, band names, or names with disambiguators (e.g., "How to Dismantle an Atomic Bomb (2004)").
+   - Avoid vague or generic terms when a proper noun is available.
+
+6. **Dates and Numbers Usage:**
+   - Use unambiguous, canonical date formats when appropriate and when it aids disambiguation or verification (e.g., `October 1, 1935` or `1 October 1935`).
+   - Include numbers primarily when they are part of the fact or comparison being verified.
+   - Do not query just the date alone unless the date itself is the sought answer.
+
+7. **Keep Queries Concise but Sufficient:**
+   - Avoid overly long or verbose queries. The query should be no longer than necessary to capture essential entities and context for verification.
+   - Generally, fewer than ~8-10 keywords, focusing on entity names combined with precise context terms, works best.
+
+8. **Address Insufficient Summary Information:**
+   - If `summary_1` lacks information about a key entity or fact necessary to answer or verify the question, phrase the query to explicitly confirm or disambiguate that missing information.
+   - For example, include a targeted question or keywords like `Is X a Y?` or `X role in Y`.
+
+9. **Query Types By Question Type:**
+   - **Direct Fact (person/place/title):** Use just the canonical name or title (e.g., `Bruno Tonioli`).
+   - **Fact with Date or Event:** Combine entity with date/context (e.g., `Julie Andrews birth date` or `"The Simpsons" episode January 21, 1990`).
+   - **Comparatives:** Focus on the identified answer entity plus comparative context.
+   - **Verification queries:** Target entity plus fact to verify (e.g., `John Ensign 2000 Nevada Senate election date`).
+
+10. **Use Quotes for Exact Phrases:**
+    - Where a multi-word phrase or title should be treated as a single unit (e.g., song titles, show titles), encase it in quotes to ensure exact matching, e.g., `"How to Dismantle an Atomic Bomb"`, `"Rock with You"`.
+
+11. **Examples:**
+    - **Question:** What adult animated television series was created by John Kricfalusi and had music tracks from APM Music?
+      **summary_1:** Ren & Stimpy "Adult Party Cartoon"
+      **Query:** `Ren & Stimpy "Adult Party Cartoon" John Kricfalusi APM Music`
+
+    - **Question:** When was the Actress who starred in Our Sons with Ann-Margret born?
+      **summary_1:** Julie Andrews — born October 1, 1935
+      **Query:** `Julie Andrews birth date`
+
+12. **Consulting Case Examples:**
+    When available, analyze summary_1 to identify the entity or fact that answers or closely relates to the question, then balance inclusion of question keywords to contextualize the query. Avoid redundancy and verbosity.
+
+Summary:
+Produce a succinct, well-targeted search query consisting of key entity names, contextual terms, and dates (if relevant) derived from the question and `summary_1`. The query should act as a precise search or verification input to retrieve the correct answer efficiently. Avoid narrative or full-sentence formats; prefer keyword phrases with proper nouns, exact titles, relationship context, and canonical date formats for clarity and disambiguation.
+
+---
+Format:
+
+- Output one field `query` with the constructed query string based on the above criteria.
+- Optionally, produce a `reasoning` field that briefly explains the construction rationale for the query, especially highlighting how key entities and context were selected.
+
+This approach ensures improved accuracy in answer retrieval, verification, and disambiguation by focusing on essential, fact-oriented search queries derived from question-summary pairs.
+Iteration 11: New subsample score 12.0 is not better than old score 12.0, skipping
+Iteration 12: Selected program 1 score: 0.5733333333333334
+Iteration 12: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-25d13c",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, rewrite the `HotpotMultiHopPipeline.forward()` method to implement a direct passage-based answer extraction architecture that eliminates information-losing summarization steps: (1) Keep k=7 and 2 retrieval queries as baseline, (2) Create a new `ExtractAnswer` signature that takes question and raw concatenated passages from both hops as input and extracts the exact short factoid answer directly from the text, (3) Remove all summarization modules (summarize1, summarize2), (4) For hop2 query generation, use a simplified signature that generates the second query directly from the question and hop1 passages (not from a summary), (5) Concatenate all passages from hop1 and hop2 (14 passages total) and pass them directly to the answer extraction module, (6) Use dspy.ChainOfThought for the ExtractAnswer module to reason about which passages contain the answer and extract the exact text. This eliminates the information bottleneck caused by summarization while keeping retrieval count at 2."
+}
+Iteration 12: Proposed new text for create_query_hop2: Generate a second query to find additional information needed to answer the question.
+Iteration 12: Proposed new text for extract_answer.predict: Extract the exact short factoid answer directly from the provided passages.
+Iteration 12: New subsample score 14.0 is better than old score 11.0. Continue to full eval and add to candidate pool.
+Iteration 12: Found a better program on the valset with score 0.6666666666666666.
+Iteration 12: Val aggregate for new program: 0.6666666666666666
+Iteration 13: Selected program 1 score: 0.5733333333333334
+Iteration 13: Proposed new text for program.create_query_hop2.predict: Task Description:
+You will be provided with two input fields:
+
+- `question`: a natural language question, often asking for a fact, name, date, place, event, classification, or a comparative fact involving one or more entities.
+- `summary_1`: a short passage or phrase extracted from knowledge sources that provides partial or full factual information related to the question. This often contains or implies the answer or a piece of evidence to verify/confirm the answer.
+
+Your task is to generate a new field called `query` that is an optimized, concise, and relevant search query in natural language keywords or short phrases. This `query` should be designed to retrieve or verify the accurate answer to the input `question` by effectively leveraging the information in `summary_1`. It should also help disambiguate between multiple possible answers or confirm an implied fact.
+
+---
+
+Key Guidelines and Domain-Specific Details:
+
+1. **Query Focus and Content**
+   - The query should emphasize the key entity, fact, name, date, event, or relationship that is the answer or verification target implied by `summary_1`.
+   - If `summary_1` states a direct factual answer (a proper noun, date, place, or numeric fact), the query should target that answer explicitly along with relevant context from the question.
+   - Avoid copying or turning the summary into a declarative sentence; instead, form concise keywords or noun phrases or short fact-check questions.
+
+2. **Form and Length**
+   - Do not produce full narrative sentences or complete affirmations/negations ("yes", "no").
+   - Queries should be succinct but sufficient to confirm or find the answer in a search or knowledge base.
+   - Typically 3–7 keywords including entity names, descriptors, and important contextual words from the question and summary.
+
+3. **Incorporate Context from the Question**
+   - Use relevant keywords from the question to disambiguate the query, especially when the summary mentions common names or facts that could be ambiguous.
+   - Include relevant dates, locations, roles, or related entities from the question to refine the query (e.g., name plus date, or entity plus event).
+
+4. **Entity Prioritization**
+   - When the answer is an entity (person, organization, place, title), include the exact canonical or well-known forms of those proper nouns, exactly as found in `summary_1` or the question.
+   - For multiple entities or comparisons, mention the entities explicitly, especially if the summary resolves which one is correct.
+
+5. **Dates and Numeric Information**
+   - Use clear, canonical date formats (such as `October 1, 1935` or `1 October 1935`) as given in `summary_1` or the question, if they help clarify the answer.
+   - Include numeric data when it enhances specificity or disambiguation (e.g., "Billboard No. 13", "formed 2009").
+
+6. **Comparisons and Ambiguity Resolution**
+   - If the question asks a comparison (e.g., which entity did X first or which is more recent), and the summary provides the answer, focus the query on the correct entity or comparison pair with relevant keywords.
+   - For unresolved or partial summaries, frame query keywords to explicitly check or compare the entities or facts involved.
+
+7. **Handling Insufficient or Negative Information**
+   - When `summary_1` states a lack of pertinent information (e.g., "no evidence that X does Y"), construct a query to verify or search for missing or negated information—e.g., `"Albanian singer sings in Italian and Spanish"`.
+   - Include all relevant entity names and descriptive keywords to target the specific information gap.
+
+8. **Task-Specific Examples of Query Formatting**
+   - **Direct entity answer:** `Tyler Glenn`
+   - **Fact plus context:** `Tyler Glenn Neon Trees "Animal" Billboard No. 13`
+   - **Date and founding verification:** `Billy Wilson president university founded 1963`
+   - **Comparison:** `Said the Whale vs Butthole Surfers formation year`
+   - **Clause with negation or missing info:** `Pelle Almqvist singer songwriter The Hives`
+
+9. **Avoid**
+   - Verbose restatements of the question or summary.
+   - Full declarative sentences or paragraphs.
+   - Simple yes/no queries without explicit facts or keywords.
+   - Queries missing critical disambiguation terms when relevant.
+
+---
+
+Additional Domain Notes from Examples:
+
+- Names should be fully qualified when appropriate (e.g., "Tyler Glenn" rather than just "Tyler"; use band names like "Neon Trees" alongside artist name when beneficial).
+- Include titular forms or show names in quotes when used as a phrase (e.g., `"The National Lottery: In It to Win It"`).
+- Include role descriptors when useful (e.g., "former CEO", "singer songwriter").
+- Include geographic or corporate identifiers when helpful (e.g., "Brighton Boston" or "300 Entertainment Lawrenceville 2009").
+- For questions about time points or events without full time info, include known historic details to refine the search query (e.g., `"Land Run of 1889" start time "April 22, 1889"`).
+
+---
+
+Summary:
+
+Construct concise, keyword-focused, entity-rich queries that combine the critical answer elements from `summary_1` with relevant contextual keywords from the `question`, formulated as natural language search queries (keywords, phrases, or short questions) that would readily retrieve or verify the correct answer in a search or knowledge base setting. Avoid verbose or narrative queries, partial answers, or unrelated terms. Focus on precision, clarity, and contextual disambiguation.
+Iteration 13: New subsample score 9.0 is not better than old score 9.0, skipping
+Iteration 14: Selected program 1 score: 0.5733333333333334
+Iteration 14: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-d76d69",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, completely rewrite the `HotpotMultiHopPipeline.forward()` method to implement a **reranking-based multi-hop extraction architecture**: (1) Create new signatures `EntityFocusedQuery`, `PassageReranker`, and `FactoidExtractor`; (2) For hop 1, retrieve k=20 documents, use LLM reranking module to score and select top 5 most relevant passages based on question; (3) For hop 2, generate a refined entity-focused query from hop 1 evidence, retrieve k=20, rerank to top 5; (4) Create a `FactoidExtractor` signature that takes question + reranked passages and extracts the exact short answer that appears verbatim in the passages (not a summary); (5) Add adaptive 3rd hop: if extracted answer is < 3 words and appears in <2 passages, generate one more targeted query, retrieve k=15, rerank to top 3, re-extract. This uses passage quality over quantity via reranking (3 hops × 20 docs = 3 queries total, acceptable cost), eliminates information-losing summaries, and focuses on extracting exact factoid answers from high-quality reranked evidence."
+}
+Iteration 14: Proposed new text for reranker: Score and rank passages by relevance to the question. Return only the most relevant passages.
+Iteration 14: Proposed new text for entity_query_generator: Generate a refined entity-focused query for the next hop based on previous evidence.
+Iteration 14: Proposed new text for factoid_extractor: Extract the exact short answer that appears verbatim in the passages. Do not summarize or paraphrase.
+Iteration 14: New subsample score 11.96 is not better than old score 14.0, skipping
+Iteration 15: Selected program 2 score: 0.6664
+Iteration 15: Proposed new text for extract_answer: Instructions for extracting short factual answers from provided passages:
+
+1. The response must contain the exact short factoid answer explicitly stated in the provided passages. Do not add, omit, or infer information beyond the content of the passages.
+
+2. The extracted answer should exactly match the relevant text span within the passages, including any proper names, titles, numbers, or specific phrases. Use full, formal names when available (e.g., "Katherine Grace McNamara" rather than just "Katherine McNamara"), and include official or full designations (e.g., "Boots UK" rather than just "Boots").
+
+3. When multiple passages provide overlapping information, select the most complete, formal, and precise version appearing in the passages. Prefer the passage that explicitly connects to the question context (e.g., naming an organization fully, providing dates, or full titles).
+
+4. For numerical or date-based answers, output the numeric value or date exactly as it appears in the passages (e.g., "£180.8 million", "1808", or "June 3, 1808").
+
+5. For yes/no questions, answer with a lowercase "yes" or "no" if explicitly supported by the passages.
+
+6. When identifying persons, places, or entities, choose the exact named mention from the passages, including any middle names or titles if present.
+
+7. If the question references a work or concept that is related to or adapted from a certain source (e.g., a TV series based on a book series), identify the named author or official source exactly as stated.
+
+8. For questions about relationships (e.g., who died first), identify the known outcome as explicitly stated or infer the relative order directly from the dates given in the passages.
+
+9. For answers involving organizational name changes or former names, provide the official former name as stated (e.g., “Reed Elsevier” as the former name of “RELX Group”).
+
+10. If the question asks for identification of a category or genre, name the specific genre as stated, e.g., "comedy", "superhero comedy", or "war comedy" rather than broad categories unless specifically indicated.
+
+General approach:
+
+- Scan passages carefully for the presence of a precise phrase or fact that directly answers the question.
+
+- Extract the minimal text span that fully and exactly answers the question without adding context or elaboration.
+
+- Ensure the answer covers all requested elements, e.g., full names, official titles, numeric values, or relationships described.
+
+- Avoid partial names or generic terms when a full official name is provided.
+
+- When numeric or date answers are expected, include any units or symbols as presented.
+
+In essence, your task is to locate and copy verbatim the most precise, complete short factual answer from the provided text relevant to the question.
+Iteration 15: New subsample score 14.0 is not better than old score 16.0, skipping
+Iteration 16: Selected program 2 score: 0.6664
+Iteration 16: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-d01394",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In the HotpotMultiHopPipeline class in /workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py, add a new DSPy Signature called `RefineToFactoid` with inputs (question, verbose_answer, passages) and output (factoid_answer: \"the minimal exact factoid answer, typically 1-5 words\"). After extracting the answer in both the initial extraction (line 64-66) and the re-extraction after hop3 (line 86-88), add a refinement step using `dspy.Predict(RefineToFactoid)` to distill the extracted answer into its minimal factoid form before returning it. Initialize the refine module as `self.refine_factoid = dspy.Predict(RefineToFactoid)` in __init__. This addresses the 0.0 scores caused by overly verbose answers like \"Nuclear Safety Inspector for the entire power plant\" instead of \"Nuclear Safety Inspector\"."
+}
+Iteration 16: Proposed new text for create_query_hop2.predict: Given the fields `question`, `passages`, produce the fields `query`.
+Iteration 16: Proposed new text for extract_answer: Extract the exact short factoid answer directly from the provided passages.
+Iteration 16: Proposed new text for answer_confidence: Score confidence (0-1) based on whether the answer is well-supported by the passages.
+Iteration 16: Proposed new text for refine_factoid: Distill a verbose answer into its minimal exact factoid form.
+Iteration 16: New subsample score 14.0 is better than old score 12.0. Continue to full eval and add to candidate pool.
+Iteration 16: Found a better program on the valset with score 0.7130666666666666.
+Iteration 16: Val aggregate for new program: 0.7130666666666666
+Iteration 17: Selected program 3 score: 0.5674666666666666
+Iteration 26: Proposed new text for answer_confidence: You will be given a question, a proposed answer to that question, and a set of supporting passages. Your task is to evaluate the confidence score (a value between 0 and 1) that the proposed answer is correct and well-supported by the information contained in the provided passages.
+
+To do this, you should:
+
+1. Carefully read the question, the proposed answer, and all passages provided.
+2. Determine whether the passages collectively provide clear, explicit, and relevant evidence that supports the accuracy of the proposed answer to the question.
+3. Consider if the passages mention:
+   - Key named entities (people, places, events, organizations) relevant to the question and answer.
+   - Specific factual data or details that directly align with the answer (e.g., dates, locations, numeric values).
+   - Confirmatory relationships or descriptions that explicitly or implicitly verify the answer.
+4. Take into account cases where:
+   - The proposed answer is directly stated or can be logically inferred from the passages.
+   - The passages are contradictory or insufficiently specific to confirm the answer.
+   - The passages mention related topics but do not support the answer.
+
+5. Assign a confidence score based on the strength and clarity of evidence:
+   - Score 1.0: The answer is fully supported by clear, direct statements in the passages.
+   - Scores between 0.5 and 0.9: The answer is partially supported, somewhat speculative, or supported by indirect evidence.
+   - Score 0: The passages do not support the answer or contradict it.
+
+Additional notes:
+
+- The passages may include various relevant and irrelevant information; your focus is on evidence supporting or refuting the answer.
+- Sometimes multiple passages together achieve the support; consider the collection as a whole.
+- Explicit named entities and exact matches (e.g., person names, dates, titles) strengthen support.
+- Absence of direct statements or key entities relevant to the answer lowers confidence.
+- Consider the domain-specific context, such as recognizing that terms like “Magdalen College, Oxford” or “Raman Research Institute” are likely the source of authority for the related question.
+- For disambiguation questions, evidence must align with the correct interpretation keyed by the question.
+- Scores should reflect the degree of evidential support, not your personal knowledge or external information.
+
+Example application:
+
+If the answer is “Shellac” for the band formed in 1992, and the passage explicitly states “Shellac is a band… formed in 1992,” assign 1.0.
+
+If the answer is “flowering plants” for Dahlia and Rondeletia, and passages only mention Dahlia as a moth or list other unrelated species, confidence should be lower or zero.
+
+Use this approach to assess all inputs and produce a confidence score reflecting evidence-based support.
+Iteration 26: New subsample score 13.0 is not better than old score 13.0, skipping
+Iteration 27: Selected program 6 score: 0.6666666666666666
+Iteration 27: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-115d80",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "Within the HotpotMultiHopPipeline class in /workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py, implement a self-verification loop with adaptive retrieval: (1) Create a new ConfidenceScorer signature that takes the question, retrieved passages, and extracted answer as inputs and outputs a confidence score (0-10) with reasoning about whether sufficient evidence exists. (2) After the initial 2-hop retrieval and answer extraction, use dspy.ChainOfThought(ConfidenceScorer) to evaluate confidence. (3) If confidence score < 7, generate a new targeted query using a RefinedQueryGenerator signature (takes question, current passages, current answer, and confidence reasoning as inputs) and perform one additional retrieval hop (k=15 to gather more comprehensive evidence). (4) If still low confidence after hop 3, perform one final retrieval with k=20. (5) After each additional retrieval, re-extract the answer from the expanded passage set. (6) This creates an adaptive 2-4 hop architecture that balances accuracy (by gathering more evidence when needed) with resource efficiency (by only using extra queries when confidence is genuinely low). Increase initial k values: hop1 k=10, hop2 k=10, adaptive hop3 k=15, adaptive hop4 k=20."
+}
+Iteration 27: Proposed new text for create_query_hop2: Generate a second query to find additional information needed to answer the question.
+Iteration 27: Proposed new text for extract_answer.predict: Extract the exact short factoid answer directly from the provided passages.
+Iteration 27: Proposed new text for confidence_scorer.predict: Evaluate confidence in the answer based on available evidence.
+Iteration 27: New subsample score 13.98 is not better than old score 15.0, skipping
+Iteration 28: Selected program 6 score: 0.6666666666666666
+Iteration 28: Proposed new text for extract_answer.predict: Your task is to extract the concise, exact factual answer that directly responds to the given question by using only the information explicitly provided in the supplied passages.
+
+Guidelines to follow:
+
+1. Identify and extract the minimal phrase or term that directly answers the question without adding interpretation, explanation, or extra information.
+
+2. The answer must be present verbatim or nearly verbatim in the passages provided. Avoid summarization, paraphrasing, or inference beyond what the passages state.
+
+3. If multiple passages provide the answer, prefer a short, unified answer common to those passages.
+
+4. When the question targets names, dates, places, titles, or specific terms, provide the exact name or term as found in the passages. For example:
+   - Use full official names when available (e.g., “James Edward Kelly” rather than “Jim Kelly” if passages specify the former).
+   - Use the exact form presented (e.g., spelling, initials, dates).
+
+5. For questions about relationships or roles (e.g., whether both people sing and write songs), answer succinctly with "yes" or "no" if supported, or provide the concise fact as per passages, avoiding elaborations.
+
+6. Use names or titles as referred to in the passages; for people, use the most complete form available. For entities like organizations or items, use the official or main name stated.
+
+7. When disambiguation is necessary (e.g., multiple candidates or entities), use the specific one clearly identified as the answer in the passages.
+
+8. Note that a single answer phrase is preferred over a complete sentence or explanation, unless the question scope demands short phrases.
+
+9. Always prioritize answers from passages that explicitly link the answer to the question context (e.g., identifying a person in relation to a role or event).
+
+10. Avoid including your reasoning or references to passages in the answer; only include those in the reasoning step if asked.
+
+In summary, extract from the provided text exactly what answers the question directly and succinctly, using the precise factual information given, formatted as short phrases or identifiers, without additional information or interpretation.
+Iteration 28: New subsample score 16.0 is better than old score 15.0. Continue to full eval and add to candidate pool.
+Iteration 28: Val aggregate for new program: 0.6666666666666666
+Iteration 29: Selected program 5 score: 0.5933333333333334
+Iteration 29: Proposed new text for program.create_query_hop2.predict: Task Description:
+You will receive two input fields:
+- `question`: a natural language question, typically requesting factual information such as a name, date, place, classification, or a comparison. These questions often require verifying or retrieving a precise answer.
+- `summary_1`: a short text snippet containing a factual answer or partial answer related to the question. This can include entity names, dates, events, locations, or clarifications that help resolve the question.
+
+Your task is to generate a new field called `query` — a concise, optimized search query designed to retrieve or verify the answer implied or explicitly stated in `summary_1`. The `query` should be suitable as a search input to a knowledge base, search engine, or database that returns authoritative evidence confirming the answer.
+
+Key Guidelines and Domain-Specific Details:
+
+1. **Answer-Driven Query Construction:**
+   - If `summary_1` contains a direct factual answer (entity name, date, place, title), the query should focus primarily on those answer terms combined with minimal contextual keywords from the question.
+   - Do **not** rewrite or restate the full summary in a sentence form; instead, isolate and combine the relevant entities or keywords that a search engine would need to confirm or find that fact.
+
+2. **Conciseness and Focus:**
+   - Avoid verbose, narrative, or explanatory queries. The query must be succinct yet comprehensive enough to uniquely identify the relevant information.
+   - Do not use yes/no phrases or full sentences; prefer keywords, proper nouns, short interrogative phrases, or fact-descriptive keyword combinations.
+
+3. **Use Contextual Keywords Appropriately:**
+   - Add essential keywords from the question to disambiguate or specify context (e.g., dates for events, relationships, locations).
+   - Do **not** add extraneous information that does not help distinguish the answer.
+
+4. **Entity and Proper Noun Inclusion:**
+   - Always include proper names, titles, and canonical forms exactly as given or known (e.g., person names, show titles, album names) when these appear as the answer or key in `summary_1`.
+   - This helps target precise records or documents.
+
+5. **Handling Dates and Numbers:**
+   - Include dates or numbers from the summary or question when relevant to clarify or narrow the query.
+   - Use unambiguous, canonical date formats as in the summary or question, but only when they aid disambiguation.
+
+6. **Dealing With Comparisons or Choices:**
+   - If the question asks to choose or compare entities, and the summary provides one direct answer, the query should contain only that answer entity or relevant keywords to confirm it.
+   - Avoid referencing the rejected option(s) unless verifying absence or contrast is necessary.
+
+7. **Queries for Verification or Missing Info:**
+   - When `summary_1` lacks sufficient detail to answer the entire question (e.g., missing birthdate, nationality, or relationship), your query should explicitly search for that missing information by combining entity names with the missing fact type (e.g., `birth date`, `nationality`, `founder`).
+   - Use concise interrogative or topical keyword phrases that would effectively target the missing answer.
+
+8. **Format and Structure:**
+   - The query may be a phrase, multiple keywords separated by spaces or semicolons for distinct queries if relevant, or a short question phrase stripped of unnecessary words.
+   - Use quotation marks around exact multi-word terms or titles to enforce exact matching (e.g., `"Nuclear Safety Inspector"`, `"January 21, 1990"`).
+
+9. **Avoid Over- or Under-Specification:**
+   - Do not provide queries that omit critical keywords that would cause ambiguity, nor include redundant or irrelevant terms that dilute focus.
+
+10. **Optional Reasoning Field:**
+    - You may include a reasoning field to explain why the query is constructed as it is, specifying which keywords or entities were prioritized and why. This is optional but recommended for clarity.
+
+Summary:
+Produce a short, targeted search query combining key entities, answer terms, and defining contextual keywords to confirm or retrieve the answer directly or resolve ambiguities suggested by the input question and summary_1. Maintain the balance between specificity and conciseness, and use domain knowledge about entity forms, dates, titles, and relational keywords to craft queries that efficiently surface authoritative answers.
+
+---
+
+**Example Query Strategies:**
+- Factual answer as entity name only: `"John Wayne"`
+- Factual answer with context: `"The Simpsons" "January 21, 1990" Homer promoted "Nuclear Safety Inspector"`
+- Multiple entities or verification: `Marc Caro nationality; Ruby Yang nationality`
+- Missing information on an entity: `Amar Singh Chamkila birth date "Lak Mera Kach Warga"`
+- Comparison resolved by summary: `Blockhead!`
+- Include relevant dates or numeric indicators only when they aid disambiguation.
+
+This instruction aims to guide the assistant to produce optimized search queries that best utilize the supplied answer snippet (`summary_1`) and question context to find or verify facts accurately and efficiently.
+Iteration 29: New subsample score 15.0 is not better than old score 16.0, skipping
+Iteration 30: Selected program 5 score: 0.5933333333333334
+Iteration 30: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-48eb13",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, completely rewrite the `HotpotMultiHopPipeline.forward()` method to implement a **high-recall raw-passage extraction architecture**: (1) Create a new `ExtractFactoidAnswer` DSPy signature with fields `question`, `passages` (list of raw retrieved documents), and `answer` (OutputField with desc='Extract the exact short factoid answer from the passages - output ONLY the answer with no additional context or explanation'); (2) Increase k from 7 to 25 to maximize recall; (3) Remove all summarization steps - retrieve 25 passages on hop1 using the question, retrieve 25 passages on hop2 using a reformulated query generated by `dspy.Predict('question,passages->refined_query')`, then concatenate all 50 raw passages; (4) Pass the concatenated raw passages directly to `dspy.ChainOfThought(ExtractFactoidAnswer)` to extract the precise factoid answer; (5) Keep retrieval_count=2 to avoid resource penalties. This eliminates information loss from summarization and focuses on extracting exact answers from comprehensive raw evidence."
+}
+Iteration 30: Proposed new text for refine_query: Given the fields `question`, `passages`, produce the fields `refined_query`.
+Iteration 30: Proposed new text for extract_answer.predict: Extract the exact short factoid answer from raw passages.
+Iteration 30: New subsample score 15.0 is better than old score 10.0. Continue to full eval and add to candidate pool.
+Iteration 30: Found a better program on the valset with score 0.7333333333333333.
+Iteration 30: Val aggregate for new program: 0.7333333333333333
+Iteration 31: Selected program 7 score: 0.7130666666666666
+Iteration 31: Proposed new text for refine_factoid: Task Description:
+Given a question, a verbose answer (which may be a phrase or short text), and a collection of relevant passages, produce a minimal, exact, factoid-style answer that directly and precisely responds to the question.
+
+Input Format:
+- A question (usually a factoid-style inquiry).
+- A verbose answer that provides the intended final answer or a close variant, potentially verbose or slightly imprecise.
+- Supporting passages with factual content relevant to the question and answer.
+
+Detailed Instructions:
+1. **Extract the Minimal Exact Factoid**: Distill the verbose answer into the most concise and specific factual phrase or term that exactly answers the question. Avoid extraneous words or overly broad terms unless explicitly required. The answer should be a "factoid," i.e., a short, definitive piece of information such as a name, year, location, title, or "yes"/"no" where appropriate.
+
+2. **Use Supporting Passages for Context & Confirmation**: Use the passages provided to confirm, disambiguate, and narrow down the answer if the verbose answer is ambiguous, overly general, or not exact enough. Passages often provide critical clarifications such as:
+   - Proper capitalization and spelling of names and terms.
+   - Precise entity types (e.g., "comedy" rather than "comedy films," or “USS Chandler” instead of “USS Chandler (DD-206)”).
+   - Confirmation of exact role, title, or attribute relevant to the question (e.g., a director’s nationality or association with a film).
+   - Contextual elaborations that indicate what is minimal and sufficient as an answer (e.g., "yes" instead of "yes, both are directors").
+
+3. **Answer Formatting and Style**:
+   - Provide the shortest possible phrase that directly answers the question without additional explanation or context.
+   - Use lowercase answers like "yes" or "no" unless the answer is a proper noun or title that requires capitalization.
+   - Exclude punctuation unless it is part of a proper name or official title (e.g., apostrophes in names or parentheses in official titles).
+   - When multiple similar variants exist (e.g., multiple films titled "Sky High"), choose the precise disambiguated term only if required by the question or passages. If the generic form suffices and is the expected answer (e.g., "comedy"), prefer the simplest form.
+
+4. **Common Patterns and Domain Specifics**:
+   - For genre questions, use the singular form (e.g., "comedy" rather than "comedy films").
+   - For persons related to historical or political facts, give full names or widely recognized forms as found in passages (e.g., "Abraham Lincoln" not just "Lincoln").
+   - For yes/no questions, respond simply with "yes" or "no," unless a qualified explanation is explicitly requested.
+   - For entities such as ships, include the official, commonly accepted ship name without needless technical designations or hull numbers unless specifically required by the question.
+   - For date or year questions, answer with the exact year or full date as relevant.
+   - For names of organizations or events, provide the full known name with acronyms in parentheses if standard (e.g., "World Wrestling Federation (WWF)").
+   - When multiple entities may fit the query, pick the one most directly tied to the question’s subject and supported by the passages.
+
+5. **Avoid Using Overly Specific Identifiers Without Necessity**:
+   - When a proper noun is sufficient, do not add disambiguation information (e.g., "USS Chandler" instead of "USS Chandler (DD-206)").
+   - When the question concerns a person's relation to an event or work, give the name without extraneous credentials.
+
+6. **General Strategy**:
+   - Identify the key fact(s) in the verbose answer.
+   - Cross-check passages for confirmation and disambiguation to ensure accuracy and minimality.
+   - Refine the verbose answer to its core factoid form per the above guidelines.
+   - Ensure that the factoid is a direct and exact response to the question.
+
+In summary, your goal is to take verbose or loosely phrased answers and compress them into a precise, minimal factoid answer that directly and unambiguously satisfies the question, using the supporting passages to ensure factual accuracy, proper form, and specificity.
+Iteration 31: New subsample score 19.0 is better than old score 17.0. Continue to full eval and add to candidate pool.
+Iteration 31: Val aggregate for new program: 0.7265333333333333
+Iteration 32: Selected program 5 score: 0.5933333333333334
+Iteration 32: Proposed new text for program.summarize1.predict: Given the input fields `question` and `passages` (a list of text snippets relevant to the question), generate the field `summary` that directly answers the question based strictly on the information contained in the passages.
+
+Task details and guidelines:
+
+1. **Identify the exact fact(s) needed:** Carefully parse the question to understand what specific fact or comparison is requested (e.g., dates, names, locations, event details, or comparisons between entities).
+
+2. **Extract relevant information only from provided passages:** Use only the facts, dates, names, or other data explicitly stated in the passages. Do not infer or assume information not mentioned or supported by the given text.
+
+3. **Precisely answer the question:** The summary should be a concise, factual response that directly addresses the question, reflecting explicit evidence from the passages.
+
+4. **Handle comparison questions carefully:** When the question asks for a comparison (e.g., which entity is more recent, who died first), identify and compare the relevant data points found in the passages. Explicitly state the correct comparison outcome.
+
+5. **If answer is not present or passages are insufficient:** Clearly state that the passages do not contain enough information to answer the question; avoid guessing or fabricating details.
+
+6. **Formats of the summary:**
+   - For factual questions (e.g., dates, places, awards): Provide a brief, direct answer including precise data if available.
+   - For yes/no questions: Provide a clear "Yes" or "No" answer with explanation based on passages.
+   - For comparisons: Report the entities compared, their relevant attributes, and conclude with which satisfies the query.
+   - If the question cannot be answered with the given passages, briefly explain this.
+
+7. **Do not provide additional context or unrelated information** unless it is essential to justify the answer.
+
+8. **Ensure consistency with terminology and entities exactly as presented in the passages:** Use the names and terms found in the text to avoid confusion.
+
+Overall, your summary should be a focused, accurate answer that is clearly supported and verifiable by the source passages provided, tailored specifically to the question asked, without extraneous detail or unsupported conclusions.
+Iteration 32: New subsample score 6.0 is not better than old score 6.0, skipping
+Iteration 33: Selected program 5 score: 0.5933333333333334
+Iteration 33: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-2adb19",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, completely rewrite the `HotpotMultiHopPipeline.forward()` method to implement a **query ensemble with sliding-window attention architecture**: (1) Create a new DSPy signature `GenerateQueryEnsemble` that generates 3 diverse retrieval queries from different perspectives (entity-focused, relation-focused, paraphrased) from the input question; (2) Perform parallel retrieval with k=15 for each of the 3 queries, collecting all passages into a unified pool (deduplicating by content); (3) Create a new DSPy signature `RankPassageWindow` that scores a window of 5 consecutive passages for relevance to the question, then apply this in a sliding-window fashion (stride=3) across all retrieved passages to compute relevance scores; (4) Select the top 10 highest-scored passages from the reranking; (5) Create a new DSPy signature `ExtractExactAnswer` with inputs (question, passages) that extracts the precise short factoid answer directly from the passages without adding clarification or elaboration; (6) Return the extracted answer with retrieval_count=3. This architecture uses 3 queries total (justified by query diversity benefit) and explores whether ensemble retrieval + attention-based reranking + direct extraction outperforms sequential hop refinement + summarization."
+}
+Iteration 33: Proposed new text for query_ensemble_gen: Generate 3 diverse retrieval queries from different perspectives to thoroughly explore the question.
+Iteration 33: Proposed new text for rank_window: Score a window of passages for relevance to answering the question. Return a relevance score (0-10) for each passage.
+Iteration 33: Proposed new text for extract_answer: Extract the precise short factoid answer directly from the passages without adding clarification or elaboration.
+Iteration 33: New subsample score 16.660000000000004 is better than old score 11.0. Continue to full eval and add to candidate pool.
+Iteration 33: Val aggregate for new program: 0.6598666666666669
+Iteration 34: Selected program 9 score: 0.7098666666666666
+Iteration 34: Proposed new text for generate_follow_up_query.predict: You will be given a question, a set of passages, and a statement describing what relevant information is present in the passages and what crucial information is missing that prevents confidently answering the question. Your task is to generate a precise, targeted follow-up query to find the missing information needed to answer the question.
+
+To do this effectively:
+
+1. Carefully read the question and all provided passages.
+2. Understand which key facts or details necessary to answer the question are explicitly **present** in the passages (e.g., related entities, partial data, contextual facts).
+3. Identify the **missing information**—in particular, specific factual data points or attributes (such as dates, locations, names, or detailed descriptions) that are **not found or sufficiently precise** in the passages, but which are essential to answer the question confidently.
+4. Formulate a concise, targeted search query that clearly focuses on obtaining the missing factual information. The query should:
+   - Reference relevant entities or concepts already known from the passages to narrow the search.
+   - Include keywords related to the missing detail (e.g., "release date", "cast", "location", "shoot down site", "city where X is based", etc.) for specificity.
+   - Avoid unnecessary general terms or unrelated information that would dilute the query.
+5. The goal is to generate a query that, if used on a search engine or knowledge base, would retrieve a source containing the missing information, thereby enabling a confident answer to the original question.
+
+Additional guidance:
+- The missing information often relates to precise attributes of named entities mentioned in the passages but not fully detailed.
+- The follow-up query should be a natural yet focused noun phrase or question fragment, not a full sentence, unless a short question improves clarity (e.g., "What city is Joint Base Elmendorf–Richardson located in?").
+- Use parentheses or quotation marks when needed to keep multi-word entity names or exact phrases intact and to improve retrieval precision.
+- Use specific descriptors like years, formats, or unique identifiers when relevant (e.g., "Scrooged (1988) cast", "Global Warming (Pitbull album) release date").
+- Avoid broad or ambiguous terms, aiming instead for the most direct path to the missing fact.
+
+This approach leverages the known context from the passages and focuses the retrieval on the identified missing fact, helping to efficiently resolve gaps in information needed to answer the initial question.
+Iteration 34: New subsample score 13.92 is better than old score 12.94. Continue to full eval and add to candidate pool.
+Iteration 34: Val aggregate for new program: 0.7168000000000001
+Iteration 35: Selected program 5 score: 0.5933333333333334
+Iteration 35: Proposed new text for program.summarize2.predict: Given three input fields: `question`, `context`, and `passages`, your task is to produce a concise, accurate `summary` that directly answers or addresses the `question`.
+
+- Use the `context` as a brief, human-readable baseline or initial assertion that helps clarify or disambiguate the question if present.
+
+- Utilize the `passages`—which contain relevant information, facts, or descriptions—to verify, supplement, or correct the information in the `context`.
+
+- Your `summary` should:
+  - Provide a direct, focused answer or summary addressing the `question`.
+  - Use clear and specific language (e.g., giving exact dates, names, or terms where relevant).
+  - Avoid unnecessary elaboration or unrelated details.
+  - When multiple facts or entities are involved, clearly identify or distinguish them as needed but keep the answer concise.
+  - Reflect accurate factual information explicitly supported by the `passages` or clarified by the `context`.
+
+- For reasoning:
+  - Cross-reference the `passages` to confirm relationships, dates, names, or definitions that answer the question.
+  - Leverage the `context` to confirm or disambiguate facts or details when the passages are ambiguous or incomplete.
+  - Avoid unsupported speculation; if information is unavailable or ambiguous, state this clearly in the summary.
+
+- Domain-specific considerations:
+  - Dates should be formatted consistently (e.g., "1 October 1935" rather than "October 1, 1935" if the passage uses the former).
+  - Names should be given in full, as presented in the passages.
+  - When the question concerns titles, roles, or specific factual attributes (e.g., birthdates, birthplace, venue names, number of acts in an opera), provide precise, factual answers as found in the passages or context.
+  - When dealing with works or proper nouns (albums, operas, films, teams), ensure to select the correct entity as identified in the passages.
+  - For yes/no questions, a simple "yes" or "no" suffices; additional clarifying info is optional if it helps precision.
+  - For comparative or relationship questions, clarify the shared attribute explicitly and succinctly.
+  - When the context provides a direct or trustworthy answer, validate it against passages and use it as the main answer.
+
+ - Always ensure final summary matches the expected specificity and format exhibited in the examples:
+   - If a simple noun or phrase is expected (e.g., "James Wan"), provide that.
+   - If a date is expected, give the full date as stated.
+   - If a "yes" or "no" answer is expected, respond with that plus minimal explanatory information if relevant.
+
+In sum, produce a short, factually supported, context-aware summary that directly answers the question using evidence in `passages`, refined by `context` when needed.
+Iteration 35: New subsample score 14.0 is better than old score 13.0. Continue to full eval and add to candidate pool.
+Iteration 35: Val aggregate for new program: 0.5866666666666667
+Iteration 36: Selected program 7 score: 0.7130666666666666
+Iteration 36: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-b2d6e3",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, add a new DSPy Signature class `NormalizeAnswer` after line 42 with the signature: `question, raw_answer -> normalized_answer` (with docstring: \"Normalize the answer to match expected exact format, especially for yes/no questions\"). Then in the `HotpotMultiHopPipeline` class, add `self.normalize_answer = dspy.Predict(NormalizeAnswer)` in `__init__` after line 56, and replace both occurrences of the final `answer` assignment (lines 79-81 and 106-108) with a normalization step: after calling `self.refine_factoid()`, pass the result through `self.normalize_answer(question=question, raw_answer=answer).normalized_answer` to ensure yes/no questions return exactly \"yes\" or \"no\" and other answers match expected exact formats."
+}
+Iteration 36: Proposed new text for create_query_hop2.predict: Given the fields `question`, `passages`, produce the fields `query`.
+Iteration 36: Proposed new text for extract_answer: Extract the exact short factoid answer directly from the provided passages.
+Iteration 36: Proposed new text for answer_confidence: Score confidence (0-1) based on whether the answer is well-supported by the passages.
+Iteration 36: Proposed new text for refine_factoid: Distill a verbose answer into its minimal exact factoid form.
+Iteration 36: Proposed new text for normalize_answer: Normalize the answer to match expected exact format, especially for yes/no questions.
+Iteration 36: New subsample score 20.0 is better than old score 19.0. Continue to full eval and add to candidate pool.
+Iteration 36: Val aggregate for new program: 0.6998666666666666
+Iteration 37: Selected program 7 score: 0.7130666666666666
+Iteration 37: Proposed new text for create_query_hop2.predict: Given the input fields `question` and `passages` (a list of relevant text excerpts each typically containing factual details or definitions about entities mentioned in the question), produce an output field `query` that formulates a precise, focused search query designed to retrieve an authoritative and concise answer to the question.
+
+The task involves:
+
+- Understanding the question intent, including any implied conditions, entities, or relationships.
+- Analyzing the passages to identify key entities, facts, or titles that relate directly to the question.
+- Rewriting or rephrasing the question into a targeted search query that includes the main subject(s) and relevant keywords or phrases extracted from passages to narrow down the information.
+- Using explicit names, titles, dates, or domain-specific terminologies found in the passages to disambiguate ambiguous question elements.
+- Where appropriate, incorporating clarifications or alternative phrasing reflecting the reasoning about the passage content and question intent.
+- Sometimes the query should include quotes around specific names or terms to maintain precision.
+- Avoid generating overly broad or vague queries; instead, the query should be as precise as possible to improve retrieval of the exact information.
+
+Additional domain-specific notes based on examples:
+
+- When the question asks "What kind of activist [person] is?", use the actual person’s full name with key identifiers from the passage and phrase as "What kind of activist is [person’s full name]?"
+- For comparison questions between two entities, form the query as a direct comparison including both entity names and suitable descriptive keywords.
+- For questions referencing TV shows, films, or other media works linked to actors or characters, include the exact character or actor name and the media title.
+- When a question mentions an event location or organization and the passages contain related place or organizational names, include those in the query to ensure geographic or institutional specificity.
+- If the question involves identifying a person associated with a particular action (e.g., "Who hired...?" or "Who disbanded...?"), incorporate both the person and event or organization names related in the passages in the query.
+- For botanical or scientific taxonomy questions, use genus and family names specifically to disambiguate.
+- If the passages mention multiple related works (e.g., songwriters, authorship, albums), include relevant combinations of those terms for more precise querying.
+- When the question involves numerical or factual data (e.g., dates, chart positions, medals), the query should reflect those data points with relevant keywords and names to increase precision.
+
+The output `query` is intended to retrieve authoritative sources or snippets that will provide an exact answer to the question. Therefore, the query should be specific, concise, and closely reflect the correct interpretation of the question as informed by the passages.
+Iteration 37: New subsample score 14.0 is not better than old score 14.98, skipping
+Iteration 38: Selected program 3 score: 0.5674666666666666
+Iteration 38: Proposed new text for decompose: Task: Given a complex, multi-hop natural language question, break it down into exactly three focused, distinct sub-queries designed for parallel information retrieval. Each sub-query should specifically target one key piece or aspect of information needed to answer the overall question comprehensively when combined.
+
+Detailed Requirements and Guidelines:
+
+1. Exactly three sub-queries: No more, no less. Each must be distinct, covering complementary facets of the source question.
+
+2. Focus and Specificity: Each sub-query should isolate a single, well-defined information need relevant to answering the original multi-hop question. Avoid vague, overly broad, or overlapping queries.
+
+3. Multi-hop reasoning: The original question often requires multi-step reasoning or chaining facts.
+   - The sub-queries should reflect this logical chain or break the reasoning into clear atomic retrieval units.
+   - For example, identify entities/concepts from the question first, then their attributes or related data, and then supporting or disambiguating information like authoritative sources or confirmation.
+
+4. Contextual clarity and unambiguous reference: If a sub-query references information discovered in a previous sub-query (e.g., naming an entity, character, or event), phrase it clearly as dependent on that prior result so that retrieval can proceed in parallel or sequentially.
+
+5. Coverage of all information needed: Together, the three sub-queries must encompass all factual components implicit or explicit in the original question that are necessary for a final answer.
+
+6. Domain-specific nuances gathered from examples:
+   - When a question references a person, first ask for identification (full name, role, character played, etc.) before seeking further data about them (birth year, nationality, works, events).
+   - When a question involves historical or fictional characters appearing in media, isolate queries targeting the character identification, historical timeframe or context, and authoritative source citations.
+   - When a question asks about events (e.g., elections, tournaments), queries should include date, location, and relevant people or outcomes.
+   - For nationality or fact-checking questions about people or entities, generate sub-queries sourcing biographical data for each subject separately, then a third sub-query to directly confirm or compare the sought attribute.
+   - When questions involve locations or geographic features, sub-queries should identify the place precisely, its features, and external confirmations.
+
+7. Search-oriented framing: While the sub-queries should be precise, phrasing them as natural language questions or search tasks is acceptable—as long as the information need is explicit.
+
+8. Avoid including the final expected answer within the sub-queries; instead, focus on the queries necessary to retrieve the information that leads to that answer.
+
+9. Emphasize retrieval of authoritative, citable sources or evidence when the question or examples show prominence of supporting references (e.g., encyclopedias, official biographies, government archives).
+
+10. Do not embed search engine operators (e.g., site:) or advanced syntax in the sub-queries; keep queries as human-readable informational requests.
+
+Summary:
+Decompose the original question into three distinct and focused sub-queries that isolate key entities, attributes, or relationships, reflect logical dependencies, cover all necessary information components, and facilitate retrieval of factually accurate, verifiable data. Sub-queries should be designed so that once answered and combined, the original multi-hop question can be confidently addressed.
+Iteration 38: New subsample score 7.82 is not better than old score 12.660000000000004, skipping
+Iteration 39: Selected program 7 score: 0.7130666666666666
+Iteration 58: Proposed new text for create_query_hop2.predict: Task: Given the input fields `question` and `context` (a phrase indicating "Retrieved 20 documents for: <question>"), produce a well-formed search query in the field `query` that can be used to retrieve authoritative, accurate, and relevant documents that answer the question effectively.
+
+Key Details and Guidelines:
+
+1. **Input Format**:
+   - `question`: A natural language question or information need.
+   - `context`: A string showing the query or question around which documents were retrieved (usually the question repeated or slightly rephrased).
+
+2. **Output Format**:
+   - `query`: A concise, effective, and precise search query string designed to retrieve authoritative sources that best address the question.
+
+3. **Objective**:
+   - Formulate a query that will surface reliable and relevant factual information (often biographical, historical, or specific fact-based details).
+   - The query must be constructed by carefully analyzing the question to extract key entities, attributes, relationships, and contextual clues.
+   - Include important keywords, proper names, dates, and distinctive phrases from the question that will help disambiguate entities and narrow down search results.
+   - Use quotation marks to group multi-word proper nouns or exact phrases.
+   - Incorporate domain-specific keywords that may increase precision, e.g., "biography," "filmography," "cast list," "nationality," or topic-specific terms like "motown," "K-1 World Grand Prix," "Syfy," "Slopestyle," etc., when relevant.
+   - When the question involves verification/comparison of attributes for multiple entities, include both entity names and the relevant attributes (e.g., nationality, occupation) in the query.
+   - When there is a known or likely specific term, event, or name related to the question, incorporate it to improve focus (e.g., known organization names, event titles, venue names).
+   - If the question contains ambiguous or misspelled terms, discern the intended meaning and adjust query wording accordingly.
+   - If the question asks for details that require multi-step reasoning (e.g., determining a birthplace then deriving a county seat), focus the query primarily on the first and crucial step (e.g., birthplace) to enable successful retrieval.
+   - Avoid overly verbose or vague queries; prefer information-rich keyword combinations rather than full-question strings, unless exact phrasing is essential.
+
+4. **Search Query Construction Strategy**:
+   - Identify key entities (people, organizations, events, works).
+   - Identify relevant attributes or qualifiers (dates, titles, locations, roles).
+   - Combine entities with attributes via essential keywords, and add synonyms or alternate names if helpful.
+   - Use Boolean OR to include synonyms or related terms if multiple forms exist (e.g., "British OR Scottish").
+   - Use quotes for exact phrases or full names to retrieve precise matches.
+   - Include domain-relevant terms when the question is about specific categories (e.g., "cast list" for actors, "filmography" for actors/films, "nationality" for citizenship questions).
+   - Include site-specific filter only when relevant (e.g., site:military.mil, site:wikipedia.org) if the context demands authoritative source prioritization.
+
+5. **Additional Considerations**:
+   - When the question references persons, use their full standard names with quotes.
+   - When dealing with historical or less-known figures, use alternate names or clarifying identifiers (e.g., "American Horse (elder)").
+   - Queries should be designed to support retrieval of documents whose titles match expected gold titles (e.g., biographical pages, event descriptions).
+   - Tailor the query to the expected answer type and focus (e.g., if answer is a band, include band name and founding members or producer).
+   - Avoid direct full-question string copy unless used as part of a multi-term query with well-chosen keywords.
+   - Strive for clarity, specificity, and coverage of necessary details to avoid ambiguity or off-topic results.
+
+This approach will improve coverage, accuracy, and retrieval effectiveness when using web or document searches to answer the question.
+Iteration 58: New subsample score 11.96 is not better than old score 15.9, skipping
+Iteration 59: Selected program 11 score: 0.7333333333333333
+Iteration 59: Proposed new text for refine_query: You are given two input fields: `question` (a natural language query) and `passages` (a list of text passages relevant to the question).
+
+Your task is to generate a `refined_query` string that improves the original question to help better locate a precise answer within the given passages.
+
+The refined query should:
+
+1. Clearly specify key entities, descriptors, or relationships from the question, especially when the question involves:
+   - Names of people (e.g., full names, roles, notable achievements)
+   - Locations (e.g., city, neighborhood, region)
+   - Organizations or companies (e.g., sponsors, founders, locations)
+   - Awards (e.g., which award a person or show won, or who won a specific award)
+   - Media titles (e.g., films, TV shows, video games) often including years or roles to disambiguate
+   - Dates or time periods relevant to events or figures
+   - Specific details that clarify ambiguous references (e.g., specifying "the 56th Governor of New York" instead of just "Governor of New York")
+
+2. Incorporate relevant information uncovered or apparent from the passages that disambiguates or specifies entities in the question, so the refined query targets a particular fact or entity. For example:
+   - Naming an award’s sponsor or company to add specificity
+   - Adding affiliations (e.g., "the company New Balance (the sponsor of XYZ Award)")
+   - Including place names associated with entities (e.g., "Brighton neighborhood of Boston")
+   - Adding contextual temporal details if relevant (e.g., "in the 2005 film Beowulf & Grendel")
+
+3. Use concise but explicit language that focuses on the main point of the original question to maximize retrieval effectiveness, while avoiding overly broad or vague wording.
+
+4. When appropriate, include key qualifiers such as:
+   - The exact name of an award or honor, including numeric order if mentioned (e.g., "34th International Emmy Awards")
+   - Roles or distinctive characteristics of persons (e.g., “five-time BAFTA TV Award winner for his comedy chat show”)
+   - Titles of works along with medium and year (e.g., “the 2010 video game Heavy Rain”)
+   - Relationship specifications (e.g., "older brother of Ben Hansbrough")
+   - Clarify ambiguous pronouns or references with full names or titles
+
+5. Avoid introducing incorrect or unsupported facts. Base refinements only on the provided question and passages.
+
+6. The refined query should be a fully formed question or an explicit search query that could be used to find a specific answer efficiently in search or knowledge retrieval systems.
+
+In summary:
+Transform the input question and the information from the passages into a clear, disambiguated, and focused query (refined_query) that explicitly highlights key entities, relationships, time frames, and contexts necessary to pinpoint the accurate factual answer in a retrieval scenario.
+Iteration 59: New subsample score 16.0 is not better than old score 17.0, skipping
+Iteration 60: Selected program 18 score: 0.5933333333333334
+Iteration 60: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-ba3bbd",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py`, completely rewrite the `HotpotMultiHopPipeline.forward()` method to implement a **BFS-style entity-focused retrieval architecture**: (1) Create a `QueryDiversification` signature that generates 3 diverse query perspectives from the question (e.g., direct factual, entity-focused, relational); (2) Perform parallel retrieval for all 3 queries with k=15 each; (3) Create an `EntityExtraction` signature that extracts key entities and factoids from the combined 45 raw passages; (4) Create a `CoverageConfidence` signature that assesses if extracted entities sufficiently answer the question (returns confidence score 0-1); (5) If confidence < 0.7, generate 2 additional targeted queries based on missing entity information and retrieve k=10 more docs; (6) Create an `ExtractExactAnswer` signature that takes the question, all extracted entities, and ALL raw passages (not summaries) to extract the precise short factoid answer matching the expected format. This eliminates information loss from summarization while using entity extraction as lightweight semantic guidance rather than a bottleneck, and adaptively expands retrieval only when needed. The base case uses 3 queries (net cost: +0.02), with adaptive expansion to 5 queries only for low-confidence cases."
+}
+Iteration 60: Proposed new text for query_diversifier: Generate 3 diverse query perspectives from the question to enable comprehensive multi-hop retrieval.
+Iteration 60: Proposed new text for entity_extractor: Extract key entities, facts, and relationships from retrieved passages to answer the question.
+Iteration 60: Proposed new text for coverage_assessor: Assess if extracted entities sufficiently answer the question with confidence score.
+Iteration 60: Proposed new text for targeted_query_gen: Generate targeted queries to retrieve missing information based on current entities and gaps.
+Iteration 60: Proposed new text for answer_extractor.predict: Extract the precise short factoid answer from entities and passages.
+Iteration 60: New subsample score 11.760000000000003 is not better than old score 14.0, skipping
+Iteration 61: Selected program 16 score: 0.6998666666666666
+Iteration 61: Proposed new text for refine_factoid: Task Description:
+
+You are given a question, a verbose (short or long) answer, and a list of passages that contain relevant information. Your task is to distill and generate the minimal exact factoid answer to the given question by extracting the precise entity, name, date, location, or phrase that directly and explicitly answers the question. This requires carefully understanding the question's focus and the underlying fact it seeks, then locating the exact, most concise factual expression within the provided passages or the verbose answer, avoiding unnecessary elaboration or context.
+
+Input Format:
+- question: A natural language question which usually requires a single factoid or a short phrase as an answer.
+- verbose_answer: A prior answer attempt which is typically brief but may or may not be fully precise or detailed.
+- passages: A list of textual passages, often large and diverse, containing factual information relevant to the question. These passages may include biographical data, film details, geographic info, historical facts, or other subject-matter content depending on question topic.
+
+Key Requirements and Nuances:
+- Return an answer that is the minimal, exact factoid (e.g., a person’s name, a date, a location, a movie title, a team name, a song title, an organization, or a short phrase).
+- The answer should be fully supported by the provided passages or by the information in the verbose answer if it matches the question precisely.
+- Avoid adding unnecessary explanations, extra details, or context—only return the exact answer.
+- The answer should correspond directly to the entity or fact requested in the question.
+- Pay close attention to details such as:
+   - Correct spelling and capitalization (e.g., proper names, official titles)
+   - Full and specific names where relevant (e.g., “University of Hertfordshire” rather than just “Hertfordshire”)
+   - Disambiguation when multiple similar entities exist (e.g., “The Fosters” as a TV series, not just “Fosters”)
+   - Dates should be precise and preferably formatted as given (e.g., “27 April 1967”)
+   - Locations should include full and commonly accepted names (e.g., “Miami-Dade County”)
+   - Responses to yes/no or binary questions should be a simple “Yes” or “No” as appropriate.
+- When multiple answers are plausible in principle, choose the one most directly answering the question and appearing in the passages.
+- When the question involves relationships, attributions, or mentions multiple individuals/entities, provide the exact entity/answer referenced (e.g., the director’s name, the person’s nationality, the stadium name, etc.).
+- Questions may cover diverse domains including but not limited to history, geography, sports, entertainment, music, politics, academia, and biographical information.
+
+General Strategy:
+- Parse the question to understand the exact fact being requested.
+- Search for explicit, unambiguous mention of this fact in the passages.
+- Use the verbose answer only if it matches the question precisely and aligns with the evidence in the passages.
+- Extract the shortest possible expression that fully answers the question without losing critical specificity.
+- If the question requires a “who,” respond with the name; for “what song,” respond with the song title; for “which university,” respond with the full proper institution name; for “when,” provide a date; for “where,” provide the relevant location name, etc.
+- Avoid synonyms, paraphrases, or additional clarifications unless they are themselves the exact answer requested.
+- For yes/no questions, respond simply “Yes” or “No.”
+
+By following these detailed guidelines, your distilled answer should be the minimal, precise factual answer corresponding exactly to the question.
+Iteration 61: New subsample score 17.0 is not better than old score 17.0, skipping
+Iteration 62: Selected program 18 score: 0.5933333333333334
+Iteration 62: Proposed new text for program.summarize2.predict: Given the input fields `question`, `context`, and `passages`, your task is to produce the output field `summary` that directly and precisely answers the question using information provided primarily in the `context` and supported or corroborated by the `passages`.
+
+Instructions and considerations:
+
+1. **Focus on the question:** Extract or synthesize the concise factual answer to the question asked. The summary should be an explicit, fact-based response, not extraneous information.
+
+2. **Use context as authoritative:** The `context` field usually contains the key answer or a concise form of it. Use it as your primary source to form the summary.
+
+3. **Corroborate and confirm from passages:** Use the `passages` to verify, clarify, or expand on the information in the context if necessary. If the passages contain multiple relevant pieces of evidence, combine them to support the answer. Avoid introducing information not found in the passages or context.
+
+4. **When multiple related entities or options appear:** If the question asks to choose or compare entities (e.g., which candidate did X defeat: A or B), confirm carefully from passages and context which entity is correct. The context is often decisive but passages may clarify or prevent errors due to ambiguity.
+
+5. **Be precise and avoid ambiguity:** The summary should ideally contain the exact phrase or name requested, or a clearly unambiguous factual statement. Avoid partial answers, overlong or vague responses.
+
+6. **In cases of missing information:** If the answer cannot be confidently found in the context or passages, clearly state that the information is unavailable or cannot be determined from the sources.
+
+7. **Use domain-specific knowledge only as supported:** Many questions involve domain-specific knowledge (historical figures, names of ships, bands, political events, actors, etc.). However, only include domain facts that are present or supported explicitly in the context or passages. Avoid assumptions or adding external knowledge that isn't provided.
+
+8. **Reasoning may be included for clarity:** When producing the final summary, you may optionally provide brief reasoning connecting the context and passages to the answer, especially if the answer is inferred. However, the primary deliverable is the concise answer itself as the summary.
+
+9. **Answer format:** Summaries are expected to be short, direct answers, such as a name, date, title, or phrase, exactly answering the question without additional commentary.
+
+10. **Consistency with gold titles/data:** When identifying the answer, align it with the key entities and concepts in the passages or context. For example, if a ship name in passages is given with or without quotation marks, match stylistic conventions as needed to avoid confusion.
+
+Summary:
+
+- Use the `context` primarily for the direct answer or summarizing fact.
+- Use `passages` to confirm, contextualize, or disambiguate.
+- Provide a direct, short, factual summary answering the question as fully as possible.
+- If data is missing, state that clearly.
+- Avoid adding unsupported knowledge or vague phrasing.
+Iteration 62: New subsample score 14.0 is better than old score 13.0. Continue to full eval and add to candidate pool.
+Iteration 62: Val aggregate for new program: 0.5733333333333334
+Iteration 63: Selected program 21 score: 0.6133333333333333
+Iteration 63: Proposed new text for extract_answer.predict: You are provided with a question and multiple passages containing relevant information related to the question. Your task is to extract and return one precise, concise factoid answer to the question, strictly based on the content of the provided passages, without introducing any additional information or interpretation.
+
+To do this successfully, carefully read all the passages, identify all potentially relevant facts, and from those, select the exact phrase or terms that best and most directly answer the question. Follow these detailed guidelines:
+
+1. Answer Format and Content:
+   - Provide a brief, exact factoid answer (such as a name, date, place, phrase, or designation) directly supported and clearly stated in the passages.
+   - The answer should be verbatim or nearly verbatim from one or more passages.
+   - Do not add any explanation, qualifiers, additional context, or summary beyond the direct answer.
+   - If the question is yes/no, answer only "yes" or "no" (lowercase or capitalized), without elaboration.
+   - If the question involves numbers, dates, rankings, titles, or locations, reproduce these exactly as shown in the texts (e.g., "£180.8 million", "January 21, 1990", "Theatre at Madison Square Garden").
+   - When the question is about people, places, or official titles, always provide the full formal name, including middle names or initials, as given in the passages (e.g., "Timothy Francis Robbins", "Kay Gunnar Leopold Pollak").
+   - In cases of ambiguity or multiple closely related entities, choose the form or title that most directly and specifically answers the question.
+
+2. Reasoning and Passage Use:
+   - The passages may contain multiple references to similar entities or overlapping information (e.g., several people named "David" or multiple locations of a city). Use your reasoning to identify the passage that most directly addresses the question.
+   - Some passages may duplicate information or partially repeat prior passages; consider the entire input collectively.
+   - Use all evidence available in the passages to disambiguate and select the most precise answer.
+   - If multiple passages provide slightly different forms of the answer, choose the one matching the expected naming or formatting conventions related to the question.
+
+3. Negative or Unknown Answers:
+   - If the passages do not contain any explicit information that can answer the question, respond exactly with the phrase: "Not stated in the provided passages."
+
+4. Domain and Context Specific Details:
+   - Passages may cover a wide range of domains, such as:
+     - Personal names (including birthdates and full official names)
+     - Titles of creative works (films, shows, books, operas, songs), including full titles and release dates
+     - Organizations, institutions, or companies and their official names
+     - Places, locations, and their precise naming with historical or political designations
+     - Biological taxa, including genus and species names, family classifications, and naming etymologies
+     - Events, dates, and historical details in exact format
+     - Roles, occupations, honors, awards, and designations with formal wording
+     - Specific numeric data, rankings, or statistics
+   - The answer should always reflect official, full, and accurate naming as presented, including diacritics, middle names, or honorifics where provided.
+
+5. Examples of Expected Answers:
+   - If asked about people: "Katherine Grace McNamara"
+   - If asked about dates: "January 21, 1990"
+   - If asked about places: "Doncaster Road"
+   - If asked about event results or roles: "Nuclear Safety Inspector"
+   - If yes/no question: "yes"
+   - If biological classification: "Aristotelia"
+
+Summary: Your responsibility is to locate and extract the single most exact, factually correct, and appropriately formatted answer phrase from the provided passages that directly responds to the question. Avoid any form of paraphrasing, interpretation, or added context. If the evidence is insufficient, respond with "Not stated in the provided passages."
+
+This precise, context-aware extraction approach allows leveraging overlapping, sometimes duplicate or intricate information in the passages to find the most suitable factual answer.
+Iteration 63: New subsample score 16.0 is not better than old score 16.0, skipping
+Iteration 64: Selected program 18 score: 0.5933333333333334
+Iteration 64: Proposed new text for program.generate_answer.predict: You will be given a question together with two supporting text summaries that may contain information to answer the question. Your task is to produce a concise, factually accurate, and direct answer based **only** on the information in the two provided summaries.
+
+Detailed instructions and guidelines to ensure precision and consistency:
+
+1. **Answer content and format:**
+   - The answer should be a brief factoid: a single name, date, place, title, term, or short phrase that directly answers the question.
+   - Provide just the answer without explanations, reasoning, elaborations, or additional context.
+   - The answer must stand alone and be fully relevant to the question.
+
+2. **Source of information:**
+   - Use exclusively the information presented in the two summaries.
+   - If both summaries agree on the answer, use that shared information exactly.
+   - If summaries conflict, select the answer that is most factual, precise, direct, and relevant. Prefer exact proper nouns, full names, dates, titles, or terms appearing in the summaries without modification.
+
+3. **Preserving exact terminology:**
+   - Keep the exact proper nouns, full personal names, official titles, dates, and terms as they appear in the summaries; do not paraphrase or abbreviate.
+   - For example, if a full birth name is given, include it exactly as is, not a short form or partial name.
+
+4. **Special question types:**
+   - For yes/no questions, respond only with "yes" or "no."
+   - For identification, birthplace, dates, roles, relationships, works, affiliations, or similar factual queries, extract the explicit answer exactly as stated in the summaries.
+   - For comparative questions (e.g., "which has more students," "which was formed more recently"), provide the name or entity directly stated as the answer in the summaries.
+   - For choice questions between two entities (e.g., "which game was invented in 1952"), select the one clearly supported by the summaries.
+
+5. **Avoidances:**
+   - Do not introduce any information not found in the two summaries.
+   - Do not include reasoning steps, explanations, or extra context in the final answer.
+   - Do not produce multiple answers unless the question explicitly requires multiple separate components—then provide them clearly and concisely, separated as appropriate.
+
+6. **Formatting instructions:**
+   - Output the answer as a single line or phrase, without quotation marks or additional punctuation unless they are an inherent part of a proper noun, title, or term.
+   - Avoid parentheses or clarifications not explicitly present in the summaries unless essential to the term itself.
+
+7. **Domain-specific nuances and best practices:**
+   - When summaries provide identical information but differ in formality (e.g., "UBS" vs. "UBS (UBS AG)"), prefer the more concise form unless the question specifically requires full legal names or formal versions.
+   - For place names with differing granularity (e.g., "North Bergen" vs. "North Bergen, New Jersey"), prefer the more concise city or place name if the question implies a city-level answer.
+   - For organizations, events, media channels, or similar entities, prefer the commonly used or official name rather than detailed geographic designations unless the official name clearly includes them.
+   - For numeric or factual values (e.g., financial figures, enrollment numbers), keep the exact number as provided. Do not add qualifiers or temporal references unless explicitly asked.
+
+Following these instructions carefully will ensure your answers are precise, consistent, and reliable, based solely on the information given by the two summaries.
+Iteration 64: New subsample score 14.0 is not better than old score 14.0, skipping
+Iteration 65: Selected program 14 score: 0.7168000000000001
+Iteration 65: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-7bd099",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In /workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py, modify the HotpotMultiHopPipeline.forward() method to replace the two-stage answer extraction (lines 100-107) with a single-stage extraction. Remove the DistillFactoid signature and self.distill_factoid module (lines 17-22 and line 55). Replace ExtractAnswer signature with a new signature that instructs the model to extract a concise but complete answer that preserves all necessary details for exact matching (years, full names, qualifiers like \"UK\", articles like \"the\", etc.). Update lines 100-112 to use only ChainOfThought(ExtractAnswer) and set result.answer directly from extract_answer.answer instead of using factoid_result.factoid. This eliminates the over-aggressive factoid distillation that is stripping critical details from otherwise correct answers."
+}
+Iteration 65: Proposed new text for create_query_hop2.predict: Given the fields `question`, `context`, produce the fields `query`.
+Iteration 65: Proposed new text for assess_completeness.predict: Assess whether the retrieved passages contain sufficient information to answer the question confidently.
+Iteration 65: Proposed new text for generate_follow_up_query.predict: You will be given a question, a set of passages, and a statement describing what relevant information is present in the passages and what crucial information is missing that prevents confidently answering the question. Your task is to generate a precise, targeted follow-up query to find the missing information needed to answer the question.
+
+To do this effectively:
+
+1. Carefully read the question and all provided passages.
+2. Understand which key facts or details necessary to answer the question are explicitly **present** in the passages (e.g., related entities, partial data, contextual facts).
+3. Identify the **missing information**—in particular, specific factual data points or attributes (such as dates, locations, names, or detailed descriptions) that are **not found or sufficiently precise** in the passages, but which are essential to answer the question confidently.
+4. Formulate a concise, targeted search query that clearly focuses on obtaining the missing factual information. The query should:
+   - Reference relevant entities or concepts already known from the passages to narrow the search.
+   - Include keywords related to the missing detail (e.g., "release date", "cast", "location", "shoot down site", "city where X is based", etc.) for specificity.
+   - Avoid unnecessary general terms or unrelated information that would dilute the query.
+5. The goal is to generate a query that, if used on a search engine or knowledge base, would retrieve a source containing the missing information, thereby enabling a confident answer to the original question.
+
+Additional guidance:
+- The missing information often relates to precise attributes of named entities mentioned in the passages but not fully detailed.
+- The follow-up query should be a natural yet focused noun phrase or question fragment, not a full sentence, unless a short question improves clarity (e.g., "What city is Joint Base Elmendorf–Richardson located in?").
+- Use parentheses or quotation marks when needed to keep multi-word entity names or exact phrases intact and to improve retrieval precision.
+- Use specific descriptors like years, formats, or unique identifiers when relevant (e.g., "Scrooged (1988) cast", "Global Warming (Pitbull album) release date").
+- Avoid broad or ambiguous terms, aiming instead for the most direct path to the missing fact.
+
+This approach leverages the known context from the passages and focuses the retrieval on the identified missing fact, helping to efficiently resolve gaps in information needed to answer the initial question.
+Iteration 65: Proposed new text for extract_answer.predict: Extract a short factoid answer directly from the provided passages.
+Iteration 65: New subsample score 3.0 is not better than old score 12.96, skipping
+Iteration 66: Selected program 18 score: 0.5933333333333334
+Iteration 66: Proposed new text for program.create_query_hop2.predict: Task Description:
+
+You will be given two input fields:
+
+- `question`: a natural language question, usually requesting a fact, name, date, place, classification, or a verification/comparison involving one or more entities.
+- `summary_1`: a concise text snippet or phrase containing factual information related to the question. This often contains a direct or partial answer, or clarifying details derived from a knowledge source.
+
+Your task is to generate a single output field called `query`, which is an optimized, clear, concise, and relevant search query designed to:
+
+- Retrieve the exact answer to the question,
+- Verify the facts or claims provided in `summary_1`,
+- Or disambiguate or confirm one side of a comparison or verification query posed by the question.
+
+---
+
+Detailed Guidelines for Query Construction:
+
+1. **Answer-Oriented Query Formation**
+   The `summary_1` usually contains or strongly implies the answer. The query should focus on verifying or retrieving that answer with minimal words. Use entity names, titles, or key fact terms from the `summary_1` as the core of the query.
+
+2. **Avoid Full Sentences or Affirmative/Negative Phrasing**
+   Do NOT create queries that are full sentences, narrative statements, or direct yes/no answers.
+   Instead, use keywords, short phrases, or interrogative fragments focused on facts or entities.
+
+3. **Use Proper Names and Canonical Terms**
+   When `summary_1` contains proper nouns (people’s full names, organizations, TV shows, awards, places, years, etc.), include them exactly or in canonical form to enhance accuracy and relevance.
+
+4. **Inclusion of Contextual Keywords**
+   Incorporate important context words from the question (such as dates, locations, categories, or relationships) together with the answer or entities from `summary_1`. This reduces ambiguity and helps retrieve precise, authoritative information.
+
+5. **Handling Comparisons and Verifications**
+   - When the question compares two or more entities and summary_1 resolves which entity fits the asked criterion, the query should name the winning entity or the entity suggested by summary_1.
+   - When the question asks if a proposition involving entities is true and summary_1 lacks complete or explicit confirmation, formulate a query that targets the missing verification, e.g., using "Is [entity] [fact/role/attribute]?"
+
+6. **Numeric and Date Information**
+   Include dates and numbers from the question or `summary_1` only if they add specificity or disambiguation to the query (e.g., for events, awards, or formation dates). Use clear and unambiguous date formats but never use just the date alone as a query unless it is the precise answer sought.
+
+7. **Avoid Overly Long or Redundant Queries**
+   Keep queries concise but sufficient to retrieve or verify the fact. Avoid copying the entire question or summary verbatim.
+
+8. **Queries with Multiple Entities**
+   If the question involves multiple people or entities, include them all in the query with relevant attributes or keywords to help find the fact in relation to each.
+
+---
+
+Examples of Good Queries:
+
+- Simple factual answer:
+  Summary_1: `Ubuntu Linux`
+  Query: `Ubuntu Linux`
+
+- Fact with date and context:
+  Question: `"When was Linux Magazine founded?"`
+  Summary_1: `"Linux Magazine was founded in 1994."`
+  Query: `Linux Magazine founded 1994`
+
+- Comparative question resolved by summary_1:
+  Question: `"Which band formed first, The Beatles or The Rolling Stones?"`
+  Summary_1: `"The Rolling Stones formed earlier than The Beatles."`
+  Query: `The Rolling Stones formation date`
+
+- Verification question with partial info:
+  Question: `"Are Alice and Bob both scientists?"`
+  Summary_1: `"Alice is a scientist, Bob is an artist."`
+  Query: `Bob scientist`
+
+---
+
+Rationale:
+
+The queries you generate will emulate search inputs to databases or search engines that will help instantly retrieve, verify, or clarify the answer described or implied in `summary_1` relative to the question asked. The emphasis is on precision, relevance, and disambiguation, not on narrative or explanation.
+
+By combining entity names, key roles, dates, and contextual keywords concisely, your queries enable rapid retrieval of authoritative facts, thereby confirming or clarifying the answers relevant to the user's question.
+
+---
+
+Format:
+
+Output only the following fields:
+
+- `query`: [constructed concise search query string]
+
+Optionally, also provide:
+
+- `reasoning`: A brief explanation about why the query was formulated this way, to document your thought process (optional).
+
+---
+
+Keep in mind:
+
+- Do not include full declarative sentences or direct yes/no answers.
+- Use punctuation and quotation marks only when they help disambiguate proper nouns or titles.
+- When `summary_1` is just an entity or proper noun answering the question, use it directly as the query.
+- When the summary partially answers or clarifies the question, the query should focus on verifying or completing that.
+- Strive for optimal brevity with sufficient context for precision.
+
+---
+
+This set of detailed instructions assimilates domain-specific details and best practices distilled from examples and feedback to guide you in generating queries that are effective for fact confirmation or retrieval based on given question-summary pairs.
+Iteration 66: New subsample score 10.0 is not better than old score 11.0, skipping
+Iteration 67: Selected program 16 score: 0.6998666666666666
+Iteration 67: Proposed new text for normalize_answer: You will be given a question and a raw answer generated by a model or source. Your task is to produce a normalized answer in an exact expected format that aligns closely with the official or canonical answer typically found in trusted references (e.g., Wikipedia article titles or gold-standard datasets).
+
+Key points and detailed guidelines:
+
+1. **Normalization of Named Entities and Proper Nouns**
+   - When the raw answer is a person's name, normalize to the full, formal name whenever possible. For example:
+     - Raw answer: "Marshall Applewhite"
+     - Normalized answer: "Marshall Herff Applewhite, Jr."
+   - Include middle names, initials, generational suffixes (Jr., Sr., III), or full middle names if these are part of the canonical form.
+   - When a canonical full name is unknown for an entity, use the most complete form available or the commonly accepted official name.
+
+2. **Exact Matching for Yes/No Questions**
+   - Normalize all affirmative responses to lowercase `"yes"` and all negative responses to lowercase `"no"`, regardless of how they appear in the raw answer.
+   - Ignore additional explanations or elaborations; if the question is yes/no, ONLY output `"yes"` or `"no"` exactly.
+
+3. **Capitalization Rules**
+   - Preserve capitalization for proper nouns (person names, place names, titles, etc.) matching the canonical form exactly.
+   - Common nouns or descriptive phrases should generally be lowercase unless they are proper nouns or official titles.
+   - Watch out for expected answers that are single adjectives (e.g., "flowering" rather than "Flowering plant genera").
+
+4. **Dates and Numeric Values**
+   - Dates should be output in the exact format as commonly expected or canonical (e.g., "1 October 1935" rather than "October 1, 1935" unless the latter is the canonical).
+   - Years and numeric answers should match the exact number format with no extra characters or text.
+
+5. **Answer Specificity and Precision**
+   - Strive to match the answer to the level of detail expected by the question context and reference answer.
+   - If the question demands the "full birth name," "full name" or "director," supply the most complete form. Avoid partial or shortened answers when fuller canonical forms are known.
+
+6. **Entities with Multiple Titles or Aliases**
+   - When entity names have multiple valid forms (e.g., titles and associated names), choose the canonical form best matching the official or most recognized title in authoritative sources.
+   - For example, a TV show or song should use its official title without extra annotation unless specified.
+
+7. **Contextual Understanding for Ambiguities**
+   - Where the raw answer includes extraneous information beyond the expected canonical answer (e.g., "Yes — tennis"), reduce to the canonical simple form ("yes").
+   - For compound answers, parse and simplify to the expected core answer.
+
+8. **Do Not Add Additional Information**
+   - Only normalize the provided raw answer; do not add any new information that is not present in the raw answer or that cannot be reliably inferred from it.
+
+Summary:
+- For names, full formal versions with suffixes
+- For yes/no, strictly “yes” or “no” lowercase
+- Correct capitalization matching expected official forms
+- Exact expected format for dates and numbers
+- Trim explanations or elaborations, focus on canonical minimal answer
+
+This instruction assumes the availability of canonical answer keys from trusted knowledge bases (e.g., Wikipedia page titles, official names), so use those as normalization references implicitly. Your output must be the canonical normalized answer exactly as expected for scoring purposes.
+Iteration 67: New subsample score 16.0 is not better than old score 16.0, skipping
+Iteration 68: Selected program 14 score: 0.7168000000000001
+Iteration 68: Proposed new text for assess_completeness.predict: You will be given a question along with multiple retrieved passages that potentially contain information relevant to answering the question. Your task is to:
+
+1. Assess whether the passages contain sufficient and specific, factual information to confidently answer the question as posed. "Sufficient" means the passages provide direct or clearly inferable facts, names, dates, or entities needed to answer the question without ambiguity or missing critical context.
+
+2. Avoid assuming or inferring beyond the explicit content of the passages. Only consider information clearly documented in the provided passages. If information is implied but not directly stated, explain why it is still insufficient to answer.
+
+3. Your output must include three components:
+
+   - Reasoning: a step-by-step logical explanation referencing specific passages (by index) that together support your assessment of sufficiency or insufficiency. Cite the passages that provide relevant facts, contextual details, or explicit statements. Highlight if multiple passages cumulatively provide the answer.
+
+   - Assessment: a clear judgment of either "sufficient" or "insufficient" indicating whether the retrieved passages contain enough information to answer the question confidently.
+
+   - Explanation: a brief summary reinforcing why the information is sufficient or why it falls short, including any missing or conflicting information preventing a confident answer.
+
+4. Pay attention to domain-specific clues in questions, such as named entities (people, titles, places, events, releases), temporal information (dates, years), specificity of facts (e.g., "the university founded in 1963 where Michael J. Prince teaches"), or relationships (e.g., "older brother of", "producer of the group", "created by"). Confirm these details appear directly or indirectly in the passages.
+
+5. If multiple passages provide overlapping or complementary information needed to answer, reason through their combination explicitly.
+
+6. Do not generate the answer to the question itself; focus solely on evaluating the information sufficiency based on the retrieved passages.
+
+7. The evaluation should consider the presence of direct statements of fact, dates, names, and explicit attributions to answer the question without ambiguity.
+
+8. The format and style should be consistent with the provided examples, using clear references to passage indices and highlighting key supporting facts.
+
+This task supports determining if given information retrieval outputs are adequate for answering fact-based questions confidently, especially in domains like entertainment, history, academic programs, sports, music, and biographical data.
+Iteration 68: New subsample score 15.920000000000002 is not better than old score 16.9, skipping
+Iteration 69: Selected program 21 score: 0.6133333333333333
+Iteration 69: Proposed new text for create_query_hop2: You are given a question and a set of initial passages ("hop1_passages") that provide some information potentially useful for answering the question. Your task is to generate a precise second search query designed to retrieve additional information necessary to answer the question fully.
+
+Key details and guidelines:
+
+1. Input Format:
+   - Question: A natural language question asking for specific factual information.
+   - hop1_passages: A list of short summaries or snippets from known documents relevant to the question, often containing key named entities, dates, events, or descriptions that relate to the question.
+
+2. Purpose:
+   - The first passages provide partial or ambiguous information, or information that needs further verification or specification.
+   - You must produce a well-crafted query that, when issued as a second search, likely returns documents or snippets that directly answer the question.
+   - The second query should target proper names, events, dates, phrases, or concepts that emerged or were mentioned in the initial passages but are incomplete or insufficient to answer the question.
+
+3. Query Construction Principles:
+   - Use key named entities (persons, places, organizations, titles, works, events) from the question and hop1_passages to anchor the query.
+   - Include relevant keywords or key phrases (such as dates, roles, occupations, specific titles, relationships) discovered in the passages that will help disambiguate or complete the answer.
+   - Natural language queries can be used, but concise keyword or phrase queries are acceptable if they clearly relate to needed info.
+   - Use quotation marks around exact phrases or titles when appropriate to focus the search (e.g., "Homer's Odyssey", "Tyler Glenn").
+   - Include alternative spellings or aliases if relevant and known (e.g., birth names, former company names).
+   - Combine multiple concepts if the question relates two or more entities (e.g., "Operation Dumbo Drop" genre; "Sky High" genre).
+   - Avoid overly broad or generic queries that do not refine the search effectively.
+   - If the question asks for distinctions or verifications (e.g., “Are both X and Y...?”), your query should compare or confirm both.
+   - If the first passage answers only part of the question or is ambiguous, form a query to verify the part that is unclear or missing.
+   - When question-specific factoids are mentioned (like song release dates, character roles, historical events), include relevant terms that directly link the entities to these factoids.
+
+4. Domain-Specific Observations from Examples:
+   - For political or election-related questions, include candidate names and election events or years.
+   - For entertainment-related questions (films, TV shows, music), reference specific works, roles, air dates, or artist names.
+   - For scientific or botanical questions, include taxonomic ranks, family names, or species distinctions.
+   - For biographical detail questions, use birth names, stage names, dates, and related notable works.
+   - For company or organization questions, refer to current or former names, locations, and key people.
+   - For fictional characters or story-specific questions (e.g., "The Simpsons" episodes), use episode titles with exact airing dates and character names.
+   - For historical or ethnic group questions, include tribal names, notable leaders, wars, or other identifying features mentioned.
+   - For music questions, include song titles, album names, chart positions, or release years.
+   - Include relevant multiple terms when necessary to disambiguate similar terms (e.g., same word used for different entities).
+
+Summary: Your output must be a single search query string specifically crafted to retrieve information that fills the knowledge gap remaining after reviewing the initial passages, enabling accurate, unambiguous answering of the original question.
+Iteration 69: New subsample score 13.0 is not better than old score 14.0, skipping
+Iteration 70: Selected program 16 score: 0.6998666666666666
+Iteration 70: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-337af8",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "Implement a competitive multi-path retrieval architecture in `/workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py` within the `HotpotMultiHopPipeline.forward()` method. Create 4 new DSPy Signature classes: `EntityFocusedQuery` (extracts entity names for targeted retrieval), `RelationFocusedQuery` (extracts relationships between entities), `TemporalContextQuery` (adds temporal/contextual qualifiers), and `CrossPathVerifier` (takes question, multiple candidate answers with their supporting passages, and outputs the best answer based on evidence overlap across paths). Modify the forward() method to: (1) generate 3 parallel queries using the new signatures, (2) retrieve k=15 documents for each query path using `self.retrieve_k`, (3) extract answers from each path's passages independently using `self.extract_answer`, (4) pass all candidate answers and their passages to `CrossPathVerifier` (implemented as `dspy.ChainOfThought(CrossPathVerifier)`) to select the final answer, (5) apply existing `refine_factoid` and `normalize_answer` to the selected answer. Remove the confidence-based adaptive retrieval logic (lines 98-127). This creates a parallel competitive architecture where diverse retrieval strategies produce candidate answers that are cross-verified for selection."
+}
+Iteration 70: Proposed new text for entity_query: Extract entity names from the question for targeted retrieval.
+Iteration 70: Proposed new text for relation_query: Extract relationships between entities from the question for targeted retrieval.
+Iteration 70: Proposed new text for temporal_query: Add temporal and contextual qualifiers to the question for targeted retrieval.
+Iteration 70: Proposed new text for extract_answer: Extract the exact short factoid answer directly from the provided passages.
+Iteration 70: Proposed new text for cross_path_verifier.predict: Select the best answer from multiple candidates based on evidence overlap across retrieval paths.
+Iteration 70: Proposed new text for refine_factoid: Distill a verbose answer into its minimal exact factoid form.
+Iteration 70: Proposed new text for normalize_answer: Normalize the answer to match expected exact format, especially for yes/no questions.
+Iteration 77: Val aggregate for new program: 0.7102666666666667
+Iteration 78: Selected program 23 score: 0.6333333333333333
+Iteration 78: Proposed new text for create_query_hop2: You will be provided with:
+
+- A natural language question.
+- A list of retrieved passages ("hop1_passages") related to the question, which may provide partial, incomplete, or sometimes conflicting information relevant to the question.
+
+Your task is to generate a precise, focused, and informative follow-up search query ("second query") meant to retrieve additional or clarifying information needed to answer the original question fully.
+
+Your generated query should be crafted with the goal of maximizing the likelihood of retrieving definitive, reliable, and disambiguated information. To achieve this, follow these detailed guidelines:
+
+1. **Incorporate Key Entities and Concepts:**
+   Identify and explicitly include the main entities (people, organizations, works, events) and key concepts mentioned in both the question and the hop1 passages. Use the exact names or noteworthy phrases (often in quotation marks) that directly relate to the missing or ambiguous piece(s) of information.
+
+2. **Add Relevant Contextual Attributes:**
+   Include specific contextual details such as dates (years, event dates), locations, roles, relationships, unique descriptors, or defining attributes (e.g., "2010 NBA Draft", "three-act play", "56th Governor of New York", "2014 film", "born August 3 1963") that narrow the search effectively. This helps distinguish between entities with similar or overlapping names.
+
+3. **Distinguish Among Similar or Conflicting Entities:**
+   When multiple entities or facts with similar names or attributes appear, explicitly specify distinguishing characteristics such as full names, birthdates, associated works or events, or synonyms (including alternative or official titles). If multiple conflicting or partial answers exist, craft the query to verify or clarify those conflicts.
+
+4. **Use Domain-Specific Knowledge and Naming Conventions:**
+   Leverage domain-specific elements such as event names ("2010 NBA Draft"), work titles (albums, songs, plays, films), organizational titles, and official or colloquial labels (e.g., "House of Knýtlinga", "Post-hardcore band Shellac") with proper titles and formats. Enclose exact names or phrases in quotation marks to improve specificity.
+
+5. **Optimize Query Precision and Conciseness:**
+   Keep queries succinct but sufficiently detailed to guide retrieval to authoritative and relevant sources. Avoid verbose or generic phrasing while including all necessary descriptors to avoid ambiguity.
+
+6. **Employ Boolean Operators and Phrase Matching When Needed:**
+   Use boolean operators like OR to compare or contrast similar entities or keywords, especially when the question involves distinguishing between options (e.g., "Shellac" OR "Sum 41" formed year), or when two names might be conflated. Use quotes liberally around exact phrases/names to improve search accuracy.
+
+7. **Focus on Attributes or Facts Needed to Fully Answer the Question:**
+   Target the core missing information such as dates of events or births, specific roles or titles, numerical counts (e.g., number of albums), locations of events, or relationships between people where the initial passages are insufficient.
+
+8. **Examples of Common Target Attributes and Entities:**
+   - Dates of events or founding years (e.g., "founded 1963", "born August 3, 1963")
+   - Full names including middle names or initials for disambiguation
+   - Roles or titles with associated persons (e.g., "president Billy Wilson", "lead vocalist Deryck Whibley")
+   - Titles of creative works with artists/directors and years (e.g., "The Magic City" 1997 Helium)
+   - Specific locations of historical or event significance (e.g., venue of a sports draft)
+   - Differentiation among similarly named entities in the same domain (e.g., different bands, characters, or TV shows)
+
+**Input Format:**
+- Question: a single natural language question.
+- hop1_passages: a list of textual passages containing initial related information.
+
+**Output Format:**
+- A single, well-constructed, contextually rich search query string suitable for submission to a search engine or knowledge base query system.
+
+Your goal is to incorporate enough detailed factual information and distinguishing context in your follow-up query so the search results will provide the definitive, comprehensive answer missing from the initial passages.
+Iteration 78: New subsample score 15.0 is better than old score 13.0. Continue to full eval and add to candidate pool.
+Iteration 78: Val aggregate for new program: 0.6
+Iteration 79: Selected program 26 score: 0.6
+Iteration 79: Proposed new text for extract_answer.predict: You will be given a question along with multiple passages containing relevant information. Your task is to extract a precise, short, factoid answer to the question based solely on the content in the provided passages. Follow these detailed guidelines carefully:
+
+1. **Answer Content and Format:**
+   - Your answer must be a direct, concise factoid extracted verbatim or nearly verbatim from the passages.
+   - Do not add any information or inference beyond what is explicitly stated or clearly implied in the passages.
+   - Avoid elaborations, explanations, descriptions, summaries, or reasoning—only provide the factual answer itself.
+   - Use exactly the names, titles, dates, numbers, and formal designations as presented in the passages, including full names with middle names, titles with honorifics, and exact formatting of dates, currencies, locations, and other identifiers.
+   - If multiple variants of a correct answer appear, select the clearest, most specific, and full form matching the expected answer style (e.g., including middle names, full titles).
+   - For yes/no questions, respond with only "Yes" or "No" in lowercase or capitalized form, without further explanation.
+   - When comparing two entities (e.g., to identify who was born first), supply the full exact name or phrase as in the passages, not a nickname or partial reference.
+   - If the passages contain conflicting or multiple related facts, use reasoning to pick the most relevant, specific, and direct factoid answer.
+   - If no answer can be found from the passages, respond with the concise phrase "Not stated in the provided passages."
+
+2. **Content Types and Domain-Specific Entities:**
+   - You may encounter a variety of factual content including:
+     - Names of people (with full birth names, including middle names and birthdates)
+     - Official titles, roles, and organizational relations (e.g., military units, regiments, political offices)
+     - Names of works (films, television shows, albums) with exact punctuation and capitalization
+     - Dates formatted with month and day, sometimes including year (e.g., "November 7, 2000")
+     - Numbers, rankings, measurements, or monetary amounts with precise units and formatting
+     - Geographic locations with detailed naming conventions (e.g., neighborhoods, suburbs, cities, countries)
+   - Maintain fidelity to the original naming conventions and contextual specificity (e.g., "27th Regiment of Foot", "University of Victoria", "Brighton neighborhood of Boston, Massachusetts").
+
+3. **Handling Names with Nicknames, Aliases, or Disambiguations:**
+   - If an individual has multiple names or nicknames, prefer the full formal name as it appears in the passages related directly to the fact asked.
+   - For cultural or ethnic names, use the full original form provided (e.g., Native American names, full tribal names).
+   - If a fact references a person’s daughter, son, or family relation, use the exact relation terminology and full names as shown.
+
+4. **Complex Facts or Multi-Part Entities:**
+   - When the answer involves a complex entity (e.g., a regiment formed by amalgamation), include the whole correct title as given ("the 27th Regiment of Foot").
+   - For events or elections, always provide the exact date as stated without adding ordinal suffixes or altering format, unless the passage shows it differently.
+
+5. **Answer Selection and Reasoning:**
+   - Read all passages carefully to identify which contain the relevant and most direct answer.
+   - Use logical deduction from multiple passages when necessary but do not introduce any external information.
+   - Confirm that the chosen fact matches the question precisely (e.g., the right person’s birth date, the correct stadium name in the correct suburb).
+   - Disambiguate entities with similar or overlapping names using the context and titles given.
+
+In sum, your goal is to provide a single, exact, factoid answer extracted verbatim (or nearly verbatim) from the input passages that directly answers the question, aligning with the domain-specific precision evident in the examples above.
+Iteration 79: New subsample score 16.0 is better than old score 15.0. Continue to full eval and add to candidate pool.
+Iteration 79: Val aggregate for new program: 0.6066666666666667
+Iteration 80: Selected program 16 score: 0.6998666666666666
+Iteration 80: Proposed new text for create_query_hop2.predict: You will be given two fields as input: `question` and `passages`. The `question` is a natural language query seeking some factual information. The `passages` field contains multiple short encyclopedic or descriptive texts, typically similar to Wikipedia snippets, that may contain relevant information to answer the question.
+
+Your task is to generate a precise, focused search query string (`query`) that can be used to retrieve or confirm the answer to the question based on the given passages. The query should be constructed by identifying key entities, dates, roles, or facts mentioned both in the question and the passages, especially those that disambiguate or refine the topic being asked about.
+
+When creating the `query`, you should:
+
+1. Extract and incorporate the main entities (people, works, organizations, events, etc.) referenced in the question and confirmed or elaborated in the passages. For example, names of actors, bands, films, roles, dates, or other unique identifiers.
+
+2. Include specific keywords or phrases from the question that clarify the intent, such as relationships (e.g., "older brother," "previous name"), specific titles or works (e.g., "Allegheny Uprising," "2541"), or unique details (e.g., "lead single 'Animal' chart at no. 13").
+
+3. Use precise wording that reflects the question but leverages authoritative facts or alternate nomenclature presented in the passages. For example, if an actor’s birth name is different from their stage name, or when a company changed its name.
+
+4. The `query` should be concise but informative enough to uniquely retrieve or verify the answer, especially for ambiguous or multi-faceted entities.
+
+5. Avoid directly including the answer itself in the query or instructions to solve the question. Rather, focus on forming an effective, targeted search query that would lead to the answer.
+
+6. If the question involves disambiguation (e.g., multiple similarly named entities or variations in names), include context from the passage to specify that in the query.
+
+The output should be a single search string or simple phrase that clearly connects the entities and key details required to find the requested information reliably.
+
+Example considerations:
+
+- When the question is about a person’s role in a show or film, include their name and role or the show’s title.
+
+- When the question inquires about relationships (e.g., "older brother"), include both persons’ names and the event (e.g., draft year).
+
+- When the question asks about a previous or alternate name, include both current and former names.
+
+- When the question concerns a work’s chart position or award, include the artist, song title and chart info explicitly.
+
+- When the question references specialized or domain-specific terms (e.g., sports draft, award titles, album names), use those exact terms if evident.
+
+Your output is just the search `query` string — no reasoning or explanation.
+Iteration 80: New subsample score 18.0 is not better than old score 18.0, skipping
+Iteration 81: Selected program 14 score: 0.7168000000000001
+Iteration 81: Proposed new text for _code:
+{
+  "git_branch": "codeevolver-20260303031536-ad9e06",
+  "parent_module_path": "langProPlus.hotpotGEPA.hotpot_pipeline.HotpotMultiHopPipeline",
+  "change_request": "In /workspace/langProPlus/hotpotGEPA/hotpot_pipeline.py, modify the ExtractAnswer signature (lines 9-14) to emphasize precision and exact entity extraction. Change the docstring to: \"Extract the precise factoid answer directly from the passages. Preserve all qualifiers (e.g., 'early', 'UK'), full entity names, and specific details that are part of the answer.\" Update the answer OutputField description to: \"The exact short answer (1-10 words) with all necessary qualifiers, full entity names, and specific details preserved from the passages.\" Then in HotpotMultiHopPipeline.forward(), remove the two-stage answer extraction (lines 100-107) and replace with a single call: `result_extraction = self.extract_answer(question=question, passages=all_passages)` followed by `result = dspy.Prediction(reasoning=result_extraction.reasoning, answer=result_extraction.answer, retrieval_count=self.rm.get_count())`. Remove the self.distill_factoid module initialization from __init__ (line 55)."
+}
+Iteration 81: Proposed new text for create_query_hop2.predict: Given the fields `question`, `context`, produce the fields `query`.
+Iteration 81: Proposed new text for assess_completeness.predict: Assess whether the retrieved passages contain sufficient information to answer the question confidently.
+Iteration 81: Proposed new text for generate_follow_up_query.predict: You will be given a question, a set of passages, and a statement describing what relevant information is present in the passages and what crucial information is missing that prevents confidently answering the question. Your task is to generate a precise, targeted follow-up query to find the missing information needed to answer the question.
+
+To do this effectively:
+
+1. Carefully read the question and all provided passages.
+2. Understand which key facts or details necessary to answer the question are explicitly **present** in the passages (e.g., related entities, partial data, contextual facts).
+3. Identify the **missing information**—in particular, specific factual data points or attributes (such as dates, locations, names, or detailed descriptions) that are **not found or sufficiently precise** in the passages, but which are essential to answer the question confidently.
+4. Formulate a concise, targeted search query that clearly focuses on obtaining the missing factual information. The query should:
+   - Reference relevant entities or concepts already known from the passages to narrow the search.
+   - Include keywords related to the missing detail (e.g., "release date", "cast", "location", "shoot down site", "city where X is based", etc.) for specificity.
+   - Avoid unnecessary general terms or unrelated information that would dilute the query.
+5. The goal is to generate a query that, if used on a search engine or knowledge base, would retrieve a source containing the missing information, thereby enabling a confident answer to the original question.
+
+Additional guidance:
+- The missing information often relates to precise attributes of named entities mentioned in the passages but not fully detailed.
+- The follow-up query should be a natural yet focused noun phrase or question fragment, not a full sentence, unless a short question improves clarity (e.g., "What city is Joint Base Elmendorf–Richardson located in?").
+- Use parentheses or quotation marks when needed to keep multi-word entity names or exact phrases intact and to improve retrieval precision.
+- Use specific descriptors like years, formats, or unique identifiers when relevant (e.g., "Scrooged (1988) cast", "Global Warming (Pitbull album) release date").
+- Avoid broad or ambiguous terms, aiming instead for the most direct path to the missing fact.
+
+This approach leverages the known context from the passages and focuses the retrieval on the identified missing fact, helping to efficiently resolve gaps in information needed to answer the initial question.
+Iteration 81: Proposed new text for extract_answer.predict: Extract a short factoid answer directly from the provided passages.
+Iteration 81: New subsample score 2.0 is not better than old score 15.940000000000001, skipping
+Iteration 82: Selected program 19 score: 0.72
+Iteration 82: Proposed new text for extract_answer.predict: You will be given a question and a set of passages containing factual information relevant to the question. Your task is to extract and output the concise, exact factoid answer from the passages without any additional explanation, elaboration, or deviation.
+
+Key points to follow:
+
+1. **Answer format:** Provide only the direct answer, typically a noun phrase, name, date, entity, or short phrase that precisely answers the question. Do not include any surrounding context, sentence fragments, or additional commentary.
+
+2. **Source grounding:** The answer must be explicitly supported by the information present in the provided passages. Use exact names and terminology as found in the passages.
+
+3. **Disambiguation and specificity:**
+   - When multiple similar terms appear, choose the most specific and directly supported one.
+   - Use the exact form or standardized name from the passages (e.g., "University of Victoria," "Jackson 5" not "The Jackson 5" unless exactly given).
+   - For numeric answers (dates, ordinal numbers), extract the precise figure as given.
+
+4. **Entity identification:**
+   - For questions about people, groups, or organizations, provide the exact proper name used in the passages.
+   - For titles of events (e.g., elections, albums), answer with the recognized title as presented, but in a concise form (e.g., "presidential election of 1924").
+   - For place names, provide the recognized geographic or political entity as named.
+
+5. **Handling of synonyms and variants:**
+   - If multiple synonymous forms exist, prefer the form most clearly connected to the factoid within the passages.
+   - Avoid generic descriptions or definitions unless no named entity form is available.
+
+6. **No additional text:**
+   - Do not restate the question.
+   - Do not include reasoning or justification.
+   - Do not add any explanations, qualifiers, or partial answers.
+   - Return a standalone factual entity or phrase suitable as a direct answer.
+
+7. **When answer is ambiguous or needs clarification:**
+   - Use the most authoritative and direct statement from the passages.
+   - If the question involves comparative or disambiguation reasoning (e.g., "Who passed away first?"), output only the single factual answer as stated.
+
+By following these guidelines, you ensure precise, context-grounded, and concise factoid answers that are directly extractable from source passages without elaboration.
+Iteration 82: New subsample score 12.0 is not better than old score 13.0, skipping
+Iteration 83: Selected program 19 score: 0.72

@@ -97,11 +97,9 @@ OPTIMIZE_CONFIG = {
     "reflection_lm": "openai/gpt-4.1-mini",
     "max_metric_calls": 7500, # 150 examples × 40 full evals (with subsampled valset)
     "num_threads": 8,
-    "max_valset_size": 150, # Subsample validation set to 150 examples (from 300) for faster evaluation
+    "max_valset_size": 150, 
     "seed": 42,
     "additional_instructions": additional_instructions_resource_tradeoffs,
     "initial_branch": "hotpotGEPA",
     "subsample_size": 20,
-    # Using default CodeFrequencyComponentSelector (initial=1, decay_rate=25)
-    # This does 1:1 code/prompt ratio initially, then increases prompts per code every 25 iterations
 }
