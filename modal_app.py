@@ -59,8 +59,8 @@ sandbox_image = (
         # Install Claude Code CLI globally - required for claude-agent-sdk
         "npm install -g @anthropic-ai/claude-code",
         # Install Deno — required for DSPy ReAct/RLM programs
-        "curl -fsSL https://deno.land/install.sh | sh",
-        "ln -s /root/.deno/bin/deno /usr/local/bin/deno",
+        #"curl -fsSL https://deno.land/install.sh | sh",
+        #"ln -s /root/.deno/bin/deno /usr/local/bin/deno",
     )
     .pip_install(
         "gitpython>=3.1.0",
