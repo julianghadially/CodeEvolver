@@ -61,7 +61,6 @@ def main_sync():
         import anyio
         from claude_agent_sdk import ClaudeAgentOptions, query, ResultMessage, HookMatcher
 
-        timer_printer("SDK imports complete")
         print(f"[REFLECT] Starting reflection...")
         sys.stdout.flush()
 
@@ -72,8 +71,7 @@ def main_sync():
 
         async def run_reflection():
             structured_output = None
-            timer_printer("Starting reflection query loop")
-
+            
             try:
                 async for message in query(
                     prompt=prompt_stream(),
@@ -97,7 +95,6 @@ def main_sync():
                     ),
                 ):
                     if isinstance(message, ResultMessage):
-                        timer_printer("Reflection result received")
                         # Signal done immediately so prompt_stream can exit
                         done_event.set()
 
@@ -108,7 +105,6 @@ def main_sync():
                         # Get structured output from ResultMessage
                         if hasattr(message, "structured_output") and message.structured_output:
                             structured_output = message.structured_output
-                            print("[REFLECT] Got structured output")
             except Exception as e:
                 print(f"[REFLECT] Exception during query: {type(e).__name__}: {e}")
                 # Don't exit - try to return any partial output

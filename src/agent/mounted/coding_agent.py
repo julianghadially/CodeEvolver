@@ -107,21 +107,8 @@ def main_sync():
                         },
                     ),
                 ):
-                    # Log what Claude is doing for observability
-                    if isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, ToolUseBlock):
-                                tool_uses.append(block.name)
-                                if block.name in ["Write", "Edit"]:
-                                    file_path = block.input.get("file_path", "unknown")
-                                    print(f"[AGENT]   -> {file_path}")
-                            elif isinstance(block, TextBlock):
-                                # Log first 200 chars of Claude's thinking
-                                text_preview = block.text[:200].replace("\n", " ")
-                                print(f"[AGENT] Claude: {text_preview}...")
-                        sys.stdout.flush()
-
-                    elif isinstance(message, ResultMessage):
+                    
+                    if isinstance(message, ResultMessage):
                         # Signal done immediately so prompt_stream can exit
                         done_event.set()
 
@@ -141,10 +128,8 @@ def main_sync():
                 done_event.set()
 
             # Summary
-            print(f"[AGENT] Tools used: {tool_uses}")
             edit_tools = [t for t in tool_uses if t in ["Write", "Edit"]]
-            print(f"[AGENT] File modifications: {len(edit_tools)}")
-
+            
             if error_occurred:
                 raise Exception(f"Agent error: {error_message}")
 
@@ -159,10 +144,7 @@ def main_sync():
         has_changes, changed_files = verify_changes_with_git(workspace)
 
         if has_changes:
-            print(f"[AGENT] Git shows {len(changed_files)} changed files:")
-            for f in changed_files[:10]:  # Show first 10
-                print(f"[AGENT]   {f}")
-            print("AGENT_SUCCESS")
+            pass
         elif changes_made:
             print("[AGENT] Tools reported changes but git shows none - files may have been reverted")
             print("AGENT_SUCCESS")
