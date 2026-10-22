@@ -1,0 +1,155 @@
+# Copyright © 2026 440 Labs LLC
+# Test fixture for tests/unit/test_experiment_fleet.py: a 5-host, 3-slot
+# matrix (3 benchmarks x 5 arms x 3 seeds = 45 runs). Not an experiment.
+#
+# Hosts are sharded by ARM, not by benchmark: every host runs all three
+# benchmarks concurrently, so all five strategies are scored at the same
+# checkpoint (~48h, ~96h, ~144h) instead of results arriving benchmark by
+# benchmark, and no host sits idle while another finishes.
+#
+# One arm per host, one host per arm -- five of each. No arm shares a machine
+# with another, which matters most for `ee` and `asa`: asa IS ee plus enforced
+# population-tree traversal, so the treatment effect is the delta between them
+# and they must not contend for the same CPU, RAM, disk and ragqa retriever.
+
+image_tag: latest
+
+hosts: [ce-a, ce-b, ce-c, ce-d, ce-e]
+
+# Which benchmarks THIS researcher runs comes from the CE_BENCHMARKS env var,
+# resolved against orchestrator/benchmarks.yaml. Team members run different
+# subsets (expect up to ~8 each) off this same file:
+#
+#     export CE_BENCHMARKS=hover,phantomwiki,ragqa
+#     export CE_REPO_ROOT=~/Documents/code
+#
+# Hosts only pull the images for the selected subset, and the ragqa retriever
+# sidecar only starts on hosts whose subset includes ragqa.
+
+arms: [ee, freeform, pareto_evolution, simple_loop, asa]
+seeds: [1, 2, 3]
+
+# Fixed arm -> host assignment, the same for every seed. This replaced a
+# per-seed rotation (and its list-valued entries, which existed only to squeeze
+# five arms onto four hosts) when the fifth host was added.
+#
+# Accepted tradeoff: the rotation existed so that a host-level anomaly (noisy
+# neighbour, disk pressure, a degraded NIC) could not confound with the arm
+# under test. With a fixed assignment it can, and the mitigation is operational
+# rather than structural -- identical droplets, plus `ce status` and the stall
+# warning to surface a sick host. Keys must match `hosts` exactly; load_matrix
+# raises if they drift.
+assignment:
+  ce-a: ee
+  ce-b: freeform
+  ce-c: pareto_evolution
+  ce-d: simple_loop
+  ce-e: asa
+
+# Concurrency cap per host -- NOT the benchmark count. With 8 benchmarks and
+# 3 slots a host runs three at a time and cycles through the rest as slots
+# free. At most one run per benchmark is in flight per host, and the
+# per-benchmark queues advance independently, so a 24h hover run never waits
+# on the 48h phantomwiki run beside it.
+slots_per_host: 3
+
+defaults:
+  # 15 min. A completed run is collected and its successor dispatched on the
+  # next pass, so the cost of a slow poll is idle host time: ~7.5 min average
+  # per completion, under 1% of a 6-day matrix. Not worth 1,440 SSH probes a
+  # day per host. `ce status` reconciles on demand and is always current.
+  poll_seconds: 900
+  rsync_seconds: 600
+  # docker run hardening. The only writable host path is this run's own
+  # artifact directory, so an agent has nowhere to leave a note that a later
+  # run could read -- which holds whether or not a container escape exists.
+  # No --read-only: the entrypoint writes /workspace (clone + multi-GB staged
+  # venv, too big for tmpfs) and /opt/holdout (the sequestered testset) on the
+  # container rootfs, which is per-container and discarded -- the host-side
+  # guarantee above is unchanged.
+  # SETUID/SETGID are added back (after --cap-drop=ALL) so root can drop agent
+  # subprocesses to the unprivileged ce-agent user, which is what fences the
+  # root-owned mode-600 holdout; --security-opt=no-new-privileges blocks
+  # privilege ELEVATION, not root setuid()ing downward, so the pair coexists.
+  # FOWNER lets the entrypoint chmod the /artifacts bind mount even when the
+  # host created it under a different uid.
+  docker_args:
+    - --security-opt=no-new-privileges
+    - --cap-drop=ALL
+    - --cap-add=SETUID
+    - --cap-add=SETGID
+    - --cap-add=FOWNER
+    # NET_ADMIN so the entrypoint can re-point the default route at the squid
+    # gateway. `internal: true` leaves it aimed at the docker bridge, where
+    # Docker's isolation rules drop it -- squid's transparent REDIRECT lives in
+    # the GATEWAY's netns and never sees the packets. Without this every run
+    # aborts in the egress canary with all providers unreachable.
+    - --cap-add=NET_ADMIN
+    - --tmpfs=/tmp:size=4g,exec
+    - --tmpfs=/var/lib/mongodb:size=2g
+    - --tmpfs=/run:size=64m
+    - --network=ce-host_ce-internal
+    # An internal network gets no external DNS forwarding from Docker at
+    # all, so names have to resolve through the gateway's dnsmasq. Docker
+    # keeps its own 127.0.0.11 resolver for container names and uses this
+    # only as the upstream, so `gateway` still resolves.
+    - --dns=172.31.66.2
+    - --memory=18g
+  # Uncomment once `apt install runsc` has been run on the hosts; gVisor turns
+  # the container into a real syscall-level sandbox.
+  # runtime: runsc
+
+# Provider credentials are read from the controller's environment and passed
+# per-run. Runners hold these and nothing else -- no ssh keys, no registry
+# credentials, no controller access -- so there is no lateral path off a host.
+env_passthrough:
+  - ANTHROPIC_API_KEY
+  - OPENAI_API_KEY
+  - DEEPINFRA_API_KEY
+  - GMI_API_KEY
+  # The arcagi and paperreview solvers read `GMI_CLOUD_API_KEY or GMI_API_KEY`,
+  - GMI_CLOUD_API_KEY
+  # DeepSeek's first-party API: a route of every benchmark's DeepSeek-V4-Flash
+  # provider chain, appworld and alfworld included. Warns on every
+  # dispatch when unset, like the other provider keys.
+  - DEEPSEEK_API_KEY
+  # Task-LM routing for the seed programs' provider chain (gmi -> deepseek ->
+  # deepinfra). LM_PROVIDER names the primary, LM_FALLBACK ("0" to disarm, or a
+  # provider name to pick the cover). Both are UNSET in the normal case -- the
+  # seed program's DEFAULT_PROVIDER (gmi) already is the intended routing -- so
+  # they are switches, not credentials, and do not warn when absent
+  # (controller.py::OPTIONAL_PASSTHROUGH). They exist so a provider can be
+  # repointed for one dispatch without rebuilding the seed bundle and image.
+  - LM_PROVIDER
+  - LM_FALLBACK
+  # ALFWorld's task model (Qwen 3.6 35B-A3B) is served through OpenRouter.
+  - OPENROUTER_API_KEY
+  # Simulator worker pools. The client runtime defaults to 4 AppWorld servers
+  # and 2 ALFWorld workers when unset -- silently mismatching num_threads in
+  # the run config, so pass the intended counts explicitly. The qualified
+  # ALFWorld profile is 15 workers (set ALFWORLD_SERVER_COUNT=15 for fleet
+  # runs; must equal num_threads in experiments/AlfWorldVision/input.py).
+  - APPWORLD_SERVER_COUNT
+  - APPWORLD_BASE_PORT
+  - ALFWORLD_SERVER_COUNT
+  - ALFWORLD_BASE_PORT
+  # `dispatch()` forwards ONLY what is listed here -- anything absent is
+  # silently dropped, not reported. The three below are optional switches, so
+  # controller.py's OPTIONAL_PASSTHROUGH suppresses the "not set" warning for
+  # them; unset is their normal state. None carries a credential.
+  #
+  #   CE_SET               per-run config overrides, `key=value;key=value`.
+  #                        Beats every other source, including the research
+  #                        defaults, so a deliberate experiment can turn any
+  #                        control off.
+  #   CE_RESEARCH_MODE     arms the research controls (clean-slate inspector,
+  #                        run-integrity, meta-reflection). The runner IMAGE
+  #                        already sets it true; this entry exists only so an
+  #                        operator can turn it OFF for a one-off.
+  #   CE_MAX_METRIC_CALLS  fallback eval budget for the mid-run integrity
+  #                        trigger. Rarely needed: the trigger now reads
+  #                        max_metric_calls from the submitted config, so this
+  #                        only matters for a config that declares no budget.
+  - CE_SET
+  - CE_RESEARCH_MODE
+  - CE_MAX_METRIC_CALLS

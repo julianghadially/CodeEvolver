@@ -1,0 +1,1 @@
+"""Local engine execution — placeholder."""

@@ -1,0 +1,149 @@
+# Copyright © 2026 440 Labs LLC
+# Catalog of every benchmark the fleet knows how to run. Shared and committed.
+#
+# WHICH of these a given researcher runs is NOT set here -- it comes from the
+# CE_BENCHMARKS environment variable, so team members running different subsets
+# share one repo and one image registry. See orchestrator/fleet_config.py.
+#
+# Adding a benchmark = one entry here + an experiments/<experiment_dir>/input.py.
+#
+#   slug           the fleet's name for it: image tag, bundle file, run_id, and
+#                  CE_REPO_<SLUG> override. Must be shell/-tag safe.
+#   experiment_dir the directory under experiments/ -- often DIFFERENT from the
+#                  slug (experiments/phantom-wiki, experiments/RAGQAArenaTech),
+#                  and passed to `experiments.run --program`.
+#   runtime_reqs   OPTIONAL. Repo-relative paths of small requirement manifests
+#                  for a benchmark's EXTRA simulator runtime (a second venv
+#                  beside the client program's). `build.py` stages them into
+#                  the image context early so the expensive simulator layers
+#                  cache across client-repo commits. Declared explicitly, like
+#                  assets: a generic filename (e.g. requirements.txt) would
+#                  otherwise match in every repo.
+#   assets         OPTIONAL. Repo-relative paths of large generated data files
+#                  that the client repo gitignores (too big to commit) but that
+#                  the workspace needs at run time. `build.py` stages them into
+#                  the benchmark image; `runner/entrypoint.py` places them into
+#                  the workspace after the seed clone. They stay out of git, so
+#                  they never touch the bundle or a candidate commit.
+#   seed_branch    OPTIONAL. Client-repo branch `build.py bundles` archives into
+#                  the seed bundle; defaults to `main`. Set it whenever the seed
+#                  program does NOT live on main -- arcagi and paperreview both
+#                  seed from `seed-program-deepseek-v4flash`, arcagi's `main` is
+#                  an older solver lineage with no trainval pool, and
+#                  paperreview has no `main` at all, so the default would build
+#                  the wrong tree for one and hard-fail on the other. A
+#                  `--branch` on the command line overrides this for EVERY
+#                  benchmark in the build, so use it only for a one-off sweep.
+#   repo_dirname   client checkout name under CE_REPO_ROOT, unless overridden
+#                  per-machine by CE_REPO_<SLUG>. Several benchmarks MAY share
+#                  one checkout -- hover and ragqa both live in LangProBe-
+#                  CodeEvolver. They were split into per-benchmark forks only
+#                  so more than one could run locally at once; every run now
+#                  gets its own container, so the split bought nothing and cost
+#                  three diverging copies of the same repo. The seed bundle and
+#                  image are still per-slug, so the two runs stay isolated.
+
+hover:
+  experiment_dir: hover
+  repo_dirname: LangProBe-CodeEvolver
+  est_hours: 24
+
+phantomwiki:
+  experiment_dir: phantom-wiki
+  repo_dirname: phantom-wiki
+  est_hours: 72
+  # ~1.3 GB generated corpus, gitignored upstream. ~180 MB as an image layer.
+  assets:
+    - output/depth_10_size_1000000/articles.json
+
+ragqa:
+  experiment_dir: RAGQAArenaTech
+  repo_dirname: LangProBe-CodeEvolver
+  est_hours: 28
+  # Pulls in the retriever sidecar (~8GB resident) on hosts that run this
+  # benchmark ONLY. Colleagues not running ragqa never start it.
+  needs_retriever: true
+
+# --- ARC-AGI v1: UNWIRED. There is no `experiments/arc-agi/input.py`.
+# --- fleet_config.load_catalog() would still hand it to `experiments.run
+# --- --program arc-agi`, which fails at submission, so it stays commented
+# --- until an input.py lands (the same convention as alfworld/appworld
+# --- below). arcagi2 is the ARC arm the matrix actually runs.
+# arcagi:
+#   experiment_dir: arc-agi
+#   repo_dirname: ARC-AGI
+#   seed_branch: seed-program-deepseek-v4flash
+#   # Evals dominate wall-clock time — rows run 50-way
+#   # parallel, so an eval walls at its slowest DeepSeek row (p50 ~1-6 min,
+#   # tail up to 40).
+#   est_hours: 48
+#   # No assets: the 720-row trainval pool and the hold-out are both committed, so
+#   # `git archive` carries them. The raw upstream corpus (data/training,
+#   # data/evaluation) was REMOVED from the seed branch: the hold-out was cut from
+#   # those 800 task files, so keeping them shipped an unfenced second copy of
+#   # every held-out answer into the workspace.
+#   # No provision conditional: requirements.txt is litellm + tenacity.
+
+arcagi2:
+  experiment_dir: arc-agi-2
+  repo_dirname: ARC-AGI-2
+  seed_branch: seed-program-deepseek-v4flash
+  # Same 5000-row budget as arcagi so the two ARC arms are comparable on spend,
+  # but ARC-AGI-2 rows are slower at the same reasoning_effort, so the same
+  # budget buys fewer wall-clock iterations. Estimated up from arcagi's measured
+  # 48h rather than measured directly — revise once a full arm has run.
+  est_hours: 72
+  # No assets: the 1000-row trainval pool and the 120-row hold-out are both
+  # committed, so `git archive` carries them. The raw upstream corpus (1122
+  # files under data/) was REMOVED from the seed branch for the same reason as
+  # arcagi — the hold-out was cut from those tasks, so keeping them shipped an
+  # unfenced second copy of every held-out answer into the workspace. `main`
+  # still has them.
+  # No provision conditional: requirements.txt is litellm + tenacity. Unlike
+  # arcagi this seed needs no OTLP exporter — it uses a no-op tracer.
+
+paperreview:
+  experiment_dir: paper-review
+  repo_dirname: PaperReview
+  seed_branch: seed-program-deepseek-v4flash
+  # Papers run up to ~50k tokens at reasoning_effort=high, so rows are slow but
+  # the pool is small (200 train / 100 hold-out) and the 9000-row budget
+  # (input.py) buys ~25 iterations at 350 rows each.
+  est_hours: 40
+
+# --- Not yet wired: no experiments/<dir>/input.py exists for these. Listed so
+# --- the colleagues running them have an obvious place to land the config.
+# alfworld:
+#   experiment_dir: alfworld
+#   repo_dirname: alfworld-codeevolver
+#   est_hours: 36
+# appworld:
+#   experiment_dir: appworld
+#   repo_dirname: appworld-codeevolver
+#   est_hours: 36
+appworld:
+  experiment_dir: AppWorld
+  repo_dirname: appworld-codeevolver
+  est_hours: 36
+  # AppWorld's simulator data (~200 MB of SQLite DBs + API docs) and its own
+  # python venv are baked into the image at build time (Dockerfile.bench's
+  # appworld block), NOT staged via `assets:` -- the data is ~15k small files,
+  # which the flat-file assets mechanism was never built for. The client
+  # runtime finds them through APPWORLD_ROOT / APPWORLD_PYTHON (set in the
+  # image), falling back to `.runtime/` only for the legacy WSL workflow.
+
+alfworld:
+  experiment_dir: AlfWorldVision
+  repo_dirname: alfworld-codeevolver
+  est_hours: 36
+  # AI2-THOR/Unity rendering needs an X display. Fleet hosts for this
+  # benchmark are GPU droplets provisioned by provision.sh's needs_gpu block
+  # (NVIDIA container toolkit + headless Xorg on :99); the container falls
+  # back to Xvfb software rendering (~5x slower) when no DISPLAY is passed,
+  # which is what a local smoke run on a laptop uses. Game data (~2.3 GB) and
+  # the legacy python-3.9 runtime venv are baked into the image, same
+  # rationale as appworld above.
+  needs_gpu: true
+  runtime_reqs:
+    - alfworld-runtime-requirements.txt
+

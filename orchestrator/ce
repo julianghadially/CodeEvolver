@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Copyright © 2026 440 Labs LLC
+# Thin wrapper so the fleet reads as one command. Put orchestrator/ on PATH.
+exec python3 "$(dirname "$(readlink -f "$0")")/controller.py" "$@"

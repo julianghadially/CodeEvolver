@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Copyright © 2026 440 Labs LLC
+# Interpreter shim for the ALFWorld runtime venv. The client repo spawns its
+# AI2-THOR server workers with $ALFWORLD_PYTHON (see the client's
+# codeevolver_benchmarks/alfworld_runtime.py); pointing that at this shim is
+# what lets ONE image serve both display arrangements:
+#
+#   GPU host   dispatch() passed DISPLAY (the host's headless Xorg from
+#              provision.sh's needs_gpu block) plus the X socket + Xauthority
+#              mounts. All workers share that display -- the qualified
+#              lifecycle-v2 arrangement for NVIDIA hosts.
+#   CPU host   no DISPLAY was passed (a laptop smoke run, or an unprovisioned
+#              droplet). Each worker gets its own private Xvfb on :99+i,
+#              software-rendered -- ~5x slower but correct, and the per-worker
+#              display is what kept long CPU runs from poisoning a shared
+#              renderer.
+set -euo pipefail
+
+venv_python=/opt/bench-runtime/alfworld-venv/bin/python
+
+# The AI2-THOR Unity binary was prefetched at image-build time under this HOME
+# (run containers sit behind the egress fence and cannot download it), so the
+# controller must resolve ~/.ai2thor here, not in /artifacts.
+export HOME=/opt/bench-runtime/thor-home
+
+if [[ -n "${DISPLAY:-}" ]]; then
+  exec "$venv_python" "$@"
+fi
+
+# Derive the worker index from the server's --port, the same way the qualified
+# CPU pipeline did, so concurrent workers land on distinct displays.
+port=""
+previous=""
+for argument in "$@"; do
+  if [[ "$previous" == "--port" ]]; then
+    port="$argument"
+    break
+  fi
+  previous="$argument"
+done
+base_port="${ALFWORLD_BASE_PORT:-19123}"
+if [[ -n "$port" ]]; then
+  display_number=$((99 + port - base_port))
+else
+  display_number=99
+fi
+export DISPLAY=":$display_number"
+
+if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+  Xvfb "$DISPLAY" -screen 0 1280x1024x24 -nolisten tcp \
+    >"/tmp/xvfb-$display_number.log" 2>&1 &
+  for _ in $(seq 1 120); do
+    xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
+    sleep 0.25
+  done
+  xdpyinfo -display "$DISPLAY" >/dev/null
+fi
+
+exec "$venv_python" "$@"

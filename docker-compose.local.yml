@@ -1,0 +1,37 @@
+# Run CodeEvolver locally in one container: the API, MongoDB and the coding
+# agents, with your task repo mounted at /workspace. Agents can edit only what
+# is mounted, not the rest of your machine.
+#
+#   TASK_REPO=/absolute/path/to/your-repo docker compose -f docker-compose.local.yml up --build -d
+#
+# Keys and STRATEGY come from .env. Job state lands in ~/.codeevolver-mount/.codeevolver/.
+name: codeevolver
+
+services:
+  codeevolver:
+    build:
+      context: .
+      dockerfile: runner/Dockerfile.base
+    env_file: .env
+    environment:
+      APP_MODE: local
+      SANDBOX_MODE: local
+      # The base image targets the research fleet; switch its research-only
+      # controls and agent-user switching off for a local container.
+      CE_RESEARCH_MODE: "false"
+      CODEEVOLVER_AGENT_USER: ""
+      # OpenSSL's ARM CPU probe crashes (SIGILL) under Docker Desktop on SME
+      # chips (Apple M4), killing any import of `cryptography`. No-op on x86.
+      OPENSSL_armcap: "0"
+    volumes:
+      - ${TASK_REPO:?set TASK_REPO to the absolute path of your task repo}:/workspace
+      - ${HOME}/.codeevolver-mount:/artifacts
+    ports:
+      - "127.0.0.1:${CE_PORT:-8080}:8080"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mkdir -p /artifacts/mongodb
+        mongod --dbpath /artifacts/mongodb --bind_ip 127.0.0.1 --quiet --logpath /artifacts/mongod.log --fork
+        exec python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8080

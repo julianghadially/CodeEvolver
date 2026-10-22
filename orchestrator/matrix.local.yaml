@@ -1,0 +1,98 @@
+# Copyright © 2026 440 Labs LLC
+# Scratch matrix: ONE run, on this machine, for proving the runner + controller
+# path end to end before any droplet is involved.
+#
+#   export CE_MATRIX=$PWD/orchestrator/matrix.local.yaml
+#   export CE_RUNS_ROOT=$HOME/ce-data/runs
+#   export CE_SET="max_metric_calls=300"
+#   ce start --bench hover --arm ee
+#
+# The shape is deliberately identical to matrix.main.yaml -- same dispatch code,
+# same entrypoint, same egress fence -- so what passes here is the same thing
+# the fleet runs. Only three things differ: one host, one seed, and container
+# limits that fit a laptop.
+
+# Images are built straight into the local daemon, so nothing is pulled and no
+# registry credentials exist. The prefix is still part of the tag.
+registry: local
+image_tag: latest
+
+# A docker context pointing at the local unix socket. controller.host_addr()
+# recognises a non-ssh:// endpoint and switches to local mkdir/rm/rsync, so no
+# sshd and no /data on the Mac.
+#
+#   docker context create ce-local --docker host=unix:///var/run/docker.sock
+hosts: [ce-local]
+
+arms: [ee, simple_loop]
+# One seed only: with `hosts` limited to ce-local, runs assigned to any other
+# host would sit `queued` forever and `ce start` would never reach "matrix
+# complete". One seed, one host, one arm filter = one run that terminates.
+seeds: [1]
+assignment:
+  ce-local: ee
+
+slots_per_host: 1
+
+defaults:
+  # A local trial is watched, not left overnight: poll and sync often enough to
+  # see it move.
+  poll_seconds: 60
+  rsync_seconds: 120
+  docker_args:
+    - --security-opt=no-new-privileges
+    - --cap-drop=ALL
+    - --cap-add=SETUID
+    - --cap-add=SETGID
+    - --cap-add=FOWNER
+    # See matrix.main.yaml: without NET_ADMIN the entrypoint cannot route to the
+    # squid gateway and the egress canary aborts the run.
+    - --cap-add=NET_ADMIN
+    # Sized for the Docker Desktop VM (~8 GB), not a 64 GB droplet. tmpfs
+    # counts against the container's memory cgroup, so these three plus the
+    # limit have to add up to less than the VM has.
+    - --tmpfs=/tmp:size=2g,exec
+    - --tmpfs=/var/lib/mongodb:size=1g
+    - --tmpfs=/run:size=64m
+    - --network=ce-host_ce-internal
+    # An internal network gets no external DNS forwarding from Docker at
+    # all, so names have to resolve through the gateway's dnsmasq. Docker
+    # keeps its own 127.0.0.11 resolver for container names and uses this
+    # only as the upstream, so `gateway` still resolves.
+    - --dns=172.31.66.2
+    - --memory=6g
+
+env_passthrough:
+  - ANTHROPIC_API_KEY
+  - OPENAI_API_KEY
+  - DEEPINFRA_API_KEY
+  - GMI_API_KEY
+  - GMI_CLOUD_API_KEY
+  # DeepSeek's first-party API: a route of every benchmark's DeepSeek-V4-Flash
+  # provider chain, appworld and alfworld included. Warns on every
+  # dispatch when unset, like the other provider keys.
+  - DEEPSEEK_API_KEY
+  # Task-LM routing for the seed programs' provider chain (gmi -> deepseek ->
+  # deepinfra). LM_PROVIDER names the primary, LM_FALLBACK ("0" to disarm, or a
+  # provider name to pick the cover). Both are UNSET in the normal case -- the
+  # seed program's DEFAULT_PROVIDER (gmi) already is the intended routing -- so
+  # they are switches, not credentials, and do not warn when absent
+  # (controller.py::OPTIONAL_PASSTHROUGH). They exist so a provider can be
+  # repointed for one dispatch without rebuilding the seed bundle and image.
+  - LM_PROVIDER
+  - LM_FALLBACK
+  - OPENROUTER_API_KEY
+  # Simulator worker pools (see matrix.main.yaml). Local smokes run 1-2 workers.
+  - APPWORLD_SERVER_COUNT
+  - APPWORLD_BASE_PORT
+  - ALFWORLD_SERVER_COUNT
+  - ALFWORLD_BASE_PORT
+  # Not in the fleet matrix: these are what make a capped trial possible at
+  # all. `dispatch()` forwards only what is listed here, so without CE_SET a
+  # run is committed to the config's full budget (hover: 5000 rows, ~24h).
+  - CE_SET
+  - CE_MAX_METRIC_CALLS
+  # Select a named config from input.py (e.g. SMOKE_CONFIG_LOCAL) for a
+  # 1-row wiring check. Local-only: fleet runs always take the default
+  # OPTIMIZE_CONFIG_LOCAL resolution.
+  - CE_CONFIG

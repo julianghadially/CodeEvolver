@@ -8,11 +8,33 @@ env/*
 venv/*
 mlartifacts/*
 *.xlsx
+results
 results/old/*
 results/optimization/gepa_optimization*
+specs/archive/
+specs/*.pdf
 *.sqlite
 # Local images folder (contents ignored, but folder structure tracked)
 .images/*
 .images
 !.images/.gitkeep
 secrets/
+# Fleet controller runtime state (rebuilt by reconciliation on every pass)
+orchestrator/state.json
+runner/bundles/
+runner/bundles-po/
+runner/assets/
+runner/runtime-reqs/
+# Gateway's self-signed intercept cert -- generated per host, never shared.
+runner/ssl/
+orchestrator/*.json
+# The pushed-image digest pin is the matrix's provenance record (experiment-fleet.md) -- commit it.
+!orchestrator/images.lock.json
+# Per-fleet pins written under CE_IMAGE_LOCK (e.g. images.evo-redo.lock.json) -- same rule.
+!orchestrator/images.*.lock.json
+scripts/macro-counts/inputs/
+scripts/macro-counts/output/
+
+# Personal Claude Code permissions
+.claude/settings.local.json
+

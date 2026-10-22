@@ -1,0 +1,177 @@
+diff --git a/src/program/phantomwiki_module.py b/src/program/phantomwiki_module.py
+index 0000000..0000000 100644
+--- a/src/program/phantomwiki_module.py
++++ b/src/program/phantomwiki_module.py
+@@ -1,3 +1,5 @@
++import json
++import os
+ import re
+ 
+ import dspy
+@@ -146,6 +148,9 @@ class PhantomWikiQA(dspy.Signature):
+     - Children of X: search "children of X" OR "sons of X" OR "daughters of X"
+     - Cousins of X: find X's parents → find parents' siblings → find their children
+     - Second uncle/aunt/cousin: search the EXACT term "second uncle of X" etc.
++    - Mother/father-in-law of X: find X's spouse (husband or wife from X's profile) → get spouse's profile → find spouse's mother/father
++    - Son/daughter-in-law of X: find X's children → for each child, find child's spouse
++    - Brother/sister-in-law of X: find X's spouse's siblings, OR find X's siblings' spouses
+ 
+     OUTPUT FORMAT:
+     - Return clean plain values: names, numbers, dates, occupations (no extra words)
+@@ -233,7 +238,38 @@ class PhantomWikiQA2(dspy.Signature):
+ 
+ 
+ class PhantomWikiReAct(dspy.Module):
++    # Class-level cache — built once per Python process, shared across instances
++    _local_index_loaded = False
++    _dob_to_names: dict = {}
++
++    @classmethod
++    def _build_local_index(cls):
++        """Load articles.json and build a DOB → names lookup dict for perfect exact-DOB recall."""
++        if cls._local_index_loaded:
++            return
++        # articles.json is at output/depth_10_size_1000000/articles.json relative to repo root
++        module_dir = os.path.dirname(os.path.abspath(__file__))
++        articles_path = os.path.join(module_dir, '..', '..', 'output',
++                                     'depth_10_size_1000000', 'articles.json')
++        try:
++            with open(articles_path, 'r') as f:
++                articles = json.load(f)
++            dob_dict: dict = {}
++            dob_re = re.compile(r'The date of birth of .+ is (\d{4}-\d{2}-\d{2})\.')
++            for item in articles:
++                name = item.get('title', '')
++                article = item.get('article', '')
++                m = dob_re.search(article)
++                if m:
++                    dob_dict.setdefault(m.group(1), []).append(name)
++            cls._dob_to_names = dob_dict
++            cls._local_index_loaded = True
++        except Exception:
++            # If loading fails, fall through to ColBERT-only mode
++            cls._local_index_loaded = True  # don't retry
++
+     def __init__(self):
++        PhantomWikiReAct._build_local_index()
+         self.retrieve = dspy.Retrieve(k=25)
+         self.retrieve_targeted = dspy.Retrieve(k=10)
+         self.retrieve_wide = dspy.Retrieve(k=400)
+@@ -260,32 +296,35 @@ class PhantomWikiReAct(dspy.Module):
+ 
+     def search_exact_dob(self, date_of_birth: str) -> str:
+         """Search specifically for ALL people with an EXACT date of birth.
+-        Uses higher-k retrieval and filters to passages containing the exact DOB string.
++        Uses a local pre-built index for 100% recall — always finds ALL people with that DOB.
+         ALWAYS USE THIS FIRST when the question root condition is a date of birth!
+         Example: search_exact_dob("0946-07-14") to find all people born on that exact date.
+         Returns a list of names — call get_entity_profile(name) for each to get full details."""
++        # Use local pre-built index for perfect recall
++        matching = PhantomWikiReAct._dob_to_names.get(date_of_birth, [])
++        if matching:
++            return (f"Found {len(matching)} people with exact DOB {date_of_birth}. "
++                    f"Call get_entity_profile(name) for each to get their full profile and attributes:\n"
++                    + "\n".join(f"- {name}" for name in matching))
++
++        # Fallback: ColBERT search (in case local index wasn't built)
+         all_matching = []
+         seen_names = set()
+-
+-        # Parse year and year-month for broader queries
+-        year_month = date_of_birth[:7]  # e.g., "0946-07"
+-        year = date_of_birth[:4]        # e.g., "0946"
+-
+-        # Try multiple query formats with wide k to maximize coverage
++        year_month = date_of_birth[:7]
++        year = date_of_birth[:4]
+         queries = [
+-            date_of_birth,                          # exact: "0946-07-14"
+-            f"date of birth {date_of_birth}",       # exact with context
+-            f"born {date_of_birth}",               # exact variant
+-            year_month,                            # partial: "0946-07" (all July 0946 people)
+-            f"date of birth {year_month}",         # partial with context
+-            year,                                  # broadest: "0946" (all year 0946 people)
+-            f"date of birth {year}",               # year with context
++            date_of_birth,
++            f"date of birth {date_of_birth}",
++            f"born {date_of_birth}",
++            year_month,
++            f"date of birth {year_month}",
++            year,
++            f"date of birth {year}",
+         ]
+         for query in queries:
+             results = self.retrieve_wide(query)
+             for passage in results.passages:
+                 if date_of_birth in passage:
+-                    # Extract the person's name from the passage header
+                     first_line = passage.strip().split('\n')[0]
+                     if ':' in first_line:
+                         name = first_line.split(':')[0].strip()
+@@ -294,21 +333,19 @@ class PhantomWikiReAct(dspy.Module):
+                     if name and name not in seen_names:
+                         seen_names.add(name)
+                         all_matching.append(name)
+-
+         if all_matching:
+             return (f"Found {len(all_matching)} people with exact DOB {date_of_birth}. "
+                     f"Call get_entity_profile(name) for each to get their full profile and attributes:\n"
+                     + "\n".join(f"- {name}" for name in all_matching))
+-        return (f"No exact matches found for DOB {date_of_birth} in top results. "
+-                f"Try search_wiki with partial date (e.g., '{date_of_birth[:7]}') and "
+-                f"manually verify which results have the exact DOB.")
++        return (f"No exact matches found for DOB {date_of_birth}. "
++                f"Try search_wiki with partial date (e.g., '{date_of_birth[:7]}').")
+ 
+     def search_all_with_occupation(self, occupation: str) -> str:
+         """Search for ALL people who have an EXACT occupation. Returns comprehensive list.
+         ALWAYS USE THIS when the question root condition is an occupation!
+         Example: search_all_with_occupation("financial controller") returns all people with that exact occupation.
+         Returns a list of names — call get_entity_profile(name) for each to get full details."""
+-        import re as _re
++        occ_lower = occupation.lower().strip()
+         all_matching = []
+         seen_names = set()
+ 
+@@ -322,16 +359,12 @@ class PhantomWikiReAct(dspy.Module):
+             results = self.retrieve_wide(query)
+             for passage in results.passages:
+                 passage_lower = passage.lower()
+-                occ_lower = occupation.lower()
+-                # Check if this passage mentions this occupation
+                 if occ_lower in passage_lower:
+-                    # Extract the person's name from the passage header
+                     first_line = passage.strip().split('\n')[0]
+                     if ':' in first_line:
+                         name = first_line.split(':')[0].strip().strip('#').strip()
+                     else:
+                         name = first_line.strip().strip('#').strip()
+-                    # Verify this person's OWN occupation matches (not just mentioned in context)
+                     if name and f"occupation of {name.lower()} is {occ_lower}" in passage_lower:
+                         if name not in seen_names:
+                             seen_names.add(name)
+@@ -349,6 +382,7 @@ class PhantomWikiReAct(dspy.Module):
+         ALWAYS USE THIS when the question root condition is a hobby!
+         Example: search_all_with_hobby("die-cast toy") returns all people with that exact hobby.
+         Returns a list of names — call get_entity_profile(name) for each to get full details."""
++        hobby_lower = hobby.lower().strip()
+         all_matching = []
+         seen_names = set()
+ 
+@@ -362,16 +396,12 @@ class PhantomWikiReAct(dspy.Module):
+             results = self.retrieve_wide(query)
+             for passage in results.passages:
+                 passage_lower = passage.lower()
+-                hobby_lower = hobby.lower()
+-                # Check if this passage mentions this hobby
+                 if hobby_lower in passage_lower:
+-                    # Extract the person's name from the passage header
+                     first_line = passage.strip().split('\n')[0]
+                     if ':' in first_line:
+                         name = first_line.split(':')[0].strip().strip('#').strip()
+                     else:
+                         name = first_line.strip().strip('#').strip()
+-                    # Verify this person's OWN hobby matches (not just mentioned in context)
+                     if name and (f"hobby of {name.lower()} is {hobby_lower}" in passage_lower or
+                                  f"hobbies of {name.lower()}" in passage_lower and hobby_lower in passage_lower):
+                         if name not in seen_names:

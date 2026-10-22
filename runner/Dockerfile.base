@@ -1,0 +1,112 @@
+# Copyright © 2026 440 Labs LLC
+# Base runner image: the toolchain every benchmark run needs, plus CodeEvolver
+# itself pinned to one commit. Benchmark layers add only the client repo and its
+# prebuilt venv, so a CodeEvolver change rebuilds one layer instead of four.
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg git build-essential unzip xz-utils \
+        iproute2 libcurl4 cmake pkg-config ripgrep \
+        python3.11 python3.11-venv python3.11-dev python3-pip \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# MongoDB is not in Debian; the local API treats Mongo as its primary store.
+# One mongod per container keeps runs from sharing any state at all.
+#
+# Two install paths because MongoDB publishes NO arm64 packages in its Debian
+# apt repo -- only for Ubuntu. On arm64 (an Apple-Silicon Mac running the
+# runner locally) we take the official ubuntu2204 aarch64 tarball instead;
+# bookworm's glibc is newer than jammy's, so the binary runs unchanged. The
+# rest of the image -- Debian, python3.11 -- is then identical across both
+# architectures, which is the point: one Dockerfile, no Mac-only variant to
+# keep in sync with the fleet image.
+ARG MONGO_VERSION=7.0.14
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    if [ "$arch" = "amd64" ]; then \
+      curl -fsSL https://pgp.mongodb.com/server-7.0.asc \
+        | gpg --dearmor -o /usr/share/keyrings/mongodb.gpg; \
+      echo "deb [signed-by=/usr/share/keyrings/mongodb.gpg] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
+        > /etc/apt/sources.list.d/mongodb.list; \
+      apt-get update && apt-get install -y --no-install-recommends mongodb-org-server; \
+      rm -rf /var/lib/apt/lists/*; \
+    else \
+      curl -fsSL -o /tmp/mongo.tgz \
+        "https://fastdl.mongodb.org/linux/mongodb-linux-aarch64-ubuntu2204-${MONGO_VERSION}.tgz"; \
+      tar -xzf /tmp/mongo.tgz -C /tmp; \
+      install -m 0755 /tmp/mongodb-linux-aarch64-ubuntu2204-${MONGO_VERSION}/bin/mongod /usr/local/bin/mongod; \
+      rm -rf /tmp/mongo.tgz /tmp/mongodb-linux-aarch64-ubuntu2204-${MONGO_VERSION}; \
+    fi; \
+    mongod --version
+
+# Node for the OpenCode harness; deno is a documented sandbox prerequisite.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+
+# uv is a hard requirement: LocalEnvironment._resolve_uv_binary raises without it.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# >=1.17.11 carries the streamText/provider fix for the ~300s tool-execution cap
+# (opencode #25509); below it every long eval tool call dies mid-run.
+# OpenCode's grep/glob/skill tools shell out to ripgrep. It looks for `rg` on
+# PATH first and otherwise DOWNLOADS it from github.com at first use -- which
+# the egress fence terminates, so every one of those tools would return
+# "ripgrep execution failed". The apt `ripgrep` above is what keeps
+# that download from ever being attempted; runner/preflight.py asserts it.
+ARG OPENCODE_VERSION=1.17.11
+RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" && opencode --version
+
+ARG CODEEVOLVER_REF=engine3
+# Explicit paths rather than `COPY . /opt/codeevolver`. Relying on a
+# .dockerignore here is a trap: the context-root .dockerignore is written for
+# the Cloud Run API image and EXCLUDES experiments/ (the run configs) -- and the
+# per-Dockerfile override only applies under BuildKit, so a legacy-builder build
+# would silently produce an image whose runs cannot submit. Listing what we need
+# is builder-independent and keeps the image predictable.
+COPY pyproject.toml README.md /opt/codeevolver/
+COPY src/         /opt/codeevolver/src/
+COPY scripts/     /opt/codeevolver/scripts/
+COPY experiments/ /opt/codeevolver/experiments/
+COPY runner/      /opt/codeevolver/runner/
+RUN cd /opt/codeevolver && pip install --break-system-packages -e ".[local]" \
+    && echo "$CODEEVOLVER_REF" > /opt/codeevolver/.image-ref
+
+# Unprivileged user for agent subprocesses (architect / coding / inspection
+# sessions). The entrypoint relocates the held-out testset to a root-owned
+# mode-600 file, so agent processes -- which the engine spawns with
+# `user=ce-agent` when CODEEVOLVER_AGENT_USER is set -- cannot read it via ANY
+# tool (bash included); the optimizer driver and evaluator stay root. The env
+# var below is the single activation switch: unset (every non-Docker deploy)
+# means no user switching at all. Requires CAP_SETUID/CAP_SETGID at run time
+# (the orchestrator matrices add them back after --cap-drop=ALL).
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin ce-agent
+
+# HOME is the bind mount, so paths.py resolves ~/.codeevolver/{traces,memory,
+# history,logs}/{job_id} straight into the host artifact directory -- results
+# stream out live and survive a container crash.
+# CE_RESEARCH_MODE: this container IS the research path -- one run per
+# container, fresh from an immutable image, holdout sequestered, egress fenced.
+# Declaring it here means entrypoint.py can arm the research controls
+# (clean-slate inspector, run-integrity, meta-reflection) by default instead of
+# every researcher having to remember `export CE_SET=...`. Override per-run with
+# `-e CE_RESEARCH_MODE=false`; nothing outside this image sets it, so the SaaS
+# path is untouched.
+ENV HOME=/artifacts \
+    CE_APP_ROOT=/opt/codeevolver \
+    CE_ARTIFACTS=/artifacts \
+    CE_WORKSPACE=/workspace \
+    CE_RESEARCH_MODE=true \
+    CODEEVOLVER_AGENT_USER=ce-agent \
+    PYTHONPATH=/opt/codeevolver
+
+RUN mkdir -p /artifacts /workspace /opt/seed /opt/venvs
+WORKDIR /opt/codeevolver
+ENTRYPOINT ["python", "/opt/codeevolver/runner/entrypoint.py"]

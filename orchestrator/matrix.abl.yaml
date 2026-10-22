@@ -1,0 +1,115 @@
+# Copyright © 2026 440 Labs LLC
+# Weaker-coder ablation: pareto_evolution vs freeform with Qwen3-Coder in place
+# of GLM-5.2 as the coding/architect model, on hover and phantomwiki, seeds 1-3.
+# The GLM-5.2 cells of the same 2x2 come from matrix.main.yaml (freeform) and
+# matrix.evo.yaml (pareto_evolution).
+#
+#   * Two hosts, one benchmark each, both arms x 3 seeds = 6 concurrent runs
+#     per host: `assignment` values are lists of arms and `bench_concurrency: 6`
+#     lifts the controller's default one-run-per-benchmark queue.
+#   * The model comes from `launch.set` below (recorded in each run's
+#     settings.json `models`); `run_suffix` names it.
+#   * `image_tag: evo-redo`: the same image as matrix.evo.yaml, pinned by
+#     images.evo-redo.lock.json. Full input.py budgets (hover 9000,
+#     phantomwiki 4500) and the same task seeds, so runs pair with the GLM cells.
+#
+#   CE_MATRIX=$PWD/orchestrator/matrix.abl.yaml ./orchestrator/launch.sh
+#
+# The container registry comes from $REGISTRY (shared with build.py and
+# provision.sh), e.g. REGISTRY=registry.digitalocean.com/<your-registry>.
+
+image_tag: evo-redo
+
+fleet:
+  tag: ce-abl
+  region: sfo2
+  size: m-8vcpu-64gb
+  image: docker-20-04          # DO marketplace "Docker on Ubuntu 22.04"
+  ssh_key: CE-JG               # name of the SSH key in your DigitalOcean account
+  project: ce-research         # DigitalOcean project the droplets are filed under
+  price_hourly: 0.50           # for `fleet.py status`; not enforced anywhere
+
+hosts: [ce-abl-h, ce-abl-p]
+
+arms: [pareto_evolution, freeform]
+seeds: [1, 2, 3]
+
+assignment:
+  ce-abl-h: [pareto_evolution, freeform]
+  ce-abl-p: [pareto_evolution, freeform]
+
+host_benchmarks:
+  ce-abl-h: [hover]
+  ce-abl-p: [phantomwiki]
+
+# Names the coder model (see `launch.set`). Must match -[a-z0-9]+.
+run_suffix: "-qwen3c"
+
+# Default CE_SET for every dispatch (orchestrator/launch.sh): the weaker coder
+# model, used as both the coding harness model and the reflection LM.
+launch:
+  set: "coding_harness_model=deepinfra/Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo;reflection_lm=deepinfra/Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo"
+
+# 2 arms x 3 seeds of one benchmark per host, all concurrent. RAM: 6 runs x
+# ~3-5 GB (phantomwiki eval clients peak ~4.3 GB) + 2 GB host = ~32 GB of 64;
+# no ragqa retriever on these hosts.
+slots_per_host: 6
+bench_concurrency: 6
+
+defaults:
+  poll_seconds: 900
+  rsync_seconds: 600
+  # Container caps. Non-streaming runs peak at ~2-3.5 GB, but ARC-AGI-2's
+  # lm_provider streams every task-LM call and its eval subprocess buffers ~50
+  # concurrent reasoning streams (~4.7 GB on a clean eval, ~5.7 GB under a
+  # provider-error burst), so the cap is 14g. Caps are limits, not
+  # reservations: the nominal sum (5 x 14 + 8 retriever = 78) exceeds the
+  # 64 GB host, but measured whole-host usage is ~30 GB.
+  docker_args:
+    - --security-opt=no-new-privileges
+    - --cap-drop=ALL
+    - --cap-add=SETUID
+    - --cap-add=SETGID
+    - --cap-add=FOWNER
+    - --cap-add=NET_ADMIN
+    - --tmpfs=/tmp:size=4g,exec
+    - --tmpfs=/var/lib/mongodb:size=2g
+    - --tmpfs=/run:size=64m
+    - --network=ce-host_ce-internal
+    - --dns=172.31.66.2
+    - --memory=14g
+
+env_passthrough:
+  - ANTHROPIC_API_KEY
+  - OPENAI_API_KEY
+  - DEEPINFRA_API_KEY
+  - GMI_API_KEY
+  # The arcagi2 and paperreview solvers read `GMI_CLOUD_API_KEY or GMI_API_KEY`,
+  # so either spelling satisfies them and only the pair being entirely absent
+  # warns.
+  - GMI_CLOUD_API_KEY
+  # DeepSeek's first-party API: a route of every benchmark's DeepSeek-V4-Flash
+  # provider chain. Warns on every dispatch when unset, like the other
+  # provider keys.
+  - DEEPSEEK_API_KEY
+  # Task-LM routing for the seed programs' provider chain (gmi -> deepseek ->
+  # deepinfra). LM_PROVIDER names the primary, LM_FALLBACK ("0" to disarm, or a
+  # provider name to pick the cover). Both are UNSET in the normal case -- the
+  # seed program's DEFAULT_PROVIDER (gmi) already is the intended routing -- so
+  # they are switches, not credentials, and do not warn when absent
+  # (controller.py::OPTIONAL_PASSTHROUGH). They exist so a provider can be
+  # repointed for one dispatch without rebuilding the seed bundle and image.
+  - LM_PROVIDER
+  - LM_FALLBACK
+  # Per-run overrides. CE_SET applies to every dispatch; for a value that must
+  # differ per benchmark (a quarter run: max_metric_calls is 9000 on hover but
+  # 25000 on ragqa) set CE_SET_<SLUG> -- dispatch() appends it to CE_SET for
+  # that benchmark's runs only:
+  #   CE_SET_HOVER=max_metric_calls=2250         # 9000 / 4
+  #   CE_SET_PHANTOMWIKI=max_metric_calls=1250   # 5000 / 4
+  #   CE_SET_RAGQA=max_metric_calls=6250         # 25000 / 4
+  #   CE_SET_ARCAGI2=max_metric_calls=1500       # 6000 / 4
+  #   CE_SET_PAPERREVIEW=max_metric_calls=2250   # 9000 / 4
+  - CE_SET
+  - CE_RESEARCH_MODE
+  - CE_MAX_METRIC_CALLS

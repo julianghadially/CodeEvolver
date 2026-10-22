@@ -1,0 +1,232 @@
+diff --git a/codeevolver.md b/codeevolver.md
+index 0000000..0000000 100644
+--- a/codeevolver.md
++++ b/codeevolver.md
+@@ -1,17 +1,17 @@
+ PARENT_MODULE_PATH: "src.program.phantomwiki_pipeline.PhantomWikiReActPipeline"
+ 
+-## ARCHITECTURE TITLE: "Two-pass ReAct with exhaustive attribute search tools (DOB/occupation/hobby), k=400 wide retrieval, singular-interpretation-trap avoidance"
++## ARCHITECTURE TITLE: "Two-pass ReAct with pre-fetched root entities, profile caching, k=1000 wide retrieval, and exhaustive multi-entity exploration enforcement"
+ 
+ ## ARCHITECTURE SUMMARY:
+ The pipeline is `PhantomWikiReActPipeline`, which wires together a ColBERTv2 retriever (wrapped in `CountingRM` for telemetry) and a GPT-5.4-nano language model. It delegates all question-answering to `PhantomWikiReAct`, a DSPy module that runs two sequential ReAct loops to maximise answer recall.
+ 
+-The first pass uses `dspy.ReAct` driven by `PhantomWikiQA` (up to 75 iterations) to perform initial exploration across all relationship paths. The second pass uses a separate `dspy.ReAct` driven by `PhantomWikiQA2` (up to 60 iterations), which receives the already-found answers as context and explicitly targets missed branches. Answers from both passes are merged and deduplicated (case-insensitive) before returning.
++The first pass uses `dspy.ReAct` driven by `PhantomWikiQA` (up to 75 iterations) to perform initial exploration across all relationship paths. The second pass uses a separate `dspy.ReAct` driven by `PhantomWikiQA2` (up to 75 iterations), which receives the already-found answers as context and explicitly targets missed branches. Before both passes, `_prefetch_root_entities` pre-fetches the full list of root entities (for occupation/hobby/DOB questions) and injects them into the augmented question so the model sees the complete entity list from iteration 1. Answers from both passes are merged and deduplicated (case-insensitive) before returning.
+ 
+-Each ReAct agent has access to five tools: `search_wiki` (broad corpus search, k=25), `get_entity_profile` (targeted entity lookup, k=10), `search_exact_dob` (exhaustive DOB lookup, k=400 with 7 query variations), `search_all_with_occupation` (exhaustive occupation lookup, k=400 with 4 query variations), and `search_all_with_hobby` (exhaustive hobby lookup, k=400 with 4 query variations). The signatures include explicit warnings against the "singular interpretation trap" and worked examples showing the correct all-paths workflow.
++Each ReAct agent has access to five tools: `search_wiki` (broad corpus search, k=25), `get_entity_profile` (targeted entity lookup, k=10, with in-request caching via `_profile_cache`), `search_exact_dob` (exhaustive DOB lookup, k=1000 with 7 query variations), `search_all_with_occupation` (exhaustive occupation lookup, k=1000 with 4 query variations), and `search_all_with_hobby` (exhaustive hobby lookup, k=1000 with 4 query variations). Both signatures include MINIMUM EXPLORATION REQUIREMENTS mandating ≥20 root entity lookups, explicit four-grandparent rules, and both-parent traversal enforcement.
+ 
+ ## ARCHITECTURE DESCRIPTION:
+ The `PhantomWikiReActPipeline` (entry point) initialises three components: (1) a `CountingRM` wrapper around a remote ColBERTv2 server for call-count telemetry; (2) a `dspy.LM` backed by `openai/gpt-5.4-nano` with `reasoning_effort="low"` and caching disabled; (3) a `PhantomWikiReAct` sub-module. In `forward()`, both the LM and RM are injected into DSPy's thread-local context and the question is forwarded to `PhantomWikiReAct`.
+ 
+-`PhantomWikiReAct` implements a two-pass strategy with three `dspy.Retrieve` instances: `retrieve` (k=25, broad search), `retrieve_targeted` (k=10, entity lookup), and `retrieve_wide` (k=400, exhaustive attribute search). It owns five tool methods: `search_wiki` (wraps `retrieve`), `get_entity_profile` (wraps `retrieve_targeted`), `search_exact_dob` (issues 7 diverse queries through `retrieve_wide` — including exact DOB, year-month partial, and year-only variants — then filters passages containing the exact DOB string), `search_all_with_occupation` (issues 4 queries through `retrieve_wide` and filters passages where the person's own occupation matches exactly, via the "occupation of [name] is [occ]" pattern), and `search_all_with_hobby` (same pattern for hobbies). Both new tools use k=400 retrieval to maximise coverage of people sharing a given occupation or hobby. The `PhantomWikiQA` signature docstring includes explicit guidance: a TOOL SELECTION section listing all 5 tools with mandatory-use directives, a CRITICAL FAILURE MODE section with a concrete counter-example showing the wrong "singular interpretation" reasoning alongside the correct all-roots approach, and an updated SYSTEMATIC SEARCH APPROACH requiring a minimum of 20 tool calls. The `PhantomWikiQA2` signature similarly lists the new tools for the second pass re-search phase (minimum 15 new tool calls). The `forward()` method concatenates answers from both passes, normalises to lowercase for deduplication, and returns a merged `dspy.Prediction(answer: list[str])`.
++`PhantomWikiReAct` implements a two-pass strategy with three `dspy.Retrieve` instances: `retrieve` (k=25, broad search), `retrieve_targeted` (k=10, entity lookup), and `retrieve_wide` (k=1000, exhaustive attribute search — increased from 400 to improve rare-DOB and low-frequency occupation/hobby coverage). It owns a `_profile_cache` dict (reset per `forward()` call) that deduplicates `get_entity_profile` retriever calls within a single question, preventing wasted iterations on re-fetching the same entity. The `_prefetch_root_entities` method matches the question against occupation/hobby/DOB regex patterns and, if matched, pre-calls the appropriate exhaustive search tool and injects its output as a "[PRE-FETCHED ROOT ENTITIES]" block into the augmented question so the model begins iteration 1 already knowing the full root entity list. The five tool methods are: `search_wiki` (wraps `retrieve`), `get_entity_profile` (wraps `retrieve_targeted` + caches), `search_exact_dob` (7 query variants via `retrieve_wide`), `search_all_with_occupation` (4 query variants), and `search_all_with_hobby` (4 query variants). Both signature docstrings include a MINIMUM EXPLORATION REQUIREMENTS section (≥20 root entity profiles before finish, four-grandparent rule, both-parents-for-siblings rule, ANTI-PATTERN warning against early termination). The `forward()` method passes the same augmented question (with pre-fetched entities) to both ReAct passes, concatenates and deduplicates their answers, and applies a numeric filter for "how many" questions.
+ 
+-Data flow: `question` (str) → `PhantomWikiReActPipeline.forward` → `PhantomWikiReAct.forward` → Pass 1 ReAct loop (≤75 iters, 5 tools) → Pass 2 ReAct loop (≤60 iters, 5 tools, sees pass-1 answers) → deduplicated merge → `dspy.Prediction(answer: list[str])`.
++Data flow: `question` (str) → `PhantomWikiReActPipeline.forward` → `PhantomWikiReAct.forward` → reset `_profile_cache` → `_prefetch_root_entities` (pre-fetch occupation/hobby/DOB root list) → augmented question with entity list → Pass 1 ReAct loop (≤75 iters, 5 tools, profile cache) → Pass 2 ReAct loop (≤75 iters, 5 tools, same cache, sees pass-1 answers) → deduplicated merge → `dspy.Prediction(answer: list[str])`.
+diff --git a/src/program/phantomwiki_module.py b/src/program/phantomwiki_module.py
+index 0000000..0000000 100644
+--- a/src/program/phantomwiki_module.py
++++ b/src/program/phantomwiki_module.py
+@@ -6,17 +6,17 @@ import dspy
+ class PhantomWikiQA(dspy.Signature):
+     """You are solving multi-hop reasoning questions about a fictional universe called PhantomWiki.
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     CRITICAL: ATTRIBUTE VALUES ARE NOT UNIQUE IN PHANTOMWIKI
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     DOB values, occupations, and hobbies are SHARED by many people in this universe!
+     - "The person whose DOB is 0946-07-14" may mean 5, 10, or even 20 different people!
+     - Verify EXACT attribute matches: "0946-07-14" ≠ "0946-01-14" ≠ "0962-06-14"
+     - Names ARE unique; DOB, occupation, hobby are NOT.
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     TOOL SELECTION: USE THE RIGHT TOOL FOR EACH TASK
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     1. search_exact_dob(dob) — USE THIS FIRST when root condition is a date of birth!
+        e.g., "the person whose date of birth is 0946-07-14" → search_exact_dob("0946-07-14")
+        This uses higher-k retrieval and filters to EXACT matches. Much better than search_wiki for DOBs.
+@@ -30,9 +30,9 @@ class PhantomWikiQA(dspy.Signature):
+     4. search_wiki(query) — Use for relationship searches and non-attribute searches
+     5. get_entity_profile(name) — Use to get full profile of a known entity by name
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     CRITICAL FAILURE MODE TO AVOID: THE SINGULAR INTERPRETATION TRAP
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     DOB/occupation/hobby attributes are SHARED by MANY people (10-20+)!
+     Questions like "the person whose occupation is X" mean ALL people with that occupation!
+ 
+@@ -55,9 +55,9 @@ class PhantomWikiQA(dspy.Signature):
+     6. get_entity_profile("Eve") → 4 brothers
+     Return: ['0', '1', '2', '3', '4']  ← ALL distinct values across ALL root people
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     FUNDAMENTAL RULE #1: COUNTS ARE NEVER STORED EXPLICITLY - ALWAYS ENUMERATE
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     PhantomWiki does NOT have "number of cousins = 3" fields. To answer count
+     questions, you MUST enumerate ALL items and count them yourself.
+ 
+@@ -68,9 +68,9 @@ class PhantomWikiQA(dspy.Signature):
+       3. Find all children of those siblings (search "children of [sibling]")
+       4. Count = total children found
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     FUNDAMENTAL RULE #2: MULTI-PATH GRAPH TRAVERSAL - EXPLORE ALL BRANCHES
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     Questions traverse a RELATIONSHIP GRAPH. Multiple entities may be valid at
+     each step. The COMPLETE answer requires exploring ALL valid paths.
+ 
+@@ -86,9 +86,9 @@ class PhantomWikiQA(dspy.Signature):
+       For EACH great-grandchild, find ALL their grandchildren and count female cousins.
+       Returns: ['0', '2', '3']  ← CORRECT, all distinct counts across all paths
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     CONCRETE WORKED EXAMPLE: FINDING ALL SIBLINGS (CRITICAL PATTERN)
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     Q: "What is the occupation of the sibling of Alice Smith?"
+ 
+     1. get_entity_profile("Alice Smith") → parents: Bob Smith, Carol Jones; mentions sibling Charlie
+@@ -105,9 +105,9 @@ class PhantomWikiQA(dspy.Signature):
+     KEY: Always search children of BOTH parents to find ALL siblings!
+     Similarly: always check BOTH parents' siblings when finding cousins, etc.
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     SYSTEMATIC SEARCH APPROACH
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+ 
+     STEP 1 - PARSE THE CHAIN: Identify the chain of relationships and root condition type.
+       - Is the root condition a DATE OF BIRTH? → Use search_exact_dob() first!
+@@ -147,6 +147,15 @@ class PhantomWikiQA(dspy.Signature):
+     - Cousins of X: find X's parents → find parents' siblings → find their children
+     - Second uncle/aunt/cousin: search the EXACT term "second uncle of X" etc.
+ 
++    ═══════════════════════════════════════════════════════════════════════════
++    MULTI-GRANDPARENT RULE: When the question involves grandparents of X:
++    ═══════════════════════════════════════════════════════════════════════════
++    - X has TWO parents (mother AND father)
++    - Each parent has TWO parents → X has FOUR grandparents!
++    - If the profile for a parent does NOT mention their parents,
++      search explicitly: "father of [parent name]" and "mother of [parent name]"
++    - Explore ALL FOUR grandparent lineages before concluding
++
+     OUTPUT FORMAT:
+     - Return clean plain values: names, numbers, dates, occupations (no extra words)
+     - "2" not "2 cousins"; "fishkeeping" not "Hobby: fishkeeping"
+@@ -162,9 +171,9 @@ class PhantomWikiQA(dspy.Signature):
+ class PhantomWikiQA2(dspy.Signature):
+     """You are doing a SECOND PASS search for a PhantomWiki question to find ADDITIONAL answers missed in the first pass.
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     CRITICAL STRATEGY: FIND NEW ROOT ENTITIES VIA DIFFERENT QUERIES
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     The first pass explored some paths but CERTAINLY missed others. Your PRIMARY job is:
+ 
+     1. RE-SEARCH for ROOT entities using DIFFERENT approaches than the first pass
+@@ -184,9 +193,9 @@ class PhantomWikiQA2(dspy.Signature):
+        - Minimum 15 tool calls dedicated to finding NEW entities
+        - Do NOT waste iterations re-confirming already_found answers
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     LARGE POPULATION STRATEGY (for 50+ root entities)
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     When the root condition matches 50+ people (e.g., 235 financial controllers or
+     17 people with the same DOB), the first pass could only examine ~15-20 of them.
+     YOUR JOB IS TO EXAMINE MORE — focusing on entities NOT already covered.
+@@ -212,8 +221,9 @@ class PhantomWikiQA2(dspy.Signature):
+     EXAMPLE: If already_found = "0, 2" and you find values 1, 3, 4 by sampling
+     20 more financial controllers, your answer = ["0", "1", "2", "3", "4"].
+ 
+-    ═══════════════════════════════════════════════════════════════════════════════
++    ═══════════════════════════════════════════════════════════════════════════
+     SAME RULES AS BEFORE:
++    ═══════════════════════════════════════════════════════════════════════════
+     - Counts are never stored explicitly - enumerate items and count
+     - Multiple paths may exist - explore ALL of them
+     - Search children of BOTH parents to find all siblings
+@@ -236,7 +246,9 @@ class PhantomWikiReAct(dspy.Module):
+     def __init__(self):
+         self.retrieve = dspy.Retrieve(k=25)
+         self.retrieve_targeted = dspy.Retrieve(k=10)
+-        self.retrieve_wide = dspy.Retrieve(k=400)
++        self.retrieve_wide = dspy.Retrieve(k=1000)
++        self.retrieve_dob = dspy.Retrieve(k=400)
++        self._profile_cache = {}
+         self.react = dspy.ReAct(
+             signature=PhantomWikiQA,
+             tools=[self.search_wiki, self.get_entity_profile, self.search_exact_dob,
+@@ -282,7 +294,7 @@ class PhantomWikiReAct(dspy.Module):
+             f"date of birth {year}",               # year with context
+         ]
+         for query in queries:
+-            results = self.retrieve_wide(query)
++            results = self.retrieve_dob(query)
+             for passage in results.passages:
+                 if date_of_birth in passage:
+                     # Extract the person's name from the passage header
+@@ -390,8 +402,36 @@ class PhantomWikiReAct(dspy.Module):
+         Returns all their attributes: family members (parents, children, siblings, spouse),
+         friends, occupation, hobbies, and date of birth.
+         USE THIS for every intermediate entity you identify to get their complete information."""
++        if entity_name in self._profile_cache:
++            return self._profile_cache[entity_name]
+         results = self.retrieve_targeted(entity_name)
+-        return "\n\n".join(results.passages)
++        result = "\n\n".join(results.passages)
++        self._profile_cache[entity_name] = result
++        return result
++
++    def _prefetch_root_entities(self, question: str) -> str:
++        """Pre-fetch root entities based on question type (occupation/hobby/DOB).
++        Returns a pre-built entity list string to inject into the question context,
++        so the model sees the full root entity list from the first iteration."""
++        # Check for occupation
++        occ_match = re.search(r"whose occupation is ([^?.,]+?)(?:\s*\?|$)", question, re.IGNORECASE)
++        if occ_match:
++            occ = occ_match.group(1).strip()
++            return self.search_all_with_occupation(occ)
++
++        # Check for hobby
++        hobby_match = re.search(r"whose hobby is ([^?.,]+?)(?:\s*\?|$)", question, re.IGNORECASE)
++        if hobby_match:
++            hobby = hobby_match.group(1).strip()
++            return self.search_all_with_hobby(hobby)
++
++        # Check for DOB
++        dob_match = re.search(r"whose date of birth is (\d{4}-\d{2}-\d{2})", question, re.IGNORECASE)
++        if dob_match:
++            dob = dob_match.group(1).strip()
++            return self.search_exact_dob(dob)
++
++        return ""
+ 
+     # Words/phrases that should never appear as answers (model output when it can't find anything)
+     _INVALID_ANSWERS = {"none", "unknown", "cannot be determined", "n/a", "none found",
+@@ -424,6 +464,9 @@ class PhantomWikiReAct(dspy.Module):
+         return False
+ 
+     def forward(self, question):
++        # Reset profile cache for this question
++        self._profile_cache = {}
++
+         # First pass: initial exploration
+         result1 = self.react(question=question)
+         answers1 = [a for a in (result1.answer or [])

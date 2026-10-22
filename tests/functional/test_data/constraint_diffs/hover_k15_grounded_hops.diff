@@ -1,0 +1,251 @@
+diff --git a/langProBe/hover/hover_program.py b/langProBe/hover/hover_program.py
+index 0000000..0000000 100644
+--- a/langProBe/hover/hover_program.py
++++ b/langProBe/hover/hover_program.py
+@@ -58,9 +58,33 @@ class CreateQueryHop2(dspy.Signature):
+     - Do NOT restate the whole claim or search for the claim text itself; pick
+       the specific missing entity.
+ 
++    Rules:
++    - Only consider an entity 'covered' if its article title appears verbatim in
++      retrieved_titles. A title that merely sounds similar does not count.
++    - The query MUST NOT duplicate any query in prior_queries (case-insensitive).
++    - Do NOT output 'no query needed' or refuse. Always output exactly ONE query.
++    - The query MUST BE the bare proper NAME of the missing entity verbatim
++      (e.g. "Billy Corgan", "Young Doctors in Love"), NOT a descriptive or
++      relational phrase (NOT "Constantinople Records founder", NOT "Leni
++      Riefenstahl documentary director"). ColBERT matches proper-name tokens,
++      not paraphrases.
++    - If the claim itself NAMES a specific work/title (a film, song, album, game,
++      book, sporting event) by its proper name and its article is NOT yet in
++      retrieved_titles, query that title VERBATIM first — it is a likely
++      supporting document that ColBERT often fails to surface from the raw claim.
++    - If a retrieved passage introduces a person via a relational phrase
++      ("produced by X", "directed by X", "fronted by X", "created by X",
++      "named after X"), that PERSON X's article is a likely next hop — query
++      X's bare name, not the role.
++    - When several entities are still missing, PREFER (in order): a claim-named
++      work/title that is still unretrieved, then a PERSON (cast/crew/director/
++      author/player), then a connector entity (place/organization/genre).
++
+     Output a single concise search query."""
+     claim: str = dspy.InputField()
+     summary_1: str = dspy.InputField(desc="Entity-focused summary of hop-1 passages")
++    retrieved_titles: list[str] = dspy.InputField(desc="Article titles already retrieved in earlier hops; an entity is only considered covered if its title appears here")
++    prior_queries: list[str] = dspy.InputField(desc="Queries already issued; the new query MUST NOT duplicate any of these (case-insensitive)")
+     query: str = dspy.OutputField(desc="A single targeted Wikipedia search query for one missing entity")
+ 
+ 
+@@ -78,13 +102,94 @@ class CreateQueryHop3(dspy.Signature):
+     - Pick a DIFFERENT entity than hop 2 if multiple are missing.
+     - Do NOT restate the whole claim; pick the specific missing entity.
+ 
++    Rules:
++    - Only consider an entity 'covered' if its article title appears verbatim in
++      retrieved_titles. A title that merely sounds similar does not count.
++    - The query MUST NOT duplicate any query in prior_queries (case-insensitive).
++    - Do NOT output 'no query needed' or refuse. Always output exactly ONE query.
++    - The query MUST BE the bare proper NAME of the missing entity verbatim
++      (e.g. "Billy Corgan", "Young Doctors in Love"), NOT a descriptive or
++      relational phrase (NOT "Constantinople Records founder", NOT "Leni
++      Riefenstahl documentary director"). ColBERT matches proper-name tokens,
++      not paraphrases.
++    - If the claim itself NAMES a specific work/title (a film, song, album, game,
++      book, sporting event) by its proper name and its article is NOT yet in
++      retrieved_titles, query that title VERBATIM first — it is a likely
++      supporting document that ColBERT often fails to surface from the raw claim.
++    - If a retrieved passage introduces a person via a relational phrase
++      ("produced by X", "directed by X", "fronted by X", "created by X",
++      "named after X"), that PERSON X's article is a likely next hop — query
++      X's bare name, not the role.
++    - When several entities are still missing, PREFER (in order): a claim-named
++      work/title that is still unretrieved, then a PERSON (cast/crew/director/
++      author/player), then a connector entity (place/organization/genre).
++
+     Output a single concise search query."""
+     claim: str = dspy.InputField()
+     summary_1: str = dspy.InputField(desc="Entity-focused summary of hop-1 passages")
+     summary_2: str = dspy.InputField(desc="Updated entity-focused summary after hop 2")
++    retrieved_titles: list[str] = dspy.InputField(desc="Article titles already retrieved in earlier hops; an entity is only considered covered if its title appears here")
++    prior_queries: list[str] = dspy.InputField(desc="Queries already issued; the new query MUST NOT duplicate any of these (case-insensitive)")
+     query: str = dspy.OutputField(desc="A single targeted Wikipedia search query for one missing entity")
+ 
+ 
++class CreateQueryHop4(dspy.Signature):
++    """You are guiding multi-hop Wikipedia retrieval to verify a claim.
++
++    Three hops of retrieval have been completed. Perform a gap analysis: identify
++    a named entity whose OWN Wikipedia article is STILL missing and needed to
++    verify or refute the claim, that has not been targeted by any previous query.
++
++    Rules:
++    - Only consider an entity 'covered' if its article title appears verbatim in
++      the retrieved_titles list. A title that merely sounds similar does not count.
++    - The query MUST NOT duplicate any query in prior_queries (case-insensitive).
++    - Do NOT output 'no query needed' or refuse. Always output exactly ONE concise query.
++    - The query MUST BE the bare proper NAME of the missing entity verbatim
++      (e.g. "Billy Corgan", "Young Doctors in Love"), NOT a descriptive or
++      relational phrase (NOT "Constantinople Records founder", NOT "documentary
++      director"). ColBERT matches proper-name tokens, not paraphrases.
++    - If the claim itself NAMES a specific work/title (film, song, album, game,
++      book, sporting event) by its proper name and its article is NOT yet in
++      retrieved_titles, query that title VERBATIM first — this is the highest-
++      priority gap because ColBERT often fails to surface such works from the
++      raw claim.
++    - If a retrieved passage introduces a person via a relational phrase
++      ("produced by X", "directed by X", "fronted by X", "created by X",
++      "named after X"), that PERSON X's article is a likely next hop — query
++      X's bare name, not the role.
++    - When several entities are missing, PREFER a PERSON (cast/crew/director/author/
++      player) over a connector entity (place/organization/genre), because the next
++      hop frequently follows a biographical neighbour.
++    - Append a single disambiguator (e.g. 'film', 'band', 'actor', 'company',
++      'place') only when the name is genuinely ambiguous.
++    - Pick a DIFFERENT entity than hops 2 and 3.
++
++    Output a single concise search query targeting one still-missing entity."""
++    claim: str = dspy.InputField()
++    summary_1: str = dspy.InputField(desc="Entity-focused summary of hop-1 passages")
++    summary_2: str = dspy.InputField(desc="Updated entity-focused summary after hop 2")
++    retrieved_titles: list[str] = dspy.InputField(desc="Article titles already retrieved across hops 1-3 (titles here are considered covered)")
++    prior_queries: list[str] = dspy.InputField(desc="Queries already issued for hops 1-3; the new query MUST NOT duplicate any of these")
++    query: str = dspy.OutputField(desc="A single targeted Wikipedia search query for one still-missing entity")
++
++
++class RerankDocs(dspy.Signature):
++    """You are reranking Wikipedia passages by relevance to a claim.
++
++    Score each passage 0-10 where 10 means the passage's own topic entity is
++    DIRECTLY named or implied by the claim and is needed to verify/refute it, and
++    0 means the passage is unrelated to the claim's entities. A passage whose
++    leading title names a person/organization/work/place from the claim's
++    relational chain scores high; surface-token matches without a topic-entity
++    match score low.
++
++    Return one score per passage in the same order."""
++    claim: str = dspy.InputField()
++    passages: list[str] = dspy.InputField()
++    scores: list[float] = dspy.OutputField(desc="Relevance score 0-10 for each passage, same length and order as passages")
++
++
+ class HoverMultiHop(LangProBeDSPyMetaProgram, dspy.Module):
+     '''Multi hop system for retrieving documents for a provided claim. 
+ 
+@@ -94,10 +199,12 @@ class HoverMultiHop(LangProBeDSPyMetaProgram, dspy.Module):
+ 
+     def __init__(self):
+         super().__init__()
+-        self.k = 10
++        self.k = 15
+         self.final_doc_limit = 21
+         self.create_query_hop2 = dspy.ChainOfThought(CreateQueryHop2)
+         self.create_query_hop3 = dspy.ChainOfThought(CreateQueryHop3)
++        self.create_query_hop4 = dspy.ChainOfThought(CreateQueryHop4)
++        self.reranker = dspy.ChainOfThought(RerankDocs)
+         self.retrieve_k = dspy.Retrieve(k=self.k)
+         self.summarize1 = dspy.ChainOfThought(SummarizeHop1)
+         self.summarize2 = dspy.ChainOfThought(SummarizeHop2)
+@@ -115,25 +222,94 @@ class HoverMultiHop(LangProBeDSPyMetaProgram, dspy.Module):
+                 unique.append(p)
+         return unique
+ 
++    @staticmethod
++    def _titles(passages):
++        """Return the leading title (part before ' | ') for each passage in order."""
++        return [p.split(" | ", 1)[0] for p in passages]
++
+     def forward(self, claim):
+         # HOP 1
+         hop1_docs = self.retrieve_k(claim).passages
+-        summary_1 = self.summarize1(
+-            claim=claim, passages=hop1_docs
+-        ).summary
++        summary_1 = self.summarize1(claim=claim, passages=hop1_docs).summary
++        prior_queries = [claim]
++        retrieved_titles = self._titles(hop1_docs)
+ 
+         # HOP 2
+-        hop2_query = self.create_query_hop2(claim=claim, summary_1=summary_1).query
++        hop2_query = self.create_query_hop2(
++            claim=claim,
++            summary_1=summary_1,
++            retrieved_titles=retrieved_titles,
++            prior_queries=prior_queries,
++        ).query
+         hop2_docs = self.retrieve_k(hop2_query).passages
+         summary_2 = self.summarize2(
+             claim=claim, context=summary_1, passages=hop2_docs
+         ).summary
++        prior_queries = prior_queries + [hop2_query]
++        retrieved_titles = retrieved_titles + self._titles(hop2_docs)
+ 
+         # HOP 3
+         hop3_query = self.create_query_hop3(
+-            claim=claim, summary_1=summary_1, summary_2=summary_2
++            claim=claim,
++            summary_1=summary_1,
++            summary_2=summary_2,
++            retrieved_titles=retrieved_titles,
++            prior_queries=prior_queries,
+         ).query
+         hop3_docs = self.retrieve_k(hop3_query).passages
++        prior_queries = prior_queries + [hop3_query]
++        retrieved_titles = retrieved_titles + self._titles(hop3_docs)
++
++        # HOP 4 (gap analysis; NO re-summarize into the shared chain)
++        hop4_query = self.create_query_hop4(
++            claim=claim,
++            summary_1=summary_1,
++            summary_2=summary_2,
++            retrieved_titles=retrieved_titles,
++            prior_queries=prior_queries,
++        ).query
++        hop4_docs = self.retrieve_k(hop4_query).passages
++
++        # Build candidate pool: union of all hops, deduped, first-seen order.
++        pool = self._dedup(hop1_docs + hop2_docs + hop3_docs + hop4_docs)
++
++        # SAFETY-NET guaranteed slots: top-1 passage of each hop, deduped by
++        # leading title, preserving hop-1..4 priority order.
++        guaranteed = []
++        guaranteed_titles = set()
++        for hop_docs in (hop1_docs, hop2_docs, hop3_docs, hop4_docs):
++            if not hop_docs:
++                continue
++            top = hop_docs[0]
++            title = top.split(" | ", 1)[0]
++            if title not in guaranteed_titles:
++                guaranteed_titles.add(title)
++                guaranteed.append(top)
++
++        # Rerank the pool; fall back to dedup-order truncation on any failure.
++        try:
++            scores = self.reranker(claim=claim, passages=pool).scores
++            if not isinstance(scores, list) or len(scores) != len(pool):
++                raise ValueError("reranker scores length mismatch")
++            scores = [float(s) for s in scores]
++        except Exception:
++            final = pool[: self.final_doc_limit]
++            return dspy.Prediction(retrieved_docs=final)
++
++        # Remaining = pool minus guaranteed passages (by leading-title identity),
++        # ordered by rerank score desc with FIFO (first-seen) tie-break.
++        guaranteed_title_set = set(
++            p.split(" | ", 1)[0] for p in guaranteed
++        )
++        remaining = []
++        for idx, passage in enumerate(pool):
++            title = passage.split(" | ", 1)[0]
++            if title in guaranteed_title_set:
++                continue
++            remaining.append((idx, passage, scores[idx]))
++        # Stable sort by score desc; FIFO tie-break via original pool index.
++        remaining.sort(key=lambda t: (-t[2], t[0]))
++        remaining_passages = [p for _, p, _ in remaining]
+ 
+-        all_docs = self._dedup(hop1_docs + hop2_docs + hop3_docs)[: self.final_doc_limit]
+-        return dspy.Prediction(retrieved_docs=all_docs)
+\ No newline at end of file
++        final = (guaranteed + remaining_passages)[: self.final_doc_limit]
++        return dspy.Prediction(retrieved_docs=final)
+\ No newline at end of file

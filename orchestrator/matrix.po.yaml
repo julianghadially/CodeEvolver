@@ -1,0 +1,132 @@
+# Copyright © 2026 440 Labs LLC
+# Prompt-only ablation: pareto_evolution and freeform with GLM-5.2 (the input.py
+# default, same as the main cells) where the agent may edit ONLY prompts -- the
+# DSPy Signature docstrings/field descriptions (and phantomwiki's tool
+# description) in one signatures file per benchmark. Pairs with the freeform
+# cells of matrix.main.yaml and the pareto_evolution cells of matrix.evo.yaml.
+#
+#   * Same image as matrix.evo.yaml (`image_tag: evo-redo`, pinned by
+#     images.evo-redo.lock.json). What differs is injected at dispatch
+#     (`launch.prompt_only`, see orchestrator/prompt_only/launch_hooks.sh):
+#       - seed: the `prompt-only` branch bundles (runner/bundles-po/, built by
+#         prompt_only/build_bundles.py), bind-mounted over /opt/seed/<bench>.bundle;
+#         rendered prompts are byte-identical to the main seed;
+#       - instructions: additional_instructions from
+#         prompt_only/{hover,phantomwiki}.md, enforced by the LM constraint gate;
+#       - kernel fence: prompt_only/po_fence.sh leaves only the signatures file
+#         and codeevolver.md writable to the ce-agent uid.
+#     Every run is then audited offline by scripts/prompt_only_audit.py.
+#   * Two hosts, one benchmark each, both arms x 3 seeds (6 concurrent per host),
+#     full input.py budgets (hover 9000, phantomwiki 4500), task seeds 1-3.
+#
+#   CE_MATRIX=$PWD/orchestrator/matrix.po.yaml ./orchestrator/launch.sh
+#
+# The container registry comes from $REGISTRY (shared with build.py and
+# provision.sh), e.g. REGISTRY=registry.digitalocean.com/<your-registry>.
+
+image_tag: evo-redo
+
+fleet:
+  tag: ce-po
+  region: sfo2
+  size: m-8vcpu-64gb
+  image: docker-20-04          # DO marketplace "Docker on Ubuntu 22.04"
+  ssh_key: CE-JG               # name of the SSH key in your DigitalOcean account
+  project: ce-research         # DigitalOcean project the droplets are filed under
+  price_hourly: 0.50           # for `fleet.py status`; not enforced anywhere
+
+hosts: [ce-po-h, ce-po-p]
+
+arms: [pareto_evolution, freeform]
+seeds: [1, 2, 3]
+
+assignment:
+  ce-po-h: [pareto_evolution, freeform]
+  ce-po-p: [pareto_evolution, freeform]
+
+host_benchmarks:
+  ce-po-h: [hover]
+  ce-po-p: [phantomwiki]
+
+# Every run id ends in -po (the prompt-only arm); po_fence_watch.sh keys on it.
+run_suffix: "-po"
+
+# orchestrator/launch.sh stages the prompt-only seeds, instructions and kernel
+# fence before dispatch (orchestrator/prompt_only/launch_hooks.sh).
+launch:
+  prompt_only: true
+
+# 2 arms x 3 seeds of one benchmark per host, all concurrent. RAM: 6 runs x
+# ~3-5 GB (phantomwiki eval clients peak ~4.3 GB) + 2 GB host = ~32 GB of 64;
+# no ragqa retriever on these hosts.
+slots_per_host: 6
+bench_concurrency: 6
+
+defaults:
+  poll_seconds: 900
+  rsync_seconds: 600
+  # Container caps. Non-streaming runs peak at ~2-3.5 GB, but ARC-AGI-2's
+  # lm_provider streams every task-LM call and its eval subprocess buffers ~50
+  # concurrent reasoning streams (~4.7 GB on a clean eval, ~5.7 GB under a
+  # provider-error burst), so the cap is 14g. Caps are limits, not
+  # reservations: the nominal sum (5 x 14 + 8 retriever = 78) exceeds the
+  # 64 GB host, but measured whole-host usage is ~30 GB.
+  docker_args:
+    - --security-opt=no-new-privileges
+    - --cap-drop=ALL
+    - --cap-add=SETUID
+    - --cap-add=SETGID
+    - --cap-add=FOWNER
+    - --cap-add=NET_ADMIN
+    - --tmpfs=/tmp:size=4g,exec
+    - --tmpfs=/var/lib/mongodb:size=2g
+    - --tmpfs=/run:size=64m
+    - --network=ce-host_ce-internal
+    - --dns=172.31.66.2
+    - --memory=14g
+    # --- prompt-only ablation (orchestrator/prompt_only/) ---
+    # Seed = the client repos' `prompt-only` branch, bind-mounted over the
+    # image's main seed bundle (clone_workspace clones it at runtime), so the
+    # evo-redo image runs unchanged. orchestrator/launch.sh copies these to the host.
+    - --volume=/opt/ce/po/seed/hover.bundle:/opt/seed/hover.bundle:ro
+    - --volume=/opt/ce/po/seed/phantomwiki.bundle:/opt/seed/phantomwiki.bundle:ro
+    # The kernel write fence, started in every container by po_fence_watch.sh.
+    - --volume=/opt/ce/po/po_fence.sh:/opt/po/po_fence.sh:ro
+    # No bytecode: a root-created __pycache__ is 0777 under the runner's
+    # umask 0, which would let the agent plant a .pyc the root evaluator imports.
+    - --env=PYTHONDONTWRITEBYTECODE=1
+
+env_passthrough:
+  - ANTHROPIC_API_KEY
+  - OPENAI_API_KEY
+  - DEEPINFRA_API_KEY
+  - GMI_API_KEY
+  # The arcagi2 and paperreview solvers read `GMI_CLOUD_API_KEY or GMI_API_KEY`,
+  # so either spelling satisfies them and only the pair being entirely absent
+  # warns.
+  - GMI_CLOUD_API_KEY
+  # DeepSeek's first-party API: a route of every benchmark's DeepSeek-V4-Flash
+  # provider chain. Warns on every dispatch when unset, like the other
+  # provider keys.
+  - DEEPSEEK_API_KEY
+  # Task-LM routing for the seed programs' provider chain (gmi -> deepseek ->
+  # deepinfra). LM_PROVIDER names the primary, LM_FALLBACK ("0" to disarm, or a
+  # provider name to pick the cover). Both are UNSET in the normal case -- the
+  # seed program's DEFAULT_PROVIDER (gmi) already is the intended routing -- so
+  # they are switches, not credentials, and do not warn when absent
+  # (controller.py::OPTIONAL_PASSTHROUGH). They exist so a provider can be
+  # repointed for one dispatch without rebuilding the seed bundle and image.
+  - LM_PROVIDER
+  - LM_FALLBACK
+  # Per-run overrides. CE_SET applies to every dispatch; for a value that must
+  # differ per benchmark (a quarter run: max_metric_calls is 9000 on hover but
+  # 25000 on ragqa) set CE_SET_<SLUG> -- dispatch() appends it to CE_SET for
+  # that benchmark's runs only:
+  #   CE_SET_HOVER=max_metric_calls=2250         # 9000 / 4
+  #   CE_SET_PHANTOMWIKI=max_metric_calls=1250   # 5000 / 4
+  #   CE_SET_RAGQA=max_metric_calls=6250         # 25000 / 4
+  #   CE_SET_ARCAGI2=max_metric_calls=1500       # 6000 / 4
+  #   CE_SET_PAPERREVIEW=max_metric_calls=2250   # 9000 / 4
+  - CE_SET
+  - CE_RESEARCH_MODE
+  - CE_MAX_METRIC_CALLS

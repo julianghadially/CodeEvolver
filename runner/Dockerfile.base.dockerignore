@@ -1,0 +1,17 @@
+# Copyright © 2026 440 Labs LLC
+# Build-speed only, NOT correctness: Dockerfile.base COPYs explicit paths, so
+# the image is right even under the legacy builder that ignores this file.
+# (BuildKit prefers <dockerfile>.dockerignore over the context-root one; the
+# root list excludes experiments/, which the runner needs.)
+env/
+venv/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.DS_Store
+secrets/
+runner/bundles/
+runner/assets/
+docs/
+.github/

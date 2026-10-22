@@ -1,0 +1,1 @@
+"""CodeEvolver API — FastAPI application."""

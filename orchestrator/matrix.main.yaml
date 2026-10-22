@@ -1,0 +1,112 @@
+# Copyright © 2026 440 Labs LLC
+# Main experiment: five arms x five benchmarks x seeds 1-3. One droplet per
+# arm; every host runs every benchmark of its arm, one run per benchmark at a
+# time, so the three seeds of a benchmark run back to back on that host. A
+# different seed is a different run_id, so a host never reuses a run directory.
+#
+#   CE_MATRIX=$PWD/orchestrator/matrix.main.yaml ./orchestrator/launch.sh
+#
+# How the reported runs were executed: seeds 1 and 2 ran on one fleet and seed
+# 3 on a second, concurrent fleet with identical settings; the ee x hover
+# seed-3 run was re-run once (run_suffix -redo) after its first attempt failed.
+# The pareto_evolution cells of this matrix were later re-run with corrected
+# candidate pruning (matrix.evo.yaml); those re-runs are the reported
+# pareto_evolution results. The `asa` arm is included as run but is not part of
+# the paper.
+#
+# Images: `image_tag: latest`, pinned by digest in images.lock.json.
+# The container registry comes from $REGISTRY (shared with build.py and
+# provision.sh), e.g. REGISTRY=registry.digitalocean.com/<your-registry>.
+
+image_tag: latest
+
+# The droplets. Memory-Optimized 8 vCPU / 64 GB is offered in nyc1/sfo2/sfo3
+# but NOT nyc2/nyc3 (fleet.py checks before creating). 64 GB is sized for the
+# ragqa retriever's ~8 GB resident index beside three ~5 GB runs; a host that
+# never runs ragqa is fine on 32 GB.
+fleet:
+  tag: ce-main
+  region: nyc1
+  size: m-8vcpu-64gb
+  image: docker-20-04          # DO marketplace "Docker on Ubuntu 22.04"
+  ssh_key: CE-JG               # name of the SSH key in your DigitalOcean account
+  project: ce-research         # DigitalOcean project the droplets are filed under
+  price_hourly: 0.50           # for `fleet.py status`; not enforced anywhere
+
+hosts: [ce-main-a, ce-main-b, ce-main-c, ce-main-d, ce-main-e]
+
+arms: [ee, freeform, pareto_evolution, simple_loop, asa]
+seeds: [1, 2, 3]
+
+assignment:
+  ce-main-a: ee
+  ce-main-b: freeform
+  ce-main-c: pareto_evolution
+  ce-main-d: simple_loop
+  ce-main-e: asa
+
+# >= the benchmark count, so every run in a seed is in flight from the start.
+# One run per benchmark per host is a scheduler invariant regardless of this
+# number (controller.py::cmd_run, busy_benches), so a larger value never
+# double-books a benchmark -- it only stops being the limit.
+# RAM at 5 concurrent: 4 runs x ~2-3.5 GB + arc at ~6 GB + 8 GB retriever
+# + 2 GB host = ~30 GB of 64. Cap math lives with docker_args below.
+slots_per_host: 6
+
+defaults:
+  poll_seconds: 900
+  rsync_seconds: 600
+  # Container caps. Non-streaming runs peak at ~2-3.5 GB, but ARC-AGI-2's
+  # lm_provider streams every task-LM call and its eval subprocess buffers ~50
+  # concurrent reasoning streams (~4.7 GB on a clean eval, ~5.7 GB under a
+  # provider-error burst), so the cap is 14g. Caps are limits, not
+  # reservations: the nominal sum (5 x 14 + 8 retriever = 78) exceeds the
+  # 64 GB host, but measured whole-host usage is ~30 GB.
+  docker_args:
+    - --security-opt=no-new-privileges
+    - --cap-drop=ALL
+    - --cap-add=SETUID
+    - --cap-add=SETGID
+    - --cap-add=FOWNER
+    - --cap-add=NET_ADMIN
+    - --tmpfs=/tmp:size=4g,exec
+    - --tmpfs=/var/lib/mongodb:size=2g
+    - --tmpfs=/run:size=64m
+    - --network=ce-host_ce-internal
+    - --dns=172.31.66.2
+    - --memory=14g
+
+env_passthrough:
+  - ANTHROPIC_API_KEY
+  - OPENAI_API_KEY
+  - DEEPINFRA_API_KEY
+  - GMI_API_KEY
+  # The arcagi2 and paperreview solvers read `GMI_CLOUD_API_KEY or GMI_API_KEY`,
+  # so either spelling satisfies them and only the pair being entirely absent
+  # warns.
+  - GMI_CLOUD_API_KEY
+  # DeepSeek's first-party API: a route of every benchmark's DeepSeek-V4-Flash
+  # provider chain. Warns on every dispatch when unset, like the other
+  # provider keys.
+  - DEEPSEEK_API_KEY
+  # Task-LM routing for the seed programs' provider chain (gmi -> deepseek ->
+  # deepinfra). LM_PROVIDER names the primary, LM_FALLBACK ("0" to disarm, or a
+  # provider name to pick the cover). Both are UNSET in the normal case -- the
+  # seed program's DEFAULT_PROVIDER (gmi) already is the intended routing -- so
+  # they are switches, not credentials, and do not warn when absent
+  # (controller.py::OPTIONAL_PASSTHROUGH). They exist so a provider can be
+  # repointed for one dispatch without rebuilding the seed bundle and image.
+  - LM_PROVIDER
+  - LM_FALLBACK
+  # Per-run overrides. CE_SET applies to every dispatch; for a value that must
+  # differ per benchmark (a quarter run: max_metric_calls is 9000 on hover but
+  # 25000 on ragqa) set CE_SET_<SLUG> -- dispatch() appends it to CE_SET for
+  # that benchmark's runs only:
+  #   CE_SET_HOVER=max_metric_calls=2250         # 9000 / 4
+  #   CE_SET_PHANTOMWIKI=max_metric_calls=1250   # 5000 / 4
+  #   CE_SET_RAGQA=max_metric_calls=6250         # 25000 / 4
+  #   CE_SET_ARCAGI2=max_metric_calls=1500       # 6000 / 4
+  #   CE_SET_PAPERREVIEW=max_metric_calls=2250   # 9000 / 4
+  - CE_SET
+  - CE_RESEARCH_MODE
+  - CE_MAX_METRIC_CALLS

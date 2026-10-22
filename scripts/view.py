@@ -53,24 +53,24 @@ def main():
         nargs="?",
         default=None,
         metavar="JOB_ID",
-        help="Job ID to look up (e.g. job_ce82f384e502). If omitted, show the most recent job.",
+        help="Job ID to look up (e.g. job_0123456789ab). If omitted, show the most recent job.",
     )
     args = parser.parse_args()
 
     # Check if MongoDB URL is configured
     if not settings.mongodb_url:
         print("Error: MongoDB URL not configured.")
-        print("Please set MONGO_KEY environment variable.")
+        print("Please set MONGO_HOST, MONGO_USER and MONGO_KEY (or LOCAL_MONGO_URI in local mode).")
         return
 
     # Get MongoDB database connection
     # Use the same database name as the FastAPI app
     db = get_mongo_db(db_name=settings.database_name, force_prod=False)
 
-    # Projection: include GEPA progress and candidate history (stored on the job)
+    # Projection: include optimization progress and candidate history (stored on the job)
     job_projection = {
         "job_id": 1,
-        "client_id": 1,
+        "repo_id": 1,
         "status": 1,
         "created_at": 1,
         "best_candidate": 1,
@@ -78,7 +78,7 @@ def main():
         "current_iteration": 1,
         "num_candidates": 1,
         "total_metric_calls": 1,
-        "gepa_state_history": 1,
+        "ce_state_history": 1,
         "program_candidates": 1,
         "candidate_scores": 1,
     }
@@ -99,12 +99,12 @@ def main():
 
     if job:
         job_id = job.get("job_id")
-        client_id = job.get("client_id")
+        repo_id = job.get("repo_id")
         status = job.get("status", "unknown")
         created_at = job.get("created_at", "unknown")
         print("=== Job record ===")
         print(f"Job ID: {job_id}")
-        print(f"Client ID: {client_id}")
+        print(f"Repo ID: {repo_id}")
         print(f"Status: {status}")
         print(f"Created at: {created_at}")
         best_candidate = job.get("best_candidate")
@@ -145,12 +145,12 @@ def main():
             print("\n=== Best candidate (JSON, copy-paste friendly) ===")
             print(json.dumps(bc, indent=2, ensure_ascii=False))
 
-        # GEPA candidates: stored on the job (gepa_state_history from progress callbacks)
-        history = job.get("gepa_state_history") or {}
+        # candidates: stored on the job (ce_state_history from progress callbacks)
+        history = job.get("ce_state_history") or {}
         if isinstance(history, dict) and history:
             # Keys may be "0", "1", ... (string for MongoDB)
             indices = sorted(history.keys(), key=lambda k: int(k) if str(k).isdigit() else -1)
-            print(f"\n=== GEPA candidates (from job, {len(indices)} found) ===")
+            print(f"\n=== candidates (from job, {len(indices)} found) ===")
             for idx_str in indices:
                 rec = history.get(idx_str) or {}
                 score = rec.get("score")
@@ -162,7 +162,7 @@ def main():
             # Completed job may have program_candidates at top level
             n = len(job["program_candidates"])
             scores = job.get("candidate_scores") or []
-            print(f"\n=== GEPA candidates (completed job, {n} candidates) ===")
+            print(f"\n=== candidates (completed job, {n} candidates) ===")
             for i in range(n):
                 cand = job["program_candidates"][i]
                 branch = ""
@@ -176,16 +176,16 @@ def main():
                 sc = scores[i] if i < len(scores) else None
                 print(f"  [{i}] score={sc} branch={branch!r}")
         else:
-            print("\n=== GEPA candidates ===")
+            print("\n=== candidates ===")
             print("No candidate history on this job. Progress is saved when the optimizer sends progress callbacks; if the job ran without callbacks (e.g. local run) or callbacks failed, no candidates will be stored here.")
 
-        # Program records: separate collection (may be empty; GEPA stores candidates on the job above)
-        if client_id:
+        # Program records: separate collection (may be empty; CodeEvolver stores candidates on the job above)
+        if repo_id:
             programs = list(
-                db.programs.find({"client_id": client_id}).limit(10)
+                db.programs.find({"repo_id": repo_id}).limit(10)
             )
             if programs:
-                print(f"\n=== Program record(s) for client_id={client_id} ({len(programs)} found) ===")
+                print(f"\n=== Program record(s) for repo_id={repo_id} ({len(programs)} found) ===")
                 for i, prog in enumerate(programs):
                     print(f"  [{i+1}] program_id={prog.get('program_id')} "
                           f"parent_program_id={prog.get('parent_program_id')} "
@@ -196,7 +196,7 @@ def main():
                     print(f"      program_json keys: {list(pj.keys()) if isinstance(pj, dict) else type(pj)}")
             else:
                 print("\n=== Program record(s) (programs collection) ===")
-                print("No program records for this client_id. In-progress GEPA candidates are stored on the job (see GEPA candidates above), not in the programs collection.")
+                print("No program records for this repo_id. In-progress candidates are stored on the job (see candidates above), not in the programs collection.")
                 try:
                     any_count = db.programs.count_documents({})
                     print(f"(programs collection has {any_count} total document(s).)")
@@ -204,7 +204,7 @@ def main():
                     print(f"(programs collection: {e})")
         else:
             print("\n=== Program record(s) ===")
-            print("Job has no client_id; cannot look up programs collection.")
+            print("Job has no repo_id; cannot look up programs collection.")
     else:
         print("No jobs found in database.")
         all_jobs = list(db.jobs.find({}, {"job_id": 1}).limit(10))

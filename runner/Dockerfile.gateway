@@ -1,0 +1,35 @@
+# Copyright © 2026 440 Labs LLC
+# The egress gateway image.
+#
+# This exists because `ubuntu/squid:latest` cannot run runner/squid.conf. Two
+# independent reasons, both fatal and both silent until the container starts:
+#
+#   1. That image's squid is built --with-gnutls. SslBump is an OpenSSL-only
+#      feature, so `https_port ... ssl-bump` is rejected outright:
+#        FATAL: Unknown https_port option 'ssl-bump'
+#      Ubuntu ships the OpenSSL build as a SEPARATE package, `squid-openssl`.
+#      Without it there is no way to read the TLS SNI of an intercepted
+#      connection, and SNI is the whole filter.
+#   2. It has no iptables, and compose's gateway command installs the
+#      PREROUTING REDIRECT rules that make interception happen at all.
+#
+# It also carries dnsmasq. A docker network marked `internal: true` gets no
+# external DNS forwarding at all -- container names resolve, everything else
+# returns NXDOMAIN -- so runners could not even look up an ALLOWED provider.
+# Forwarding through the gateway keeps every runner-originated packet, name
+# lookups included, on the one host that has a route out.
+#
+# Kept deliberately thin: squid, dnsmasq, iptables, a CA bundle. No entrypoint
+# -- the compose service supplies the command so the rules and the daemons stay
+# visible in one place.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        squid-openssl openssl ca-certificates iptables dnsmasq \
+    && rm -rf /var/lib/apt/lists/* \
+    && squid -v | grep -q -- --with-openssl \
+    && mkdir -p /var/log/squid /var/spool/squid \
+    && chown -R proxy:proxy /var/log/squid /var/spool/squid
+
+EXPOSE 3128 3129 3130

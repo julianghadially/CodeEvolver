@@ -1,0 +1,220 @@
+diff --git a/.claude/skills/tracing/assets/otel_reference.md b/.claude/skills/tracing/assets/otel_reference.md
+index 0000000..0000000 100644
+--- a/.claude/skills/tracing/assets/otel_reference.md
++++ b/.claude/skills/tracing/assets/otel_reference.md
+@@ -115,8 +115,8 @@ The `parent` / `child` suffix convention:
+ 
+ - `"parent"` — evaluation of the current candidate before changes
+ - `"child"` — evaluation after the architect's proposed changes
+-- `"seed"`  — initial seed full-valset eval
+-- `"final"` — finalization full-valset eval
++- `"valset"` — seed valset-subsample eval (iteration 0)
++- `"test"`  — finalization held-out test-set eval (seed + best candidate)
+ 
+ CodeEvolver also writes a compact per-row index file alongside each trace file (`/traces/iteration_{N}_{suffix}_index.jsonl`) that the architect embeds inline in its prompts. That's an engine-side artifact — clients don't generate it and don't need to know its shape. See `specs/engine2.md` if you're curious.
+ 
+@@ -207,6 +207,20 @@ because they carry duplicated inputs/outputs of the leaf `LM.__call__`.
+ LM calls, TOOL/RETRIEVER spans, and the user's own `dspy.Module.forward`
+ spans are retained.
+ 
++**Re-parenting across dropped wrappers.** Dropping a span would otherwise
++orphan its kept children, because OTel records only each span's *direct*
++parent id. To avoid that, the filter records every dropped span's
++`(id -> parent_id)` link into a per-row ancestry skip-map
++(`telemetry.collect_row_spans` yields `(spans, drop_links)`), and
++`converter.spans_to_trace_entries(..., drop_links=...)` walks that map to
++re-parent each kept span to its *nearest surviving ancestor*. So a kept
++`LM.__call__` whose `ChatAdapter`/`Predict` wrappers were dropped nests under
++the surviving `JudgeModule.forward` rather than appearing as a detached root.
++The skip-map holds ids only — the dropped spans' (duplicated) payloads are
++still discarded. The parent-input dedupe pass runs against this resolved
++ancestor too. The walk is cycle/depth-safe (malformed chains degrade to a
++detached root).
++
+ ## Span filters
+ 
+ `telemetry/filters/__init__.py` exposes `make_keep_predicate(drops)` which
+diff --git a/.gitignore b/.gitignore
+index 0000000..0000000 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -10,4 +10,5 @@ __pycache__/
+ .claude/
+ .codeevolver.lock
+ .codeevolver/
+-*/__pycache__/*
+\ No newline at end of file
++*/__pycache__/*
++.opencode/
+diff --git a/codeevolver.md b/codeevolver.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/codeevolver.md
+@@ -0,0 +1,26 @@
++PARENT_MODULE_PATH: src.program.phantomwiki_pipeline.PhantomWikiReActPipeline
++METRIC_MODULE_PATH: src.metric.metric.phantomwiki_f1_feedback
++
++## ARCHITECTURE TITLE: ReAct with exact-match DOB index (search_by_date_exact, k=10/50)
++
++## ARCHITECTURE SUMMARY:
++The system is a DSPy-based question-answering pipeline that uses a ReAct (Reasoning + Acting) agent to answer multi-hop questions over PhantomWiki — a benchmark corpus of entirely fictional characters and facts designed to resist data leakage. The pipeline is organized into three layers: a pipeline wrapper (`PhantomWikiReActPipeline`) that owns infrastructure, a core reasoning module (`PhantomWikiReAct`) that CodeEvolver optimizes, and a metric module (`phantomwiki_f1_feedback`) that scores predictions against gold answers with textual feedback for the GEPA optimizer.
++
++The `PhantomWikiReAct` module uses a structured `PhantomWikiQA(dspy.Signature)` class with a detailed docstring guiding exhaustive multi-answer search. It exposes three tools: `search_wiki` (k=10 ColBERT), `search_wiki_broad` (k=50 ColBERT), and `search_by_date_exact` — a new exact-match lookup that reads a pre-built JSON index (`date_passages.json`) mapping every YYYY-MM-DD date to ALL article texts for people born on that date. This index completely replaces semantic search for DOB-anchored questions, ensuring 100% recall across all people sharing a given date. The LM is `openai/gpt-5.4-nano` with `reasoning_effort="low"`.
++
++## ARCHITECTURE DESCRIPTION:
++**What the program does:** Given a natural language question about fictional PhantomWiki entities, the system iteratively searches a corpus and reasons over retrieved passages to produce a `list[str]` answer. Questions can require multi-hop, multi-branch reasoning (e.g., "list all siblings of X who are also friends of Y").
++
++**Key modules and responsibilities:**
++
++- `src/program/phantomwiki_pipeline.py` — `PhantomWikiReActPipeline` (the evaluator's entry point). Constructs the `CountingRM` retriever (wraps `dspy.ColBERTv2` pointed at `$COLBERT_URL_HOST/api/search`), the LM (`gpt-5.4-nano`, `reasoning_effort="low"`), and the `PhantomWikiReAct` module. Its `forward(question)` sets the LM and RM into DSPy's thread-local context and delegates to the module.
++
++- `src/program/phantomwiki_module.py` — `PhantomWikiReAct` (the file CodeEvolver mutates). Contains `PhantomWikiQA(dspy.Signature)`, a structured signature with a detailed docstring guiding exhaustive multi-answer search. `PhantomWikiReAct` wraps `dspy.ReAct` with three tools: `search_wiki` (k=10), `search_wiki_broad` (k=50), and `search_by_date_exact`. The new `search_by_date_exact(date_str)` tool loads a module-level singleton (`_date_index_cache`) from `output/depth_10_size_1000000/date_passages.json` — a 494MB pre-built index mapping every YYYY-MM-DD string to the full article texts of all people born on that date. This guarantees 100% recall for DOB-anchored questions, where ColBERT semantic search previously missed most co-birthday people. The index is loaded once and cached for the process lifetime.
++
++- `src/program/counting_rm.py` — `CountingRM`. A `dspy.Retrieve` subclass that wraps any retriever, increments a call counter on each retrieval, monkey-patches the ColBERTv2 HTTP client to enforce a 60-second timeout, and retries up to 2 times on timeout/connection errors. Used to track retrieval cost per question.
++
++- `src/metric/metric.py` — Two metrics: `phantomwiki_f1` (plain float F1 for the evaluation harness) and `phantomwiki_f1_feedback` (returns `dspy.teleprompt.gepa.ScoreWithFeedback` with score + human-readable breakdown of correct/missed/extra answers). Normalization is lowercase + strip; scoring is set-based precision/recall/F1 over answer lists.
++
++**Data flow:** `evaluate.py` loads JSON question splits from `output/depth_10_size_1000000/`, calls `PhantomWikiReActPipeline.forward(question)` per row, and scores the returned `dspy.Prediction.answer` against the gold `answer` field using `phantomwiki_f1`. CodeEvolver uses `phantomwiki_f1_feedback` during optimization for richer gradient signal.
++
++**Metric being optimized:** Token-level F1 between the predicted answer set and the gold answer set (both normalized to lowercase). A score of 1.0 requires exactly matching the complete set of correct answers — no more, no less.
+diff --git a/src/program/phantomwiki_module.py b/src/program/phantomwiki_module.py
+index 0000000..0000000 100644
+--- a/src/program/phantomwiki_module.py
++++ b/src/program/phantomwiki_module.py
+@@ -1,20 +1,131 @@
+ import dspy
++import json
++import os
++
++_date_index_cache = None
++
++def _load_date_index():
++    global _date_index_cache
++    if _date_index_cache is None:
++        index_path = os.path.normpath(
++            os.path.join(
++                os.path.dirname(os.path.abspath(__file__)),
++                '../../output/depth_10_size_1000000/date_passages.json'
++            )
++        )
++        if os.path.exists(index_path):
++            with open(index_path, 'r') as f:
++                _date_index_cache = json.load(f)
++        else:
++            _date_index_cache = {}
++    return _date_index_cache
++
++
++class PhantomWikiQA(dspy.Signature):
++    """You are a meticulous researcher answering questions from PhantomWiki, a fictional encyclopedia.
++
++    IMPORTANT: Questions frequently have MULTIPLE correct answers (sometimes 10 or more). Your mission is to find ALL of them — not just the first one you encounter.
++
++    HOW TO SEARCH:
++    1. Break down the question into its component parts: identify anchor entities, relationships, and target attributes
++    2. Search for each component separately with targeted queries
++    3. For ancestry/family questions: after tracing one branch, ALWAYS search for siblings and other family branches — every sibling of an ancestor is another potential answer path
++    4. Even when a question uses singular form ("the great-grandparent of X", "the cousin of Y"), there may be MULTIPLE entities at that hop — enumerate ALL of them before moving forward
++    5. For attribute-lookup questions ("What is X of the person whose Y is Z"): multiple people may share the same attribute value — after finding one match, keep searching for others
++    6. After every answer found, ask yourself: "Are there more?" and issue additional searches
++    7. If a search fails, try completely different angles: search by a related name, a different relationship, or a nearby attribute
++
++    HOW MANY QUESTIONS — CRITICAL FORMAT RULE:
++    - "How many X does Y have?" → The answer MUST be a NUMBER (count), NOT a list of entity names.
++    - WRONG: answer=['Alice Smith', 'Bob Jones']   RIGHT: answer=['2']
++    - NEVER return entity names as the answer to a "how many" question — always return the integer count as a string.
++    - After finding entities, COUNT them and return that integer as your answer.
++    - If the chain in the question resolves to MULTIPLE distinct entities (e.g., multiple great-grandparents, multiple people with the same DOB), count X separately for EACH entity and return ALL distinct count values as separate string answers.
++
++    MULTI-ENTITY ENUMERATION — Do NOT stop at the first qualifying entity:
++    When the question's subject chain contains an indirect anchor (e.g., "the great-grandparent of Z", "the person whose DOB is D", "the person whose hobby is H"), MULTIPLE people may qualify. Stopping after finding the first qualifying entity is the most common mistake. You MUST search for ALL qualifying entities before computing any count:
++    - Ancestor anchors (great-grandparent, grandparent, great-uncle): search BOTH the maternal AND paternal branches of Z — issue separate targeted searches for each grandparent pair (e.g., "grandparents of Z's mother" and "grandparents of Z's father")
++    - Date-of-birth anchor: use search_by_date_exact(date_str) — this returns ALL people with that exact DOB from a pre-built exact-match index (no additional searches needed; just read ALL returned articles)
++    - Hobby/occupation anchor: after finding person #1 with that attribute, issue 2+ more searches with varied queries to find MORE people sharing the same hobby/occupation
++    - Friend/sibling anchor: enumerate ALL friends or siblings listed in the entity's passage before proceeding to count
++    Only AFTER exhausting searches for all qualifying entities should you count X for each one and return ALL distinct count values as a list.
++
++    IMPLICIT RELATIONSHIPS — NEVER SEARCH DIRECTLY, ALWAYS DERIVE VIA TRAVERSAL:
++    Relationships like "cousin," "nephew," "niece," "great-uncle" are NOT stored as keywords in the wiki. You MUST derive them step by step:
++    - "cousin of X" → find X's parents → find those parents' siblings → find those siblings' children (= X's cousins)
++    - "nephew of X" → find X's siblings → find siblings' sons
++    - "niece of X" → find X's siblings → find siblings' daughters
++    - "great-uncle of X" → find X's grandparents → find those grandparents' siblings
++    NEVER query "cousin of Alice" or "nephew of Bob" directly — the wiki does not contain those phrases.
++
++    NON-STANDARD KINSHIP TERMS — derive step by step:
++    - "great-uncle" or "great-aunt" = grandparent's sibling (go up 2 generations, find siblings)
++    - "second uncle" or "second aunt" = great-grandparent's sibling (go up 3 generations, find siblings — ONE MORE generation up than great-uncle)
++    - "grand-nephew" or "grand-niece" = sibling's grandchild
++    - "first cousin once removed" = your first cousin's child, OR your parent's first cousin
++    - "second cousin" = parent's first cousin's child (grandparent's sibling's grandchild)
++
++    DATE-OF-BIRTH ANCHOR SEARCHES — use the exact-match index for complete recall:
++    - ALWAYS use search_by_date_exact("YYYY-MM-DD") for questions involving "the person whose date of birth is X"
++    - This tool uses a pre-built exact index and returns EVERY person in the wiki born on that date (sometimes 10-20 people!)
++    - Read ALL returned articles and extract the relevant attribute (occupation, hobby, etc.) for EACH person — they are all valid answers
++    - Tautological case: if the question asks "What is the DOB of the person whose DOB is X?", the answer is X directly — do NOT search, just return X
++
++    DO NOT:
++    - Stop after finding just one answer
++    - Assume a question has a unique answer
++    - Return entity names when the question asks "how many" — always return a numeric count as a string
++    - Query for implicit relationships like "cousin of X" directly — derive them via the step-by-step traversal above
++    - Give up with "unknown" or "cannot determine" after only a few searches — try at least 5 distinct approaches before concluding
++    """
++
++    question: str = dspy.InputField(
++        desc="A question about fictional PhantomWiki entities, possibly requiring multi-hop reasoning"
++    )
++    answer: list[str] = dspy.OutputField(
++        desc="A complete list of ALL correct answers found. Most questions have multiple answers. Search exhaustively before finishing. IMPORTANT: Return ONLY the exact answer values — do NOT include person names, attributions, or extra context alongside the answers. For example, if the question asks for occupations, return ['teacher', 'doctor'] NOT ['John Smith — teacher', 'Jane Doe — doctor']. For 'how many' questions, return the COUNT as a string (e.g., ['3']), NOT the entity names."
++    )
+ 
+ 
+ class PhantomWikiReAct(dspy.Module):
+     def __init__(self):
+-        self.retrieve = dspy.Retrieve(k=7)
++        self.retrieve = dspy.Retrieve(k=10)
++        self.retrieve_broad = dspy.Retrieve(k=50)
+         self.react = dspy.ReAct(
+-            signature="question -> answer: list[str]",
+-            tools=[self.search_wiki],
++            signature=PhantomWikiQA,
++            tools=[self.search_wiki, self.search_wiki_broad, self.search_by_date_exact],
+             max_iters=50,
+         )
+ 
+     def search_wiki(self, query: str) -> str:
+-        """Search the PhantomWiki corpus. Returns relevant passages."""
++        """Search the PhantomWiki corpus for entities, relationships, and attributes.
++        Use for targeted lookups: finding a specific person, their relationships, or their attributes.
++        Returns up to 10 relevant passages."""
+         results = self.retrieve(query)
+         return "\n\n".join(results.passages)
+ 
++    def search_wiki_broad(self, query: str) -> str:
++        """Search PhantomWiki broadly for exhaustive enumeration.
++        Use this when you need to find ALL instances matching a criterion — e.g., all people with a given occupation,
++        all people sharing a date of birth, or all entities with a specific attribute value.
++        Also useful for date-of-birth lookups where multiple people share the same date.
++        Returns up to 50 passages for wider coverage than search_wiki."""
++        results = self.retrieve_broad(query)
++        return "\n\n".join(results.passages)
++
++    def search_by_date_exact(self, date_str: str) -> str:
++        """Search PhantomWiki for ALL entities with exactly this date of birth.
++        Uses a pre-built exact-match index — guaranteed to return EVERY person in the wiki
++        born on this exact date. Far more complete than semantic search (which misses most matches).
++        date_str should be in format YYYY-MM-DD (e.g., '0946-07-14').
++        ALWAYS use this tool for questions involving 'the person whose date of birth is X'."""
++        index = _load_date_index()
++        passages = index.get(date_str, [])
++        if not passages:
++            return f"No entries found in exact index for date: {date_str}. Try search_wiki_broad with 'born {date_str.split('-')[0]}'."
++        header = f"EXACT MATCH: Found {len(passages)} people born on {date_str}:\n\n"
++        return header + "\n\n".join(passages)
++
+     def forward(self, question):
+         result = self.react(question=question)
+         return dspy.Prediction(answer=result.answer)

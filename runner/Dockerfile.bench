@@ -1,0 +1,161 @@
+# Copyright © 2026 440 Labs LLC
+# Benchmark layer: the squashed seed bundle plus a prebuilt client venv.
+#
+# Building the venv here rather than at run time is the difference between a
+# 5-second container start and a multi-GB torch/sentence-transformers install
+# per run (hover and ragqa pin sentence-transformers==2.2.2 and
+# sentencepiece==0.1.99, both of which build from source).
+ARG BASE_IMAGE=codeevolver-runner:base
+FROM ${BASE_IMAGE}
+
+ARG BENCH
+RUN test -n "$BENCH" || (echo "BENCH build-arg is required" && false)
+
+# The base image sets HOME=/artifacts (the run's bind mount). uv defaults its
+# MANAGED interpreters to $HOME/.local/share/uv, so a python baked there at
+# build time is SHADOWED by the mount at run time and every venv symlinked to
+# it dies with ENOENT. Pin the install dir to an image path that survives.
+#
+# ARG, not ENV, deliberately. Docker injects a build arg into every RUN below,
+# which is all the pin needs -- the venvs symlink their interpreter by ABSOLUTE
+# path, so nothing at run time has to look one up again -- but it does NOT
+# follow the container into run time. An ENV here would repoint uv at a
+# root-owned 755 directory for EVERY benchmark, silently taking away the
+# sequestered agent's ability to `uv venv --python <x>` in its own workspace,
+# which resolves under /artifacts (entrypoint.py makes it world-writable). Making /opt/uv-python itself writable is NOT the alternative
+# -- alfworld's root-executed venv symlinks its 3.9 interpreter in here, so a
+# writable tree would hand ce-agent a root-code-execution path.
+ARG UV_PYTHON_INSTALL_DIR=/opt/uv-python
+
+# --- Benchmark-specific simulator runtimes ----------------------------------
+# AppWorld and ALFWorld drive their simulators from interpreters SEPARATE from
+# the client program's venv below, plus data trees of tens of thousands of
+# small files -- neither fits the one-venv/one-requirements.txt pattern nor the
+# flat-file `assets:` mechanism, so both are baked here at build time (the
+# recipe the qualified cloud/alfworld-docker pipeline proved out). These layers
+# come BEFORE the seed bundle on purpose: they depend only on the small staged
+# requirement file, so a client-repo commit does not invalidate an hour of
+# compiled toolchain and downloaded simulator data. The client runtime finds
+# them through the APPWORLD_*/ALFWORLD_* env vars declared at the bottom; for
+# every other benchmark these blocks are no-ops and the vars are inert.
+#
+# The runtimes are locked to root (chmod 700): the sequestered agent user
+# (ce-agent) gets EACCES on the simulator data trees, which carry per-task
+# ground truth (AppWorld answer/private data, ALFRED expert trajectories).
+# The simulator server processes are spawned by the root evaluator and read
+# them fine.
+COPY runtime-reqs/${BENCH}/ /opt/bench-runtime/reqs/
+# chmod 700 on the TOP directory is the whole fence: path traversal for
+# ce-agent dies right here, every descendant is unreachable regardless of its
+# own mode, and no multi-GB recursive-chmod layer gets copied up by overlayfs.
+RUN chmod 700 /opt/bench-runtime
+# The ALFWorld interpreter shim rides in via the per-benchmark runtime-reqs
+# staging dir (build.py stages it for alfworld only), so the other benchmark
+# images never carry it. Installed from inside the fence by root; CRLF
+# stripped because the staging happens on a Windows checkout.
+RUN if [ "$BENCH" = "alfworld" ]; then \
+      sed 's/\r$//' /opt/bench-runtime/reqs/alfworld-python \
+        > /usr/local/bin/alfworld-python \
+      && chmod 755 /usr/local/bin/alfworld-python; \
+    fi
+
+# Each simulator step is its own layer so a fix to a later step (e.g. the THOR
+# prefetch) never re-runs an hour of compiles and downloads before it.
+RUN if [ "$BENCH" = "appworld" ]; then \
+      uv venv --python 3.11 /opt/bench-runtime/appworld-venv \
+      && uv pip install --python /opt/bench-runtime/appworld-venv/bin/python \
+           'appworld==0.1.3' 'click==8.1.7' \
+      && APPWORLD_ROOT=/opt/bench-runtime/appworld-root \
+           /opt/bench-runtime/appworld-venv/bin/appworld install \
+      && rm -rf /root/.cache; \
+    fi
+RUN if [ "$BENCH" = "appworld" ]; then \
+      APPWORLD_ROOT=/opt/bench-runtime/appworld-root \
+           /opt/bench-runtime/appworld-venv/bin/appworld download data \
+             --root /opt/bench-runtime/appworld-root \
+      && /opt/bench-runtime/appworld-venv/bin/appworld verify tasks \
+           --root /opt/bench-runtime/appworld-root \
+      && rm -rf /root/.cache; \
+    fi
+
+# The X11/GL stack Unity renders against, a python 3.9 venv for the legacy
+# textworld/alfworld chain (bookworm's apt has no 3.9 -- uv fetches a managed
+# interpreter), the ~2.2 GB game/detector data, and the AI2-THOR Unity binary
+# prefetched into a fixed HOME -- run containers sit behind the egress fence
+# and CANNOT download it on first controller start. Package pins and install
+# order copied from the qualified recipe: the 3.9 wheels for the blis/thinc
+# chain are incomplete, so compiled deps go in dependency order with build
+# isolation off; the alfworld pin itself (0.4.2 + PyYAML/Pillow) comes from
+# the seed repo's alfworld-runtime-requirements.txt, staged by build.py.
+RUN if [ "$BENCH" = "alfworld" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        xvfb xauth x11-utils mesa-utils ffmpeg flex bison libffi-dev \
+        libgl1 libglx-mesa0 libglib2.0-0 libsm6 libxext6 libxrender1 \
+        libnss3 libxss1 libxtst6 libgtk-3-0 libasound2 \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+RUN if [ "$BENCH" = "alfworld" ]; then \
+      uv venv --python 3.9 /opt/bench-runtime/alfworld-venv \
+      && uv pip install --python /opt/bench-runtime/alfworld-venv/bin/python \
+           'setuptools==80.9.0' 'wheel==0.47.0' 'Cython==3.2.8' \
+           'numpy==2.0.2' 'cymem==2.0.13' 'murmurhash==1.0.15' 'preshed==3.0.13' \
+      && for package in \
+           'blis==1.3.3' \
+           'thinc==8.3.9' \
+           'spacy==3.8.11' \
+           'textworld[pddl]==1.6.1' \
+           'visdom==0.2.4'; do \
+           uv pip install --python /opt/bench-runtime/alfworld-venv/bin/python \
+             --no-build-isolation "$package"; \
+         done \
+      && rm -rf /root/.cache; \
+    fi
+RUN if [ "$BENCH" = "alfworld" ]; then \
+      uv pip install --python /opt/bench-runtime/alfworld-venv/bin/python \
+           --no-build-isolation \
+           -r /opt/bench-runtime/reqs/alfworld-runtime-requirements.txt \
+      && uv pip check --python /opt/bench-runtime/alfworld-venv/bin/python \
+      && rm -rf /root/.cache; \
+    fi
+RUN if [ "$BENCH" = "alfworld" ]; then \
+      mkdir -p /opt/bench-runtime/alfworld-data \
+      && ALFWORLD_DATA=/opt/bench-runtime/alfworld-data \
+           /opt/bench-runtime/alfworld-venv/bin/alfworld-download \
+      && touch /opt/bench-runtime/alfworld-data/.complete; \
+    fi
+# ai2thor 2.1.0 (pinned via alfworld 0.4.2) has no download_only kwarg; the
+# supported prefetch is Controller().download_binary() -- the constructor is
+# inert in this version, Unity only launches on .start().
+RUN if [ "$BENCH" = "alfworld" ]; then \
+      mkdir -p /opt/bench-runtime/thor-home \
+      && HOME=/opt/bench-runtime/thor-home \
+           /opt/bench-runtime/alfworld-venv/bin/python -c \
+           "from ai2thor.controller import Controller; Controller().download_binary()" \
+      && test -d /opt/bench-runtime/thor-home/.ai2thor/releases; \
+    fi
+
+# One orphan commit, produced by `make bundles`. The original history -- which
+# still contains the committed holdout test sets -- is not in here.
+COPY bundles/${BENCH}.bundle /opt/seed/${BENCH}.bundle
+
+RUN git clone --branch seed /opt/seed/${BENCH}.bundle /tmp/seedrepo \
+    && uv venv --python 3.11 /opt/venvs/${BENCH} \
+    && uv pip install --python /opt/venvs/${BENCH}/bin/python \
+         -r /tmp/seedrepo/requirements.txt \
+    && uv pip install --python /opt/venvs/${BENCH}/bin/python \
+         opentelemetry-api opentelemetry-sdk \
+    && rm -rf /tmp/seedrepo /root/.cache
+
+# Large generated data files the client repo gitignores, so they cannot ride in
+# the bundle. Staged by `build.py::stage_assets`; the directory exists for every
+# benchmark and is empty for most. entrypoint.py places these into the workspace
+# after the seed clone. Placed after the venv layer: these are the biggest and
+# most-likely-to-change bytes in the image, and the venv install above must not
+# be invalidated by them.
+COPY assets/${BENCH}/ /opt/assets/${BENCH}/
+
+ENV CE_BENCH=${BENCH} \
+    APPWORLD_PYTHON=/opt/bench-runtime/appworld-venv/bin/python \
+    APPWORLD_ROOT=/opt/bench-runtime/appworld-root \
+    ALFWORLD_PYTHON=/usr/local/bin/alfworld-python \
+    ALFWORLD_DATA=/opt/bench-runtime/alfworld-data

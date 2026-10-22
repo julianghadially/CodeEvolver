@@ -1,0 +1,11 @@
+# Shell scripts and configs that execute on Linux (droplets, WSL controllers,
+# containers) must keep LF endings even when checked out on Windows -- a CRLF
+# shebang ("bash\r") fails before the script runs a single line.
+*.sh text eol=lf
+orchestrator/ce text eol=lf
+runner/alfworld-python text eol=lf
+runner/squid.conf text eol=lf
+runner/*.yml text eol=lf
+runner/Dockerfile.* text eol=lf
+orchestrator/xorg-headless.conf text eol=lf
+

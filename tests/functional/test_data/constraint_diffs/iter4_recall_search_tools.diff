@@ -1,0 +1,536 @@
+diff --git a/codeevolver.md b/codeevolver.md
+index 0000000..0000000 100644
+--- a/codeevolver.md
++++ b/codeevolver.md
+@@ -1,19 +1,21 @@
+ PARENT_MODULE_PATH: "src.program.phantomwiki_pipeline.PhantomWikiReActPipeline"
+ 
+-## ARCHITECTURE TITLE: "Two-pass ReAct with PhantomWikiQA + PhantomWikiQA2 signatures, k=20/7 retrieval"
++## ARCHITECTURE TITLE: "Per-entity mini-loops for multi-root questions with PhantomWikiEntityQA, retrieve_extra_wide (k=200), and two-pass fallback"
+ 
+ ## ARCHITECTURE SUMMARY:
+-The pipeline is `PhantomWikiReActPipeline`, which wires together a ColBERTv2 retriever (wrapped in `CountingRM` for telemetry) and a GPT-5.4-nano language model. It delegates all question-answering to `PhantomWikiReAct`, a DSPy module that runs two sequential ReAct loops to maximise answer recall.
++The pipeline is `PhantomWikiReActPipeline`, which wires together a ColBERTv2 retriever (wrapped in `CountingRM` for telemetry) and a GPT-5.4-nano language model. It delegates all question-answering to `PhantomWikiReAct`, a DSPy module with two execution paths depending on whether root entities can be pre-identified.
+ 
+-The first pass uses `dspy.ReAct` driven by `PhantomWikiQA` (up to 60 iterations) to perform initial exploration across all relationship paths. The second pass uses a separate `dspy.ReAct` driven by `PhantomWikiQA2` (up to 50 iterations), which receives the already-found answers as context and explicitly targets missed branches. Answers from both passes are merged and deduplicated (case-insensitive) before returning.
+-
+-Each ReAct agent has access to two tools: `search_wiki` (broad corpus search, k=20) and `get_entity_profile` (targeted entity lookup, k=7).
++Before any ReAct loop, `PhantomWikiReAct._pre_find_root_entities()` uses regex to detect attribute-based root conditions (DOB, hobby, occupation) and calls exhaustive search tools (`search_exact_dob` or `search_all_with_attribute`, both now using `retrieve_extra_wide` with k=200) to fetch all matching entities. If root entities are found, `_extract_entity_list` parses the pre-found list and `_process_per_entity` runs a focused `react_entity` mini-loop (using `PhantomWikiEntityQA`, max 35 iters) for EACH entity independently — substituting the entity name directly into the question via `_substitute_entity`. This per-entity strategy guarantees all root entities are processed, avoiding the DFS failure mode where one entity exhausts the iteration budget. If no root entities are pre-identified (name-based root or no attribute match), the system falls back to the classic two-pass approach: `react` (PhantomWikiQA, 90 iters) followed by `react2` (PhantomWikiQA2, 75 iters) with answer deduplication.
+ 
+ ## ARCHITECTURE DESCRIPTION:
+ The `PhantomWikiReActPipeline` (entry point) initialises three components: (1) a `CountingRM` wrapper around a remote ColBERTv2 server for call-count telemetry; (2) a `dspy.LM` backed by `openai/gpt-5.4-nano` with `reasoning_effort="low"` and caching disabled; (3) a `PhantomWikiReAct` sub-module. In `forward()`, both the LM and RM are injected into DSPy's thread-local context and the question is forwarded to `PhantomWikiReAct`.
+ 
+-`PhantomWikiReAct` implements a two-pass strategy. It owns two `dspy.Retrieve` instances (`k=20` for broad search, `k=7` for targeted entity lookup) and two `dspy.ReAct` agents. Pass 1 (`self.react`, max 60 iters): uses `PhantomWikiQA`, a rich signature that instructs the model to enumerate all entities, never use implicit counts, traverse all relationship branches in BFS order, and make at least 12 tool calls. Pass 2 (`self.react2`, max 50 iters): uses `PhantomWikiQA2`, which receives the question plus the already-found answers and is tasked with discovering complementary answers from unexplored intermediate entities and alternative query angles. The `forward()` method concatenates answers from both passes, normalises to lowercase for deduplication, and returns a merged `dspy.Prediction(answer: list[str])`.
++`PhantomWikiReAct` owns four `dspy.Retrieve` instances: `retrieve` (k=25, broad search), `retrieve_targeted` (k=10, entity lookup), `retrieve_wide` (k=100, legacy wide search), and `retrieve_extra_wide` (k=200, maximum coverage for root-entity discovery). It also owns three ReAct agents: `react` (PhantomWikiQA, 90 iters, all 4 tools), `react2` (PhantomWikiQA2, 75 iters, all 4 tools), and `react_entity` (PhantomWikiEntityQA, 35 iters, 3 tools: search_wiki, get_entity_profile, search_exact_dob).
++
++Execution path A (multi-root, attribute-based): `_pre_find_root_entities` detects DOB/hobby/occupation patterns → calls `search_exact_dob` or `search_all_with_attribute` (both using `retrieve_extra_wide`) → `_extract_entity_list` parses the `- Name` lines → `_process_per_entity` substitutes each entity name into a simplified question via `_substitute_entity` (regex-based replacement of "the person whose X is Y" → entity name) → runs `react_entity` per entity (capped at 15 entities) → combines and deduplicates answers. For "how many" questions, only numeric answers are returned.
++
++Execution path B (name-based or no match): `react` runs a full BFS-enforced ReAct pass on the raw question → `react2` runs a complementary second pass seeded with first-pass answers → results are merged and deduplicated. Both signatures enforce level-by-level BFS traversal and enumerate-then-count for numeric answers.
+ 
+-Both agents share the same two tools: `search_wiki` (calls `dspy.Retrieve(k=20)`, returns top-20 passages concatenated) and `get_entity_profile` (calls `dspy.Retrieve(k=7)` with an entity name, returns top-7 passages). The two-pass design addresses the core failure mode of the single-pass approach: premature termination that misses valid answer paths in questions with high graph branching factor.
++`search_all_with_attribute` now uses 5 query variants (attribute: value, attribute is value, attribute value, The attribute of, value) with `retrieve_extra_wide` (k=200). `search_exact_dob` similarly uses `retrieve_extra_wide` for all 4 DOB query variants. Both tools apply per-passage line-level matching to avoid false positives.
+ 
+-Data flow: `question` (str) → `PhantomWikiReActPipeline.forward` → `PhantomWikiReAct.forward` → Pass 1 ReAct loop (≤60 iters) → Pass 2 ReAct loop (≤50 iters, sees pass-1 answers) → deduplicated merge → `dspy.Prediction(answer: list[str])`.
++Data flow: `question` (str) → `PhantomWikiReActPipeline.forward` → `PhantomWikiReAct.forward` → `_pre_find_root_entities` → if entities found: `_process_per_entity` (N × react_entity loops) → merged `dspy.Prediction`; else: react pass 1 → react2 pass 2 → deduplicated `dspy.Prediction(answer: list[str])`.
+diff --git a/src/program/phantomwiki_module.py b/src/program/phantomwiki_module.py
+index 0000000..0000000 100644
+--- a/src/program/phantomwiki_module.py
++++ b/src/program/phantomwiki_module.py
+@@ -17,11 +17,43 @@ class PhantomWikiQA(dspy.Signature):
+     ═══════════════════════════════════════════════════════════════════════════════
+     TOOL SELECTION: USE THE RIGHT TOOL FOR EACH TASK
+     ═══════════════════════════════════════════════════════════════════════════════
+-    1. search_exact_dob(dob) — USE THIS FIRST when root condition is a date of birth!
++    1. search_all_with_attribute(attribute_type, value) — USE THIS for hobby/occupation root conditions!
++       e.g., "person whose hobby is stone collecting" → search_all_with_attribute("hobby", "stone collecting")
++       e.g., "person whose occupation is financial controller" → search_all_with_attribute("occupation", "financial controller")
++       This exhaustively finds ALL people with that attribute (not just the first one)!
++    2. search_exact_dob(dob) — USE THIS FIRST when root condition is a date of birth!
+        e.g., "the person whose date of birth is 0946-07-14" → search_exact_dob("0946-07-14")
+        This uses higher-k retrieval and filters to EXACT matches. Much better than search_wiki for DOBs.
+-    2. search_wiki(query) — Use for relationship searches and non-DOB attribute searches
+-    3. get_entity_profile(name) — Use to get full profile of a known entity by name
++    3. search_wiki(query) — Use for relationship searches and non-DOB/occupation/hobby attribute searches
++    4. get_entity_profile(name) — Use to get full profile of a known entity by name
++
++    ═══════════════════════════════════════════════════════════════════════════════
++    MANDATORY: LEVEL-BY-LEVEL BFS (NEVER FOLLOW A SINGLE PATH TO COMPLETION)
++    ═══════════════════════════════════════════════════════════════════════════════
++    YOU MUST FOLLOW THIS EXACT WORKFLOW:
++
++    PHASE 1 - FIND ALL ROOT ENTITIES (do this completely before any traversal):
++      → If root is DOB: call search_exact_dob(dob) → get a list of names
++      → If root is occupation/hobby: call search_all_with_attribute("occupation"/"hobby", value)
++      → If root is a name: call get_entity_profile(name)
++      → STORE all root entity names: "LEVEL 0: [Name1, Name2, Name3, ...]"
++      → There may be 5, 10, even 20 root entities!
++
++    PHASE 2 - TRAVERSE LEVEL BY LEVEL (complete EACH level before going deeper):
++      → For EVERY entity in your current level list, call get_entity_profile(name)
++      → Collect ALL next-hop entities into "LEVEL N: [...]"
++      → DO NOT skip any entity. DO NOT go deeper until the current level is complete.
++      → For siblings: get children of BOTH parents of EACH entity
++      → WRITE OUT: "Processing Level N: found [X, Y, Z] from entity [A]"
++      → After processing ALL entities at current level: "LEVEL N COMPLETE: [X, Y, Z, ...]"
++
++    PHASE 3 - EXTRACT ANSWERS (only after all levels are complete):
++      → For count questions: for each entity at final level, count the target attribute
++      → Return ALL DISTINCT counts (one per unique value across all paths)
++
++    CRITICAL: If you find yourself deeply analyzing ONE entity's complex genealogy while
++    others at the same level wait unprocessed — STOP! Go back and process the other entities
++    first. Return to the complex one after completing the whole level.
+ 
+     ═══════════════════════════════════════════════════════════════════════════════
+     FUNDAMENTAL RULE #1: COUNTS ARE NEVER STORED EXPLICITLY - ALWAYS ENUMERATE
+@@ -80,10 +112,11 @@ class PhantomWikiQA(dspy.Signature):
+     STEP 1 - PARSE THE CHAIN: Identify the chain of relationships and root condition type.
+       - Is the root condition a DATE OF BIRTH? → Use search_exact_dob() first!
+       - Is the root condition a NAME? → Use get_entity_profile() directly
+-      - Is the root condition an occupation/hobby? → Use search_wiki()
++      - Is the root condition an occupation/hobby? → Use search_all_with_attribute()!
+     STEP 2 - FIND ALL ROOT ENTITIES: Search for ALL entities matching the root condition.
+       - Use the EXACT relationship terms from the question (e.g., "second uncle", not just "uncle")
+       - For DOB: use search_exact_dob(dob) — it finds ALL people with that exact DOB!
++      - For occupation/hobby: use search_all_with_attribute() — finds ALL matching people!
+       - Verify EXACT attribute match in each returned passage before using!
+       - There may be MULTIPLE people matching - find ALL of them!
+     STEP 3 - BFS TRAVERSAL: For each found entity, get their full profile and find ALL next-hop entities.
+@@ -132,6 +165,8 @@ class PhantomWikiQA2(dspy.Signature):
+ 
+     1. RE-SEARCH for ROOT entities using DIFFERENT approaches than the first pass
+        - If root is a DOB, use search_exact_dob(dob) — very important for finding all people!
++       - If root is an occupation/hobby, use search_all_with_attribute("occupation"/"hobby", value)
++         to find ALL matching people that the first pass might have missed!
+        - Try different relationship traversal paths
+        - Look for entities mentioned in passages that weren't explicitly followed
+ 
+@@ -141,23 +176,69 @@ class PhantomWikiQA2(dspy.Signature):
+        - Follow every mentioned sibling, cousin, child, parent
+ 
+     3. EXHAUST every possible path before concluding
+-       - Minimum 12 tool calls dedicated to finding NEW entities
++       - Use at least 10 tool calls to find new entities
+        - Do NOT waste iterations re-confirming already_found answers
+ 
++    TOOL SELECTION:
++    1. search_all_with_attribute(attribute_type, value) — USE THIS for hobby/occupation root conditions!
++       e.g., search_all_with_attribute("hobby", "stone collecting") finds ALL stone collectors.
++       e.g., search_all_with_attribute("occupation", "financial controller") finds ALL people with that job.
++       This exhaustively finds ALL people with that attribute — use it to catch entities the first pass missed!
++    2. search_exact_dob(dob) — USE THIS for DOB-based root conditions to find ALL matching people
++    3. search_wiki(query) — Use for relationship searches
++    4. get_entity_profile(name) — Use to get full profile of a known entity
++
+     SAME RULES AS BEFORE:
+     - Counts are never stored explicitly - enumerate items and count
+     - Multiple paths may exist - explore ALL of them
+     - Search children of BOTH parents to find all siblings
+     - Verify EXACT attribute matches (DOBs, occupations must match exactly)
+     - Use search_exact_dob(dob) for DOB-based root conditions
++    - Use search_all_with_attribute() for occupation/hobby root conditions
++
++    ═══════════════════════════════════════════════════════════════════════════════
++    QUALITY CONTROL: HIGH CONFIDENCE ONLY
++    ═══════════════════════════════════════════════════════════════════════════════
++    ONLY add answers that you found EXPLICITLY in retrieved passages.
++    - Before adding any new answer, verify it appears in a passage you retrieved.
++    - Do NOT guess, infer, or speculate answers that aren't in the text.
++    - If you cannot directly cite a passage confirming the answer, do NOT include it.
++    - It is better to return fewer confirmed answers than many unverified ones.
+ 
+     FOCUS: Find root entities and relationship paths that the FIRST PASS MISSED.
+     DO NOT just verify already_found answers — that wastes iterations!
+     """
+     question: str = dspy.InputField()
+-    already_found: str = dspy.InputField(desc="Answers found in the first pass (for reference — find ADDITIONAL ones not in this list)")
++    already_found: str = dspy.InputField(desc="Answers found in the first pass (for reference — find ADDITIONAL confirmed ones not in this list)")
++    answer: list[str] = dspy.OutputField(
++        desc="ALL answers including already_found answers AND any new answers CONFIRMED by retrieved passages."
++    )
++
++
++class PhantomWikiEntityQA(dspy.Signature):
++    """Solve a PhantomWiki question about ONE specific named person.
++
++    The question names a specific person. Look them up and follow the relationship chain.
++
++    WORKFLOW:
++    1. ALWAYS start: get_entity_profile(name_from_question)
++    2. Follow each relationship in the chain step by step
++    3. For count questions: ENUMERATE all items, then count
++       - "how many granddaughters": get children → get each child's profile → count their daughters
++       - "how many nephews": find siblings → find each sibling's sons
++       - DO NOT just count what's visible in one profile — follow the chain!
++    4. For attribute questions: extract the value from the profile
++
++    EFFICIENCY: Use 6-15 tool calls. Do not repeat calls unnecessarily.
++
++    OUTPUT FORMAT:
++    - Return clean values: numbers, names, dates, occupations (no extra words)
++    - "2" not "2 cousins"; "fishkeeping" not "Hobby: fishkeeping"
++    - For count questions: return the count as a single number string
++    """
++    question: str = dspy.InputField()
+     answer: list[str] = dspy.OutputField(
+-        desc="ALL answers including both already_found answers AND any new answers discovered in this pass."
++        desc="Answer(s) as clean plain values. For count questions, just the number."
+     )
+ 
+ 
+@@ -166,22 +247,29 @@ class PhantomWikiReAct(dspy.Module):
+         self.retrieve = dspy.Retrieve(k=25)
+         self.retrieve_targeted = dspy.Retrieve(k=10)
+         self.retrieve_wide = dspy.Retrieve(k=100)
++        self.retrieve_extra_wide = dspy.Retrieve(k=300)
+         self.react = dspy.ReAct(
+             signature=PhantomWikiQA,
+-            tools=[self.search_wiki, self.get_entity_profile, self.search_exact_dob],
+-            max_iters=75,
++            tools=[self.search_all_with_attribute, self.search_wiki, self.get_entity_profile, self.search_exact_dob],
++            max_iters=90,
+         )
+         self.react2 = dspy.ReAct(
+             signature=PhantomWikiQA2,
++            tools=[self.search_all_with_attribute, self.search_wiki, self.get_entity_profile, self.search_exact_dob],
++            max_iters=75,
++        )
++        self.react_entity = dspy.ReAct(
++            signature=PhantomWikiEntityQA,
+             tools=[self.search_wiki, self.get_entity_profile, self.search_exact_dob],
+-            max_iters=60,
++            max_iters=35,
+         )
+ 
+     def search_wiki(self, query: str) -> str:
+         """Search the PhantomWiki corpus with a broad query. Returns up to 25 relevant passages.
+         Use for: relationship searches ('children of John', 'siblings of Alice'),
+         occupation searches ('occupation lawyer'), hobby searches, or general entity finding.
+-        NOTE: For date-of-birth root conditions, prefer search_exact_dob() instead."""
++        NOTE: For date-of-birth root conditions, prefer search_exact_dob() instead.
++        NOTE: For occupation/hobby root conditions, prefer search_all_with_attribute() instead."""
+         results = self.retrieve(query)
+         return "\n\n".join(results.passages)
+ 
+@@ -202,18 +290,28 @@ class PhantomWikiReAct(dspy.Module):
+             f"date of birth is {date_of_birth}",
+         ]
+         for query in queries:
+-            results = self.retrieve_wide(query)
++            results = self.retrieve_extra_wide(query)
+             for passage in results.passages:
+-                if date_of_birth in passage:
+-                    # Extract the person's name from the passage header
++                if date_of_birth not in passage:
++                    continue
++                # Try to extract name directly from the DOB sentence (most reliable)
++                # Format: "The date of birth of [Name] is YYYY-MM-DD."
++                dob_match = re.search(
++                    r'The date of birth of ([A-Z][^.]+?) is ' + re.escape(date_of_birth),
++                    passage
++                )
++                if dob_match:
++                    name = dob_match.group(1).strip()
++                else:
++                    # Fallback: extract name from passage header
+                     first_line = passage.strip().split('\n')[0]
+                     if ':' in first_line:
+                         name = first_line.split(':')[0].strip()
+                     else:
+                         name = first_line.strip().strip('#').strip()
+-                    if name and name not in seen_names:
+-                        seen_names.add(name)
+-                        all_matching.append(name)
++                if name and name not in seen_names:
++                    seen_names.add(name)
++                    all_matching.append(name)
+ 
+         if all_matching:
+             return (f"Found {len(all_matching)} people with exact DOB {date_of_birth}. "
+@@ -223,6 +321,67 @@ class PhantomWikiReAct(dspy.Module):
+                 f"Try search_wiki with partial date (e.g., '{date_of_birth[:7]}') and "
+                 f"manually verify which results have the exact DOB.")
+ 
++    def search_all_with_attribute(self, attribute_type: str, value: str) -> str:
++        """Search exhaustively for ALL people with a specific occupation or hobby.
++        ALWAYS USE THIS for hobby or occupation root conditions instead of search_wiki!
++
++        attribute_type: 'occupation' or 'hobby'
++        value: the exact attribute value (e.g., 'stone collecting', 'financial controller')
++
++        Example: search_all_with_attribute("hobby", "stone collecting") finds ALL stone collectors.
++        Returns a compact list of names to call get_entity_profile(name) on each."""
++        all_matching = []
++        seen_names = set()
++
++        # Try multiple query formats with wide k to maximize coverage
++        queries = [
++            f"{attribute_type}: {value}",
++            f"{attribute_type} is {value}",
++            f"The {attribute_type} of",
++            f"{attribute_type} {value}",
++            value,
++        ]
++        for query in queries:
++            results = self.retrieve_extra_wide(query)
++            for passage in results.passages:
++                passage_lower = passage.lower()
++                if value.lower() not in passage_lower:
++                    continue
++                # Check that the attribute appears in the same line as the value
++                matched = False
++                for line in passage.split('\n'):
++                    line_lower = line.lower()
++                    if value.lower() in line_lower and attribute_type.lower() in line_lower:
++                        matched = True
++                        break
++                if not matched:
++                    continue
++                # Try to extract name directly from the attribute sentence (most reliable)
++                # Format: "The occupation of [Name] is financial controller."
++                attr_match = re.search(
++                    r'The ' + re.escape(attribute_type) + r' of ([A-Z][^.]+?) is ' + re.escape(value),
++                    passage, re.IGNORECASE
++                )
++                if attr_match:
++                    name = attr_match.group(1).strip()
++                else:
++                    # Fallback: extract from passage header
++                    first_line = passage.strip().split('\n')[0]
++                    if ':' in first_line:
++                        name = first_line.split(':')[0].strip()
++                    else:
++                        name = first_line.strip().strip('#').strip()
++                if name and name not in seen_names:
++                    seen_names.add(name)
++                    all_matching.append(name)
++
++        if all_matching:
++            return (f"Found {len(all_matching)} people with {attribute_type} '{value}'. "
++                    f"Call get_entity_profile(name) for EACH one before proceeding:\n"
++                    + "\n".join(f"- {name}" for name in all_matching))
++        return (f"No exact matches found for {attribute_type}='{value}'. "
++                f"Try search_wiki('{value}') and look for '{value}' in passages manually.")
++
+     def get_entity_profile(self, entity_name: str) -> str:
+         """Look up the complete profile of a specific person by their exact name.
+         Returns all their attributes: family members (parents, children, siblings, spouse),
+@@ -244,6 +403,21 @@ class PhantomWikiReAct(dspy.Module):
+     # Maximum length for a valid answer (names/dates/occupations/hobbies are short)
+     _MAX_ANSWER_LENGTH = 80
+ 
++    def _clean_answer(self, a: str) -> str:
++        """Strip parenthetical annotations and trailing punctuation from an answer.
++
++        Examples:
++          "1034-03-02 (Gloria Valente's date of birth)" → "1034-03-02"
++          "Jada Paez (daughter of X)"                  → "Jada Paez"
++          "fishkeeping."                               → "fishkeeping"
++        """
++        s = a.strip()
++        # Remove trailing parenthetical explanation like " (some context)"
++        s = re.sub(r'\s*\([^)]+\)\s*$', '', s)
++        # Strip trailing period or colon
++        s = s.rstrip('.').rstrip(':').strip()
++        return s
++
+     def _is_invalid_answer(self, a: str) -> bool:
+         """Return True if this string is a failure message rather than a real answer."""
+         norm = a.strip().lower()
+@@ -256,16 +430,160 @@ class PhantomWikiReAct(dspy.Module):
+             return True
+         if any(norm.startswith(p) for p in self._INVALID_PREFIXES):
+             return True
++        # Reject "Name — attribute" or "Name – attribute" format (em/en dash separator)
++        # e.g. "Carmine Libby — waste management officer" is never a valid answer
++        if '—' in norm or '–' in norm:
++            return True
+         # Catch the literal "already_found" pass-through phrase
+         if "nothing found yet" in norm or "please search more" in norm:
+             return True
+         return False
+ 
++    def _pre_find_root_entities(self, question: str) -> str:
++        """Pre-identify all root entities from the question before the ReAct loop."""
++        q_lower = question.lower()
++
++        # Check for date of birth pattern like "0946-07-14"
++        dob_match = re.search(r'\b(\d{4}-\d{2}-\d{2})\b', question)
++        if dob_match and any(kw in q_lower for kw in ['date of birth', 'born on', 'dob', 'birthday']):
++            dob = dob_match.group(1)
++            try:
++                result = self.search_exact_dob(dob)
++                # Only augment if actual entities were found (not "no match" messages)
++                if result.startswith("Found"):
++                    return f"[ROOT ENTITIES PRE-FOUND for DOB={dob}]:\n{result}"
++            except Exception:
++                pass
++            return ""
++
++        # Check for hobby pattern: "whose hobby is X"
++        hobby_match = re.search(
++            r"whose hobby is ([a-z][\w\s\-]*?)(?:\s+have|\s+has|\s+is|\s+are|[?,]|$)",
++            q_lower
++        )
++        if hobby_match:
++            hobby = hobby_match.group(1).strip()
++            try:
++                result = self.search_all_with_attribute("hobby", hobby)
++                # Only augment if actual entities were found
++                if result.startswith("Found"):
++                    return f"[ROOT ENTITIES PRE-FOUND for hobby='{hobby}']:\n{result}"
++            except Exception:
++                pass
++            return ""
++
++        # Check for occupation pattern: "whose occupation is X"
++        occ_match = re.search(
++            r"whose occupation is ([a-z][\w\s\-]*?)(?:\s+have|\s+has|\s+is|\s+are|[?,]|$)",
++            q_lower
++        )
++        if occ_match:
++            occ = occ_match.group(1).strip()
++            try:
++                result = self.search_all_with_attribute("occupation", occ)
++                # Only augment if actual entities were found
++                if result.startswith("Found"):
++                    return f"[ROOT ENTITIES PRE-FOUND for occupation='{occ}']:\n{result}"
++            except Exception:
++                pass
++            return ""
++
++        return ""
++
++    def _extract_entity_list(self, root_context: str) -> list:
++        """Parse the pre-found entity list from root_context string."""
++        if not root_context or not root_context.startswith("[ROOT ENTITIES PRE-FOUND"):
++            return []
++        entities = []
++        for line in root_context.split('\n'):
++            line = line.strip()
++            if line.startswith('- '):
++                name = line[2:].strip()
++                if name:
++                    entities.append(name)
++        return entities
++
++    def _substitute_entity(self, question: str, entity_name: str) -> str:
++        """Replace 'the person whose [attribute] is [value]' with the entity name."""
++        q = question
++        # DOB pattern
++        q = re.sub(
++            r'the person whose date of birth is \d{4}-\d{2}-\d{2}',
++            entity_name, q, flags=re.IGNORECASE
++        )
++        # Occupation pattern — match up to punctuation or end of clause
++        q = re.sub(
++            r'the person whose occupation is [\w][\w\s\-]*?(?=\s+have\b|\s+has\b|\s+is\b|\s+are\b|\?|,|$)',
++            entity_name, q, flags=re.IGNORECASE
++        )
++        # Hobby pattern
++        q = re.sub(
++            r'the person whose hobby is [\w][\w\s\-]*?(?=\s+have\b|\s+has\b|\s+is\b|\s+are\b|\?|,|$)',
++            entity_name, q, flags=re.IGNORECASE
++        )
++        return q
++
++    def _process_per_entity(self, question: str, root_entities: list) -> dspy.Prediction:
++        """For each root entity, run a focused mini-loop and combine answers."""
++        all_answers = []
++        seen_normalized = set()
++
++        # Cap at 20 entities to control cost
++        entities_to_process = root_entities[:20]
++
++        q_lower = question.lower()
++        is_count_question = bool(re.search(r'\bhow many\b', q_lower))
++
++        for entity_name in entities_to_process:
++            simple_q = self._substitute_entity(question, entity_name)
++            try:
++                result = self.react_entity(question=simple_q)
++                answers = self._process_answers(result.answer or [])
++                for a in answers:
++                    norm = a.strip().lower()
++                    if norm and norm not in seen_normalized:
++                        seen_normalized.add(norm)
++                        all_answers.append(a)
++            except Exception:
++                pass
++
++        # For "how many" questions, keep only numeric answers
++        if is_count_question:
++            numeric = [a for a in all_answers if re.fullmatch(r'\d+', a.strip())]
++            if numeric:
++                return dspy.Prediction(answer=numeric)
++
++        return dspy.Prediction(answer=all_answers)
++
++    def _process_answers(self, raw_answers: list) -> list:
++        """Clean and filter a raw answer list: strip parentheticals, deduplicate, drop invalids."""
++        seen_normalized = set()
++        cleaned = []
++        for a in raw_answers:
++            a = self._clean_answer(a)
++            if self._is_invalid_answer(a):
++                continue
++            norm = a.strip().lower()
++            if norm and norm not in seen_normalized:
++                seen_normalized.add(norm)
++                cleaned.append(a)
++        return cleaned
++
+     def forward(self, question):
+-        # First pass: initial exploration
++        # Pre-identify all root entities from the question
++        root_context = self._pre_find_root_entities(question)
++        root_entities = self._extract_entity_list(root_context)
++
++        # If we found multiple root entities via attribute search (DOB/occupation/hobby),
++        # process each entity separately with a focused mini-loop.
++        # This is more reliable than hoping one big loop processes all of them.
++        if root_entities:
++            return self._process_per_entity(question, root_entities)
++
++        # No attribute-based root entities found: use the standard two-pass approach
++        # (handles name-based root questions and complex multi-hop chains)
+         result1 = self.react(question=question)
+-        answers1 = [a for a in (result1.answer or [])
+-                    if not self._is_invalid_answer(a)]
++        answers1 = self._process_answers(result1.answer or [])
+ 
+         # Second pass: find additional missed answers
+         if answers1:
+@@ -276,25 +594,22 @@ class PhantomWikiReAct(dspy.Module):
+             question=question,
+             already_found=already_found,
+         )
+-        answers2 = [a for a in (result2.answer or [])
+-                    if not self._is_invalid_answer(a)]
++        answers2 = self._process_answers(result2.answer or [])
+ 
+-        # Combine and deduplicate (preserve first-pass answers, add new ones from second pass)
+-        seen_normalized = set()
+-        combined = []
+-        for a in answers1 + answers2:
++        # Combine (answers1 already deduplicated; merge answers2 in)
++        seen_normalized = {a.strip().lower() for a in answers1}
++        combined = list(answers1)
++        for a in answers2:
+             norm = a.strip().lower()
+-            if norm and norm not in seen_normalized:
++            if norm not in seen_normalized:
+                 seen_normalized.add(norm)
+                 combined.append(a)
+ 
+-        # Post-processing: for "how many" questions, the answer must be numeric.
+-        # If the model included entity names (a common error), filter them out.
++        # For "how many" questions, keep only numeric answers
+         q_lower = question.lower()
+         if re.search(r'\bhow many\b', q_lower):
+             numeric_answers = [a for a in combined if re.fullmatch(r'\d+', a.strip())]
+             if numeric_answers:
+                 return dspy.Prediction(answer=numeric_answers)
+-            # If no numeric answers found, fall through and return what we have
+ 
+         return dspy.Prediction(answer=combined)

@@ -1,0 +1,765 @@
+diff --git a/langProBe/hover/hover_program.py b/langProBe/hover/hover_program.py
+index 0000000..0000000 100644
+--- a/langProBe/hover/hover_program.py
++++ b/langProBe/hover/hover_program.py
+@@ -127,8 +127,10 @@ class CreateQueryHop4(dspy.Signature):
+     Answer ONE question: which single entity, needed to verify or refute the
+     claim, has NOT yet had its own Wikipedia article retrieved and should be
+     searched now? Then output a search query for that entity.
+-    - Use `summary_2`, the list of `retrieved_titles` (titles already retrieved
+-      across hops 1-3), and `prior_queries` (queries already issued).
++    - Use `summary_1`, `summary_2`, the list of `retrieved_titles` (titles
++      already retrieved across hops 1-3), and `prior_queries` (queries already
++      issued). This hop stays INDEPENDENT: it reads the summaries of hops 1
++      and 2 only and does NOT depend on any later summary.
+     - An entity is "still missing" only if its title is NOT in
+       `retrieved_titles` and a query for it is NOT in `prior_queries`.
+     - Cast/crew-follow: when a film, TV, music video, album or other work
+@@ -146,12 +148,142 @@ class CreateQueryHop4(dspy.Signature):
+     Output a single concise search query (the bare entity name plus optional
+     disambiguator only)."""
+     claim: str = dspy.InputField()
++    summary_1: str = dspy.InputField(desc="Entity-focused summary of hop-1 passages")
+     summary_2: str = dspy.InputField(desc="Updated entity-focused summary after hop 2")
+     retrieved_titles: list[str] = dspy.InputField(desc="Wikipedia article titles already retrieved across hops 1-3")
+     prior_queries: list[str] = dspy.InputField(desc="Search queries already issued")
+     query: str = dspy.OutputField(desc="A single targeted Wikipedia search query for one still-missing entity")
+ 
+ 
++class EntityHop1Query(dspy.Signature):
++    """You are retrieving Wikipedia documents to verify a multi-hop claim.
++
++    Hop 1 retrieved Wikipedia passages for the raw claim. Many multi-hop claims
++    pivot on a single MAIN entity whose bare name is ambiguous and was not
++    disambiguated by the raw-claim retrieval. Emit ONE disambiguation search
++    query for the claim's MAIN entity, choosing the single best Wikipedia
++    archetype from this fixed family:
++    - "<entity> (musical)"          (a stage musical)
++    - "<entity> (TV series)"        (a television series)
++    - "<entity> (song)"
++    - "<entity> (film)"
++    - "<entity> (band)"              (a musical group / band)
++    - "<entity> (video game)"
++    - "<entity> (board game)"
++    - "<entity> (novel)"
++    - "<entity> <year/season> season"  (a sports season article)
++    - "<entity> (county)" / "<entity> (place)"  (a county or geographic place)
++    - "<entity>"                     (bare person — a biography article)
++
++    Use the claim and the list of `retrieved_titles` already fetched by hop 1 so
++    the query does NOT duplicate hop 1's siblings. The main entity is the subject
++    the claim is fundamentally about. Pick the archetype that best matches the
++    claim's domain. Keep the entity name verbatim; only vary the archetype suffix.
++
++    Escape clause: output "none" for the query when the main entity is clearly
++    unambiguous (its bare name already resolves to the right Wikipedia article,
++    or no archetype fits the claim).
++
++    Output a single concise disambiguation query (the entity name plus the
++    chosen archetype), or "none"."""
++    claim: str = dspy.InputField()
++    retrieved_titles: list[str] = dspy.InputField(desc="Wikipedia article titles already retrieved in hop 1")
++    query: str = dspy.OutputField(desc="A single disambiguation query for the claim's main entity, or 'none'")
++
++
++class HarvestEntityQueries(dspy.Signature):
++    """You are retrieving Wikipedia documents to verify a multi-hop claim.
++
++    Several hops of retrieval have been completed. The concatenated passage text
++    below names many entities. Emit up to 3 short, BARE entity-NAME search queries
++    for entities that are NAMED in the passage text but whose exact Wikipedia
++    article title is NOT yet in `retrieved_titles` and that could be part of the
++    multi-hop chain verifying the claim.
++
++    Rules:
++    - Each query is a bare entity name (optionally with a single disambiguator
++      such as "film", "band", "actor", "company", "place") — never restate the
++      whole claim.
++    - Do NOT include an entity whose title already appears in `retrieved_titles`.
++    - Prefer named people (cast/crew/director/producer/writer/actor) and named
++      works/organizations/places that a relational phrase in the passages points
++      to. Skip vague connectors (festivals, broadcasters, venues) unless the
++      claim links to them.
++    - Output between 0 and 3 queries. If every named entity is already covered,
++      output an empty list.
++
++    Output a JSON-style list of up to 3 short search queries."""
++    claim: str = dspy.InputField()
++    retrieved_titles: list[str] = dspy.InputField(desc="Wikipedia article titles already retrieved")
++    passages_text: str = dspy.InputField(desc="Concatenated text of passages retrieved so far (truncated)")
++    queries: list[str] = dspy.OutputField(desc="Up to 3 short bare-entity search queries for entities not yet retrieved")
++
++
++class BridgeDescriptorQuery(dspy.Signature):
++    """You are retrieving Wikipedia documents to verify a multi-hop claim.
++
++    The passages retrieved so far name many entities, but the claim may IMPLY an
++    entity by ROLE, title, location, or descriptor that NO retrieved passage
++    names explicitly. Emit ONE short SEARCH QUERY PHRASE for such an implied
++    entity, choosing from these SIX explicit archetype families:
++    1. Event-named phrase: an event implied by a noun phrase in the claim, e.g.
++       "<X> escape" / "<X> disaster" / "<X> riot" / "<X> accident".
++    2. Sports-season article: e.g. "2001-02 Detroit Red Wings season".
++    3. A song or other work adapted from a retrieved work (e.g. its parent work,
++       or a cover/adaptation).
++    4. A predecessor, parent, or subsidiary organization of a retrieved
++       organization.
++    5. A co-starring film: a film that two retrieved people both starred in.
++    6. A city or county implied by a place reference in the claim or passages.
++
++    Two hints (NOT from the training subsample, illustrative only):
++    - claim implies a 1986 NASA launch failure -> "Space Shuttle Challenger disaster"
++    - claim implies a 2001-02 NHL team season   -> "2001-02 Detroit Red Wings season"
++    - claim implies a Tom Hanks 1998 war film   -> "Saving Private Ryan"
++
++    Use the claim, the truncated `titles` list (retrieved titles), and the
++    truncated `passages_text`. The implied entity's article must NOT be among the
++    retrieved titles. Output a single short search query phrase, or "none" if no
++    implied entity is plausibly part of the chain.
++
++    Output ONE short search query phrase (not the whole claim), or "none"."""
++    claim: str = dspy.InputField()
++    retrieved_titles: list[str] = dspy.InputField(desc="All Wikipedia article titles already retrieved")
++    titles: list[str] = dspy.InputField(desc="Truncated list of retrieved titles for budget-readable scoring")
++    passages_text: str = dspy.InputField(desc="Concatenated passage text (truncated)")
++    query: str = dspy.OutputField(desc="A single short search query phrase for an implied entity, or 'none'")
++
++
++class ClaimEntityProbe(dspy.Signature):
++    """You are retrieving Wikipedia documents to verify a multi-hop claim.
++
++    All retrieval hops have already run, and many Wikipedia articles have been
++    retrieved. Some multi-hop chains wander off a claim-named entity because the
++    raw-claim hop-1 may distract on peripheral tokens and the downstream
++    query-gen LM can pivot to a topical cluster. Emit up to TWO short, BARE
++    entity-NAME search queries for proper-noun entities (persons, organizations,
++    places, works, events) that are NAMED DIRECTLY and LITERALLY in the claim,
++    whose own Wikipedia article title is NOT already in `retrieved_titles`, and
++    that are plausibly needed to verify the claim.
++
++    Rules:
++    - Each query is the bare entity name VERBATIM as it appears in the claim
++      (optionally with a single disambiguator such as "film", "band", "author",
++      "place" ONLY when the bare name is genuinely ambiguous). Never restate the
++      whole claim, never output common/connecting words.
++    - Do NOT include an entity whose title already appears in `retrieved_titles`.
++    - Do NOT include the subject of the claim if its article is already
++      retrieved.
++    - Output between 0 and 2 queries. If every claim-named entity's article is
++      already in `retrieved_titles`, output an empty list. Do NOT refuse, do NOT
++      answer "none"/"no query".
++
++    Output a JSON-style list of up to 2 short bare-entity search queries."""
++    claim: str = dspy.InputField()
++    retrieved_titles: list[str] = dspy.InputField(desc="All Wikipedia article titles already retrieved across all hops")
++    probe_queries: list[str] = dspy.OutputField(desc="Up to 2 short bare-entity search queries for claim-named entities not yet retrieved")
++
++
+ class RerankDocs(dspy.Signature):
+     """You are verifying a multi-hop Wikipedia claim. A pool of candidate
+     Wikipedia abstract passages has been retrieved across several search hops.
+@@ -180,6 +312,40 @@ class RerankDocs(dspy.Signature):
+     scores: list[int] = dspy.OutputField(desc="One relevance score 0-10 per passage, in input order")
+ 
+ 
++class RerankStage2(dspy.Signature):
++    """You are verifying a multi-hop Wikipedia claim. A shortlist of candidate
++    Wikipedia abstract passages survived a first relevance pass. Score EACH
++    passage 0-10 for how relevant its Wikipedia article is to verifying the
++    claim's multi-hop chain, using BOTH the passages and the FULL list of
++    surviving article titles for sharper pointwise judgment.
++
++    Score 9-10: this passage's Wikipedia article is one of the entities the
++    claim directly links to (the subject entity, or a person/organization/place
++    /work that a relational phrase in the claim or in retrieved passages points
++    to — e.g. "directed by X", "produced by Y", "starring Z", "founded by W",
++    "located in L"). Gold supporting articles are in this band.
++    Score 5-8: clearly on-topic and plausibly part of the chain.
++    Score 1-4: only loosely related (same broad field, a neighbor article, a
++    disambiguator); a surface-token hit, not the linked entity.
++    Score 0: off-topic distractor.
++
++    A film/album/show article itself is highly relevant when the claim concerns
++    that work; a cast/crew member's own biography article is highly relevant
++    when the claim links the subject to that person. A venue/festival/broadcaster
++    is a low-value connector unless the claim literally links to it. Prefer a
++    PERSON's biography article over a connector when the claim links to a person.
++
++    Use the `titles` list to disambiguate same-named articles and to avoid
++    rewarding a passage whose title is a near-duplicate of another survivor.
++
++    Output one integer score per passage, in the SAME order as the input
++    passages. Output exactly len(passages) scores."""
++    claim: str = dspy.InputField()
++    passages: list[str] = dspy.InputField(desc="Shortlisted candidate Wikipedia abstract passages to re-score")
++    titles: list[str] = dspy.InputField(desc="Full surviving article-title list, one per input passage, in the same order")
++    scores: list[int] = dspy.OutputField(desc="One refined relevance score 0-10 per passage, in input order")
++
++
+ class HoverMultiHop(LangProBeDSPyMetaProgram, dspy.Module):
+     '''Multi hop system for retrieving documents for a provided claim.
+ 
+@@ -189,17 +355,24 @@ class HoverMultiHop(LangProBeDSPyMetaProgram, dspy.Module):
+ 
+     def __init__(self):
+         super().__init__()
+-        self.k = 10
+-        self.k_hop4 = 10
++        self.k = 15
++        self.k_hop4 = 15
++        self.k_hop1b = 10
+         self.final_doc_limit = 21
+         self.create_query_hop2 = dspy.ChainOfThought(CreateQueryHop2)
+         self.create_query_hop3 = dspy.ChainOfThought(CreateQueryHop3)
+         self.create_query_hop4 = dspy.ChainOfThought(CreateQueryHop4)
++        self.entity_hop1 = dspy.ChainOfThought(EntityHop1Query)
++        self.harvest = dspy.ChainOfThought(HarvestEntityQueries)
++        self.bridge = dspy.ChainOfThought(BridgeDescriptorQuery)
++        self.claim_probe = dspy.ChainOfThought(ClaimEntityProbe)
+         self.retrieve_k = dspy.Retrieve(k=self.k)
+         self.retrieve_k_hop4 = dspy.Retrieve(k=self.k_hop4)
++        self.retrieve_k_hop1b = dspy.Retrieve(k=self.k_hop1b)
+         self.summarize1 = dspy.ChainOfThought(SummarizeHop1)
+         self.summarize2 = dspy.ChainOfThought(SummarizeHop2)
+-        self.rerank = dspy.Predict(RerankDocs)
++        self.rerank_stage1 = dspy.Predict(RerankDocs)
++        self.rerank_stage2 = dspy.Predict(RerankStage2)
+ 
+     @staticmethod
+     def _titles(passages):
+@@ -207,8 +380,6 @@ class HoverMultiHop(LangProBeDSPyMetaProgram, dspy.Module):
+ 
+     @staticmethod
+     def _dedup(passages):
+-        """Deduplicate passages by their leading title ('Title | ...'),
+-        preserving first-seen order."""
+         seen = set()
+         unique = []
+         for p in passages:
+@@ -219,41 +390,16 @@ class HoverMultiHop(LangProBeDSPyMetaProgram, dspy.Module):
+         return unique
+ 
+     @staticmethod
+-    def _rerank_pool(passages_groups, claim, rerank_fn, limit):
+-        """Build a title-deduped candidate pool from per-hop passage lists,
+-        score each passage with the LM reranker, and return the top-`limit`
+-        passages ordered by score (ties broken by earliest hop then earliest
+-        rank, preserving FIFO priority for primary-hop golds)."""
+-        seen_titles = set()
+-        candidates = []  # (passage, hop, rank)
+-        for hop, group in enumerate(passages_groups):
+-            for rank, p in enumerate(group):
+-                title = p.split(" | ", 1)[0]
+-                if title in seen_titles:
+-                    continue
+-                seen_titles.add(title)
+-                candidates.append((p, hop, rank))
+-        if not candidates:
+-            return []
+-        if len(candidates) <= limit:
+-            return [p for p, _, _ in candidates]
+-        passages = [c[0] for c in candidates]
+-        try:
+-            scores = rerank_fn(claim=claim, passages=passages).scores
+-        except Exception:
+-            scores = None
+-        if not scores or len(scores) != len(candidates):
+-            return passages[:limit]
+-        order = sorted(
+-            range(len(candidates)),
+-            key=lambda i: (-scores[i], candidates[i][1], candidates[i][2]),
+-        )
+-        return [candidates[i][0] for i in order[:limit]]
++    def _is_disambig(title):
++        t = (title or "").strip().lower()
++        return t == "disambiguation" or t.endswith("(disambiguation)")
+ 
+     @staticmethod
+     def _is_refusal(query):
+         if query is None:
+             return True
++        if not isinstance(query, str):
++            return True
+         q = query.strip().lower()
+         if q == "" or q in ("none", "no query", "no", "n/a", "no query needed"):
+             return True
+@@ -261,102 +407,379 @@ class HoverMultiHop(LangProBeDSPyMetaProgram, dspy.Module):
+             return True
+         return False
+ 
+-    def _fifo_then_interleave_dedup(self, primary_docs, late_docs_groups, limit):
+-        """Primary hops (1, 2) keep FIFO priority for full tail coverage; late
+-        hops (3, 4) round-robin into remaining tail slots so their gap-analysis
+-        golds survive the 21-doc cap."""
+-        primary = self._dedup(primary_docs)
+-        if len(primary) >= limit:
+-            return primary[:limit]
+-        seen = set(self._titles(primary))
+-        late_unique_groups = []
+-        for group in late_docs_groups:
+-            ug = []
+-            for p in group:
+-                t = p.split(" | ", 1)[0]
+-                if t not in seen and t not in {x.split(" | ", 1)[0] for x in ug}:
+-                    ug.append(p)
+-            late_unique_groups.append(ug)
+-        capacity = limit - len(primary)
+-        result = list(primary)
+-        # round-robin across late groups until cap reached
+-        filled = 0
+-        while filled < capacity:
+-            added_any = False
+-            for group in late_unique_groups:
+-                if group:
+-                    p = group.pop(0)
+-                    result.append(p)
+-                    seen.add(p.split(" | ", 1)[0])
+-                    filled += 1
+-                    added_any = True
+-                    if filled >= capacity:
+-                        break
+-            if not added_any:
++    def _ensemble_rerank(self, hop_groups, claim):
++        """Two-stage ensemble reranker with RRF + top-1 safety-net.
++
++        All mutable state is local. Returns up to final_doc_limit passages."""
++        limit = self.final_doc_limit
++
++        # Per-group first-appearance rank for each non-disambiguation title.
++        group_title_ranks = []
++        for group in hop_groups:
++            grp = {}
++            for rank, p in enumerate(group):
++                title = p.split(" | ", 1)[0]
++                if self._is_disambig(title) or title in grp:
++                    continue
++                grp[title] = rank
++            group_title_ranks.append(grp)
++
++        # First-appearance (hop, rank) and best passage per unique title.
++        first_hop = {}
++        first_rank = {}
++        title_passage = {}
++        for hop, group in enumerate(hop_groups):
++            for rank, p in enumerate(group):
++                title = p.split(" | ", 1)[0]
++                if self._is_disambig(title):
++                    continue
++                if title in title_passage:
++                    continue
++                title_passage[title] = p
++                first_hop[title] = hop
++                first_rank[title] = rank
++
++        # RRF: sum over groups containing the title of 1/(first_rank + 60).
++        rrf = {}
++        for grp in group_title_ranks:
++            for title in grp:
++                rrf[title] = rrf.get(title, 0.0) + 1.0 / (first_rank[title] + 60)
++
++        candidates = [
++            (title, title_passage[title], first_hop[title], first_rank[title])
++            for title in title_passage
++        ]
++
++        # Top-1 safety-net: rank-1 non-disambig passage of hop1, hop2, hop3, hop4.
++        # hop_groups order: [hop1, hop1b, hop2, hop3, hop4, harvest, bridge, probe].
++        # probe is auxiliary and deliberately excluded from the safety-net.
++        sn_idx = (0, 2, 3, 4)
++        safety_net = []
++        sn_titles = set()
++        for hi in sn_idx:
++            for rank, p in enumerate(hop_groups[hi]):
++                title = p.split(" | ", 1)[0]
++                if self._is_disambig(title) or title in sn_titles:
++                    continue
++                sn_titles.add(title)
++                safety_net.append((title, p, hi, rank))
++                break
++        sn_count = len(safety_net)
++        need = limit - sn_count
++
++        chosen_titles = set(sn_titles)
++        chosen_passages = [p for _, p, _, _ in safety_net]
++
++        if need <= 0:
++            return chosen_passages[:limit]
++        if not candidates:
++            return chosen_passages[:limit]
++
++        remaining = [c for c in candidates if c[0] not in sn_titles]
++        remaining.sort(key=lambda c: (-rrf.get(c[0], 0.0), c[2], c[3]))
++        if not remaining:
++            return chosen_passages[:limit]
++
++        # Prefilter top-40 by RRF, ordered by RRF for Stage1.
++        top40 = remaining[:40]
++        s1_passages = [c[1] for c in top40]
++        try:
++            s1_out = self.rerank_stage1(claim=claim, passages=s1_passages)
++            s1 = list(getattr(s1_out, "scores", None) or [])
++        except Exception:
++            s1 = []
++
++        def _fallback():
++            order = [c for c in remaining if c[0] not in chosen_titles]
++            for c in order:
++                if len(chosen_passages) >= limit:
++                    break
++                chosen_titles.add(c[0])
++                chosen_passages.append(c[1])
++            return chosen_passages[:limit]
++
++        if len(s1) != len(top40):
++            return _fallback()
++
++        survivors = sorted(
++            zip(top40, s1),
++            key=lambda x: (-_clamp(x[1]), x[0][2], x[0][3]),
++        )[: max(need + 9, 0)]
++
++        if not survivors:
++            return _fallback()
++
++        surv_candidates = [c for c, _ in survivors]
++        s2_passages = [c[1] for c in surv_candidates]
++        s2_titles = [c[0] for c in surv_candidates]
++        try:
++            s2_out = self.rerank_stage2(
++                claim=claim, passages=s2_passages, titles=s2_titles
++            )
++            s2 = list(getattr(s2_out, "scores", None) or [])
++        except Exception:
++            s2 = []
++
++        if len(s2) != len(survivors):
++            return _fallback()
++
++        rrf_vals = [rrf.get(c[0], 0.0) for c in surv_candidates]
++        max_rrf = max(rrf_vals) if rrf_vals else 0.0
++        if max_rrf <= 0:
++            max_rrf = 1.0
++
++        finals = []
++        for (c, s1v), s2v in zip(survivors, s2):
++            s1n = _clamp(s1v) / 10.0
++            s2n = _clamp(s2v) / 10.0
++            rrfn = (rrf.get(c[0], 0.0) / max_rrf) if max_rrf > 0 else 0.0
++            final = 0.3 * s1n + 0.4 * s2n + 0.3 * rrfn
++            finals.append((final, c[2], c[3], c[0], c[1]))
++
++        finals.sort(key=lambda x: (-x[0], x[1], x[2]))
++
++        for _, _, _, title, p in finals:
++            if len(chosen_passages) >= limit:
+                 break
+-        return result[:limit]
++            if title in chosen_titles:
++                continue
++            chosen_titles.add(title)
++            chosen_passages.append(p)
++
++        # Pad to limit from remaining RRF-ordered candidates if under-filled.
++        if len(chosen_passages) < limit:
++            for c in remaining:
++                if len(chosen_passages) >= limit:
++                    break
++                if c[0] in chosen_titles:
++                    continue
++                chosen_titles.add(c[0])
++                chosen_passages.append(c[1])
++
++        return chosen_passages[:limit]
+ 
+     def forward(self, claim):
++        # ALL per-call mutable state stays local for 25-thread concurrency safety.
+         prior_queries = [claim]
+ 
+         # HOP 1
+-        hop1_docs = self.retrieve_k(claim).passages
+-        summary_1 = self.summarize1(
+-            claim=claim, passages=hop1_docs
+-        ).summary
+-        retrieved_titles = self._titles(hop1_docs)
++        try:
++            hop1_docs = self.retrieve_k(claim).passages
++        except Exception:
++            hop1_docs = []
++
++        # HOP 1b (EntityHop1Query): fired right after hop-1, BEFORE query gens
++        # see retrieved_titles. Additive disambiguation for the claim's main entity.
++        hop1_titles = self._titles(hop1_docs)
++        hop1b_query = ""
++        try:
++            hop1b_query = self.entity_hop1(
++                claim=claim, retrieved_titles=hop1_titles
++            ).query
++        except Exception:
++            hop1b_query = ""
++        if self._is_refusal(hop1b_query):
++            hop1b_docs = []
++        else:
++            try:
++                hop1b_docs = self.retrieve_k_hop1b(hop1b_query).passages
++            except Exception:
++                hop1b_docs = []
++
++        # CRITICAL: summarize hop1 over the UNION of hop1 + hop1b passages, and
++        # derive retrieved_titles for downstream hops from that same union.
++        hop1_union = self._dedup(hop1_docs + hop1b_docs)
++        try:
++            summary_1 = self.summarize1(claim=claim, passages=hop1_union).summary
++        except Exception:
++            summary_1 = ""
++        retrieved_titles = self._titles(hop1_union)
+ 
+         # HOP 2
+-        hop2_query = self.create_query_hop2(
+-            claim=claim,
+-            summary_1=summary_1,
+-            retrieved_titles=retrieved_titles,
+-            prior_queries=prior_queries,
+-        ).query
++        hop2_query = ""
++        try:
++            hop2_query = self.create_query_hop2(
++                claim=claim,
++                summary_1=summary_1,
++                retrieved_titles=retrieved_titles,
++                prior_queries=prior_queries,
++            ).query
++        except Exception:
++            hop2_query = ""
+         if self._is_refusal(hop2_query):
+             hop2_docs = []
+         else:
+             prior_queries.append(hop2_query)
+-            hop2_docs = self.retrieve_k(hop2_query).passages
+-        summary_2 = self.summarize2(
+-            claim=claim,
+-            context=summary_1,
+-            passages=hop2_docs,
+-            retrieved_titles=retrieved_titles + self._titles(hop2_docs),
+-        ).summary
+-        retrieved_titles = self._titles(hop1_docs) + self._titles(hop2_docs)
++            try:
++                hop2_docs = self.retrieve_k(hop2_query).passages
++            except Exception:
++                hop2_docs = []
++        try:
++            summary_2 = self.summarize2(
++                claim=claim,
++                context=summary_1,
++                passages=hop2_docs,
++                retrieved_titles=retrieved_titles + self._titles(hop2_docs),
++            ).summary
++        except Exception:
++            summary_2 = ""
++        retrieved_titles = retrieved_titles + self._titles(hop2_docs)
+ 
+         # HOP 3
+-        hop3_query = self.create_query_hop3(
+-            claim=claim,
+-            summary_1=summary_1,
+-            summary_2=summary_2,
+-            retrieved_titles=retrieved_titles,
+-            prior_queries=prior_queries,
+-        ).query
++        hop3_query = ""
++        try:
++            hop3_query = self.create_query_hop3(
++                claim=claim,
++                summary_1=summary_1,
++                summary_2=summary_2,
++                retrieved_titles=retrieved_titles,
++                prior_queries=prior_queries,
++            ).query
++        except Exception:
++            hop3_query = ""
+         if self._is_refusal(hop3_query):
+             hop3_docs = []
+         else:
+             prior_queries.append(hop3_query)
+-            hop3_docs = self.retrieve_k(hop3_query).passages
++            try:
++                hop3_docs = self.retrieve_k(hop3_query).passages
++            except Exception:
++                hop3_docs = []
+         retrieved_titles = retrieved_titles + self._titles(hop3_docs)
+ 
+-        # HOP 4 (independent gap-analysis; does NOT re-summarize into chain)
+-        hop4_query = self.create_query_hop4(
+-            claim=claim,
+-            summary_2=summary_2,
+-            retrieved_titles=retrieved_titles,
+-            prior_queries=prior_queries,
+-        ).query
++        # HOP 4 (independent gap-analysis; reads summary_1+summary_2 only; NOT re-summarized)
++        hop4_query = ""
++        try:
++            hop4_query = self.create_query_hop4(
++                claim=claim,
++                summary_1=summary_1,
++                summary_2=summary_2,
++                retrieved_titles=retrieved_titles,
++                prior_queries=prior_queries,
++            ).query
++        except Exception:
++            hop4_query = ""
+         if self._is_refusal(hop4_query):
+             hop4_docs = []
+         else:
+-            hop4_docs = self.retrieve_k_hop4(hop4_query).passages
+-
+-        all_docs = self._rerank_pool(
+-            [hop1_docs, hop2_docs, hop3_docs, hop4_docs],
+-            claim,
+-            self.rerank,
+-            self.final_doc_limit,
+-        )
+-        return dspy.Prediction(retrieved_docs=all_docs)
+\ No newline at end of file
++            try:
++                hop4_docs = self.retrieve_k_hop4(hop4_query).passages
++            except Exception:
++                hop4_docs = []
++
++        # HARVEST: union of all retrieved passages so far (hop1 + hop1b + hop2 + hop3 + hop4)
++        all_so_far = hop1_docs + hop1b_docs + hop2_docs + hop3_docs + hop4_docs
++        harvested_titles = set(self._titles(all_so_far))
++        passages_text = "\n\n".join(all_so_far)[:3000]
++        try:
++            harvest_out = self.harvest(
++                claim=claim,
++                retrieved_titles=sorted(harvested_titles),
++                passages_text=passages_text,
++            )
++            harvest_queries = list(getattr(harvest_out, "queries", None) or [])
++        except Exception:
++            harvest_queries = []
++        harvest_docs = []
++        hq_added = 0
++        for q in harvest_queries:
++            if hq_added >= 3:
++                break
++            if not isinstance(q, str) or self._is_refusal(q):
++                continue
++            try:
++                docs = self.retrieve_k(q).passages
++            except Exception:
++                docs = []
++            harvest_docs.extend(docs)
++            hq_added += 1
++
++        # BRIDGE: rich descriptor query for an entity the claim implies by
++        # role/title/location/descriptor but no retrieved passage names.
++        bridge_titles = sorted(set(self._titles(all_so_far + harvest_docs)))
++        titles_trunc = bridge_titles[:30]
++        bridge_passages_text = ("\n\n".join(all_so_far + harvest_docs))[:3000]
++        bridge_query = ""
++        try:
++            bridge_query = self.bridge(
++                claim=claim,
++                retrieved_titles=bridge_titles,
++                titles=titles_trunc,
++                passages_text=bridge_passages_text,
++            ).query
++        except Exception:
++            bridge_query = ""
++        if self._is_refusal(bridge_query):
++            bridge_docs = []
++        else:
++            try:
++                bridge_docs = self.retrieve_k_hop4(bridge_query).passages
++            except Exception:
++                bridge_docs = []
++
++        # PROBE (ClaimDirectEntityProbe): guaranteed direct lookup for
++        # proper-noun entities NAMED LITERALLY in the claim that are still
++        # missing from retrieved_titles after all hops. Grounded (only
++        # claim-named entities) and high-precision. Fires AFTER hop-1/1b/2/3/4
++        # and harvest/bridge, immediately before the final ensemble rerank, so
++        # it sees the full retrieved_titles. All per-call state is LOCAL.
++        probe_titles_in = list(retrieved_titles) + self._titles(harvest_docs) + self._titles(bridge_docs)
++        try:
++            probe_out = self.claim_probe(
++                claim=claim, retrieved_titles=probe_titles_in
++            )
++            probe_queries_raw = list(getattr(probe_out, "probe_queries", None) or [])
++        except Exception:
++            probe_queries_raw = []
++        probe_docs = []
++        probe_kept = 0
++        prior_local = list(prior_queries)
++        for q in probe_queries_raw:
++            if probe_kept >= 2:
++                break
++            if not isinstance(q, str) or self._is_refusal(q):
++                continue
++            q = q.strip()
++            if q == claim or q in prior_local:
++                continue
++            prior_local.append(q)
++            try:
++                docs = self.retrieve_k(q).passages
++            except Exception:
++                docs = []
++            probe_docs.extend(docs)
++            probe_kept += 1
++
++        # Two-stage ensemble rerank with RRF + top-1 safety-net over all hop groups.
++        hop_groups = [
++            hop1_docs,
++            hop1b_docs,
++            hop2_docs,
++            hop3_docs,
++            hop4_docs,
++            harvest_docs,
++            bridge_docs,
++            probe_docs,
++        ]
++        try:
++            all_docs = self._ensemble_rerank(hop_groups, claim)
++        except Exception:
++            # Last-resort FIFO dedup fallback so a crash never zeros an example.
++            all_docs = self._dedup(
++                hop1_docs + hop1b_docs + hop2_docs + hop3_docs + hop4_docs
++                + harvest_docs + bridge_docs + probe_docs
++            )[: self.final_doc_limit]
++
++        return dspy.Prediction(retrieved_docs=all_docs)
++
++
++def _clamp(v):
++    try:
++        f = float(v)
++    except (TypeError, ValueError):
++        return 0.0
++    if f < 0:
++        return 0.0
++    if f > 10:
++        return 10.0
++    return f
+\ No newline at end of file
+diff --git a/specs/hover.md b/specs/hover.md
+deleted file mode 100644
+index 0000000..0000000
+--- a/specs/hover.md
++++ /dev/null
+@@ -1,16 +0,0 @@
+-# hotpotGEPA
+-Original Hover program mirrors the GEPA paper architecture, which mirrors the LangProBe dataset.
+-
+-According to the GEPA paper:
+-> HoVer (Jiang et al., 2020) is an open-domain multihop fact extraction and claim verification benchmark built on a 
+-> Wikipedia-based corpus requiring complex reasoning across multiple sentences and documents, typically involving multiple wikipedia articles. 
+-> Following Tan et al. (2025), the systems are evaluated for their ability to write queries in multiple hops to retrieve all relevant wikipedia documents (gold documents) required to make the claim. 
+-> We obtain the HoverMultiHop program from Tan et al. (2025), which performs up to 3-hop retrievals using 2 query writer modules, and 2 document summary modules. 
+-> The textual feedback module simply identifies the set of correct documents retrieved, and the set of documents remaining to be retrieved, and returns them as feedback text. 
+-> For HoVer, we use 150 examples for training, 300 for validation, and 300 for testing
+-
+-
+-## Ambiguity in GEPA
+-
+-**Hop filtering:** The training data in GEPA is filtered to 3-hop only (count_unique_docs == 3), and the test set is unspecified. When we include hop counts of all hops we get 33-36% test results. The GEPA paper doesn't explicitly state whether it filters test examples by hops, and the langProBe repository has no filter by default (whereas the training set is filtered)
+-

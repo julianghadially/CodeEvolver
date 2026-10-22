@@ -1,0 +1,133 @@
+# Copyright © 2026 440 Labs LLC
+# Per-host infrastructure: the egress gateway and (optionally) the RAGQA
+# retriever. Brought up once per droplet by provision.sh; runner containers are
+# started individually by the controller and join `ce-internal`.
+#
+#   docker compose -f compose.host.yml up -d
+#
+name: ce-host
+
+networks:
+  # Runner containers attach ONLY here. `internal: true` means no default route
+  # off the host, so anything the gateway does not permit is simply unreachable
+  # -- the fence does not depend on a client honouring proxy env vars.
+  #
+  # The subnet is pinned so the gateway can hold a fixed address: `internal`
+  # leaves a container's default route pointing at the docker BRIDGE, not at
+  # squid, and squid's REDIRECT rules only fire on packets delivered to its own
+  # netns. Runners re-point their default route at the address below
+  # (runner/entrypoint.py::configure_egress_route); without that step nothing
+  # reaches the gateway and every run aborts in the egress canary.
+  ce-internal:
+    internal: true
+    # Fixed bridge name so the host rule in `netrules` below can be written
+    # once instead of derived from a per-deployment network id.
+    driver_opts:
+      com.docker.network.bridge.name: ce-int0
+    ipam:
+      config:
+        - subnet: 172.31.66.0/24
+  ce-external:
+
+services:
+  # One-shot, and the reason the gateway pattern works at all.
+  #
+  # Docker implements `internal: true` with a host rule that drops by
+  # DESTINATION address, not by interface:
+  #
+  #   -A DOCKER-INTERNAL ! -d 172.31.66.0/24 -i ce-int0 -j DROP
+  #
+  # A runner packet addressed to the gateway container at L2 but bound for
+  # api.anthropic.com at L3 matches that DROP and dies on the bridge -- so the
+  # gateway never sees a single byte and every provider looks unreachable. The
+  # rule below re-admits traffic that both enters AND leaves this one bridge,
+  # inserted into DOCKER-USER, which FORWARD traverses before DOCKER-INTERNAL.
+  #
+  # It does NOT weaken the isolation: same-bridge is the only thing permitted,
+  # so the sole path off the host is still the gateway's ce-external interface.
+  # Docker rebuilds DOCKER-USER when the daemon restarts, so this re-runs on
+  # every `compose up` (provision.sh, ce recycle).
+  netrules:
+    image: ce-gateway:local
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: ce-netrules
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    restart: "no"
+    command: >
+      sh -c "iptables -C DOCKER-USER -i ce-int0 -o ce-int0 -j ACCEPT 2>/dev/null ||
+             iptables -I DOCKER-USER 1 -i ce-int0 -o ce-int0 -j ACCEPT"
+
+  gateway:
+    # Built here, not pulled: `ubuntu/squid` is a GnuTLS build with no SslBump
+    # and no iptables, so it cannot run squid.conf OR install the intercept
+    # rules below. See Dockerfile.gateway. Building on the host keeps the
+    # gateway off the registry entirely -- provision.sh ships the two files.
+    image: ce-gateway:local
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: ce-gateway
+    restart: unless-stopped
+    networks:
+      ce-internal:
+        aliases: [gateway]
+        ipv4_address: 172.31.66.2
+      ce-external:
+    cap_add: [NET_ADMIN]
+    volumes:
+      - ./squid.conf:/etc/squid/squid.conf:ro
+      - ./ssl:/etc/squid/ssl:ro
+      # Overridable so the same file works on a Mac, which has no /data.
+      - ${CE_GATEWAY_LOG_DIR:-/data/gateway-logs}:/var/log/squid
+    sysctls:
+      net.ipv4.ip_forward: 1
+    # Transparent interception: runners need no proxy configuration, and
+    # runtimes that ignore HTTP_PROXY are filtered anyway.
+    # dnsmasq first: runners resolve through it (matrix docker_args pass
+    # --dns=172.31.66.2), because an internal network has no external DNS of
+    # its own. Explicit upstreams rather than /etc/resolv.conf so the gateway
+    # does not inherit whatever the host happens to point at.
+    #
+    # CE_DNS_UPSTREAM overrides the public resolvers for a network that blocks
+    # outbound UDP/53 to them -- a campus or corporate LAN commonly does. The
+    # failure is silent and badly misleading: dnsmasq still answers the socket,
+    # every runner lookup times out, and the egress canary reports the PROVIDER
+    # hosts unreachable, so it reads as a provider or squid problem rather than
+    # a DNS one. Find a resolver the host can actually reach with
+    # `resolvectl status` and set CE_DNS_UPSTREAM to it.
+    command: >
+      sh -c "dnsmasq --listen-address=0.0.0.0 --bind-interfaces --no-resolv ${CE_DNS_UPSTREAM:---server=1.1.1.1 --server=8.8.8.8} &&
+             iptables -t nat -A PREROUTING -p tcp --dport 80  -j REDIRECT --to-port 3129 &&
+             iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 3130 &&
+             squid -N -f /etc/squid/squid.conf"
+
+  # RAGQA only. ~3.7GB index.pt + 557MB corpus, ~8GB resident. One per host
+  # rather than one shared instance: with five hosts each running a ragqa arm at
+  # num_threads=40, a single retriever would be a 200-concurrent-request
+  # bottleneck shared across the arms under comparison.
+  ragqa-retriever:
+    image: ${REGISTRY:?set REGISTRY}/ragqa-retriever:latest
+    container_name: ce-ragqa-retriever
+    restart: unless-stopped
+    profiles: [ragqa]
+    networks:
+      ce-internal:
+        aliases: [ragqa-retriever]
+        # Pinned: on a fresh host the retriever can start before the gateway
+        # and, with no fixed address, take .2 -- the gateway's -- so the
+        # gateway then fails with "Address already in use" and every runner
+        # on the host has no egress. Two fixed addresses cannot collide.
+        ipv4_address: 172.31.66.3
+      ce-external:
+    environment:
+      RAGQA_HOST: 0.0.0.0
+      RAGQA_PORT: 8894
+      RAGQA_THREADS: 48
+      RAGQA_TORCH_THREADS: 4
+      RAGQA_DATA_DIR: /data/ragqa
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - /data/ragqa:/data/ragqa:ro

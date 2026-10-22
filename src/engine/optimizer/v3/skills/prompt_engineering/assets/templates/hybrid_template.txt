@@ -1,0 +1,101 @@
+=== HYBRID / COMBINED FRAMEWORK TEMPLATE ===
+
+Use this when a single framework doesn't fully cover your needs.
+Include only the sections that add value — remove the rest.
+
+─────────────────────────────────────────────
+COMMON COMBINATION PATTERNS
+─────────────────────────────────────────────
+
+[REQUIREMENTS GATHERING → EXECUTION]
+Reverse Role (interview) → any CREATE framework
+Use when: requirements unclear → gather first → then apply CO-STAR/RISEN/RACE/etc.
+
+[STRESS-TEST PAIR]
+Devil's Advocate + Pre-Mortem
+Use when: high-stakes decision needs both opposing arguments AND failure analysis
+
+[TRANSFORM THEN VERIFY]
+BAB + Self-Refine
+Use when: rewrite existing content → then quality-loop the result
+
+[PRINCIPLES THEN EXECUTE]
+Step-Back + Chain of Thought
+Use when: need to establish first principles before working through a problem
+
+[RECOVER THEN IMPROVE]
+RPEF + Self-Refine
+Use when: recover a lost prompt → then improve the recovered template
+
+[GENERATE THEN ALIGN]
+CO-STAR/RISEN + CAI Critique-Revise
+Use when: create content → then verify it meets an explicit principle/standard
+
+─────────────────────────────────────────────
+HYBRID TEMPLATE STRUCTURE
+─────────────────────────────────────────────
+
+CONTEXT / BACKGROUND:
+[From CTF / CO-STAR / CARE — situation, background, why this task exists]
+
+ROLE:
+[From RTF / RISEN / RACE / CRISPE — expertise or perspective needed]
+
+OBJECTIVE:
+[From CO-STAR / RISEN — specific goal to achieve]
+
+INPUT (if applicable):
+[From RISE-IE — what's being provided, format, characteristics]
+
+INSTRUCTIONS / STEPS:
+[From RISEN / RISE — guiding principles, methodology, step sequence]
+
+CONSTRAINTS / RULES:
+[From CARE / TIDD-EC / RISEN — what must/must not happen, boundaries]
+
+DO:
+[From TIDD-EC — explicit positive guidance]
+
+DON'T:
+[From TIDD-EC — explicit negative guidance]
+
+AUDIENCE (if relevant):
+[From CO-STAR — who this is for, characteristics]
+
+TONE & STYLE (if relevant):
+[From CO-STAR / CRISPE — voice and communication style]
+
+EXAMPLES (if relevant):
+[From RISE-IX / CARE — reference samples]
+
+KEY RESULTS (if relevant):
+[From BROKE — measurable business outcomes]
+
+END GOAL / EXPECTATION:
+[From RISEN / RACE / BROKE — success criteria, final outcome, output format]
+
+FORMAT:
+[From RTF / CTF / APE — exactly how output should be structured]
+
+─────────────────────────────────────────────
+CRITIQUE / VERIFICATION LAYER (optional)
+─────────────────────────────────────────────
+Add after generation if needed:
+
+FEEDBACK DIMENSIONS (Self-Refine):
+Review for: [dimension 1], [dimension 2], [dimension 3]
+Refine addressing all feedback.
+
+OR
+
+PRINCIPLE (CAI Critique-Revise):
+[State the standard] → Critique → Revise.
+
+OR
+
+POSITION ATTACK (Devil's Advocate):
+Argue against the above recommendation as forcefully as possible.
+
+─────────────────────────────────────────────
+NOTE: Use only sections relevant to your task.
+A hybrid with 4 focused sections beats a hybrid that uses all 15.
